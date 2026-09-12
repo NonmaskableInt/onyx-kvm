@@ -255,14 +255,16 @@ int main(int argc, char **argv)
 	(void)probe_lt6911_identity(4, 0x2b, "RELEASED");
 	(void)probe_lt6911_identity(4, 0x2c, "RELEASED");
 	fflush(stdout);
-	/* v15 is a bridge-only admission diagnostic. Stop before the vendor VI
-	 * capture path, whose failed-frame cleanup can block indefinitely. */
-	return 0;
+	/* Configure only the bounded MIPI receiver for the v21 pad-mux admission
+	 * test.  Stop before the vendor VI capture path, whose failed-frame
+	 * cleanup can block indefinitely. */
 	if (ioctl(mipi_fd, CVI_MIPI_RESET_MIPI, &mipi_dev) < 0 ||
 	    ioctl(mipi_fd, CVI_MIPI_SET_DEV_ATTR, &mipi) < 0) {
 		perror("MIPI configuration");
 		goto cleanup;
 	}
+	usleep(500000);
+	return 0;
 
 	dev.enIntfMode = VI_MODE_MIPI_YUV422;
 	dev.enWorkMode = VI_WORK_MODE_1Multiplex;
