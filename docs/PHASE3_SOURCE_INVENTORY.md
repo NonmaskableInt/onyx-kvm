@@ -106,3 +106,19 @@ bus 4/address `0x2b` to the hardware target and identifies the populated
 variant as LT6911UXC with high confidence. The probe did not scan any other
 address and did not issue a register write. Reading the banked silicon-ID
 registers would require state-changing bank/select writes and remains deferred.
+
+Further read-only extraction recovered `/mnt/data/sensor_cfg.ini.LT`. It names
+`LONTIUM_LT6911_2M_60FPS_8BIT` and selects bus 4, MIPI device 0, lane order
+`2,4,3,1,0`, PN swaps `0,0,0,0,0`, and no MCLK. The reviewed SDK INI parser
+parses each list element and stores it directly; the sensor setup later copies
+those runtime values into the MIPI attributes. This product configuration takes
+precedence over the generic LT6911 adapter defaults used by the v21 diagnostic.
+
+The stock `S15kvmhwd` init path exports GPIO451, configures it as an output, and
+leaves it high. It contains no bridge firmware load, EDID programming, or reset
+pulse. The separate, unexecuted `nanokvm_update_edid` ELF contains LT6911C and
+LT6911UXC EDID read/write routines, targets `/dev/i2c-4`, and toggles GPIO451,
+but no reviewed normal-startup script invokes it. The stripped `kvm_system` ELF
+references hardware-version detection and MIPI-driver replacement but yielded
+no string evidence of an automatic EDID update. This evidence supports testing
+the product lane profile before admitting any LT6911 register write.

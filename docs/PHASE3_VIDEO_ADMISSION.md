@@ -257,3 +257,28 @@ all six physical samples remain zero, all four digital data lanes report
 mux is therefore not sufficient: the evidence now points upstream to LT6911
 power, firmware release, or HDMI/EDID state. No LT6911 initialization table will
 be guessed or written without corresponding-source evidence.
+
+Subsequent offline inspection recovered the stock product profile at
+`/mnt/data/sensor_cfg.ini.LT`. It selects MIPI device 0, lane order
+`2,4,3,1,0`, PN swaps `0,0,0,0,0`, bus 4, and no sensor MCLK. The SDK INI parser
+stores the five lane and PN values verbatim, and its normal sensor setup passes
+those runtime values into the receiver attributes. This means v21 tested the
+generic SDK adapter defaults (device 1, lanes `2,0,1,3,4`, all PN swaps set),
+not the NanoKVM Lite wiring. The all-idle result therefore does not yet prove an
+upstream bridge power or firmware failure. The next bounded probe must retain
+the v21 status-only boundary while using the recovered product profile.
+
+That v22 probe and full image are now built. The build remained network-disabled
+and passed source-cache, normalized kernel configuration, rootfs, ownership,
+FIT, embedded-artifact, and final-image verification. The 79,692,288-byte image
+is `out/phase3-mipi-status-v22/cleankvm-phase1.img`, SHA-256
+`7162fa38bf50bcb248a7b14f8fc58f8464d87d26ff287d43b7974b87c3f1b98e`.
+It awaits removable-media resolution, flashing, read-back, and one controlled
+UART boot.
+
+The stock `S15kvmhwd` path exports GPIO451, sets it as an output, and leaves it
+high; it does not program EDID, load LT6911 firmware, or pulse reset. The
+separate `nanokvm_update_edid` utility contains explicit LT6911C/UXC EDID read
+and write paths and GPIO451 toggles, but the normal startup scripts do not invoke
+it. This is consistent with a persistently configured bridge and further
+reduces the justification for speculative register writes.

@@ -178,7 +178,7 @@ int main(int argc, char **argv)
 	VI_CHN_ATTR_S chn = {0};
 	VIDEO_FRAME_INFO_S frame = {0};
 	struct combo_dev_attr_s mipi = {0};
-	CVI_U32 mipi_dev = 1;
+	CVI_U32 mipi_dev = 0;
 	CVI_U32 sensor_reset_dev = 0;
 	int mipi_fd = -1, out_fd = -1, rc = 1;
 	int sys_up = 0, dev_up = 0, pipe_created = 0, pipe_up = 0, chn_up = 0;
@@ -212,12 +212,12 @@ int main(int argc, char **argv)
 	mipi.mclk.freq = CAMPLL_FREQ_NONE;
 	mipi.mipi_attr.raw_data_type = YUV422_8BIT;
 	mipi.mipi_attr.lane_id[0] = 2;
-	mipi.mipi_attr.lane_id[1] = 0;
-	mipi.mipi_attr.lane_id[2] = 1;
-	mipi.mipi_attr.lane_id[3] = 3;
-	mipi.mipi_attr.lane_id[4] = 4;
+	mipi.mipi_attr.lane_id[1] = 4;
+	mipi.mipi_attr.lane_id[2] = 3;
+	mipi.mipi_attr.lane_id[3] = 1;
+	mipi.mipi_attr.lane_id[4] = 0;
 	for (i = 0; i < 5; ++i)
-		mipi.mipi_attr.pn_swap[i] = 1;
+		mipi.mipi_attr.pn_swap[i] = 0;
 	mipi.mipi_attr.wdr_mode = CVI_MIPI_WDR_MODE_NONE;
 	mipi.mipi_attr.dphy.enable = 1;
 	mipi.mipi_attr.dphy.hs_settle = 8;
@@ -255,9 +255,9 @@ int main(int argc, char **argv)
 	(void)probe_lt6911_identity(4, 0x2b, "RELEASED");
 	(void)probe_lt6911_identity(4, 0x2c, "RELEASED");
 	fflush(stdout);
-	/* Configure only the bounded MIPI receiver for the v21 pad-mux admission
-	 * test.  Stop before the vendor VI capture path, whose failed-frame
-	 * cleanup can block indefinitely. */
+	/* Configure only the bounded MIPI receiver using the stock NanoKVM Lite
+	 * sensor_cfg.ini.LT wiring profile. Stop before the vendor VI capture path,
+	 * whose failed-frame cleanup can block indefinitely. */
 	if (ioctl(mipi_fd, CVI_MIPI_RESET_MIPI, &mipi_dev) < 0 ||
 	    ioctl(mipi_fd, CVI_MIPI_SET_DEV_ATTR, &mipi) < 0) {
 		perror("MIPI configuration");
