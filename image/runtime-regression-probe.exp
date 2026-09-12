@@ -50,6 +50,7 @@ run_command {echo '[LISTENERS]'; netstat -lnt 2>/dev/null || true}
 run_command {echo '[SERVICES]'; for p in cleankvmd cleankvm-hid-broker; do printf "$p="; pidof "$p" || echo absent; done}
 run_command {echo '[USB_GADGET]'; printf 'UDC='; cat /sys/kernel/config/usb_gadget/cleankvm/UDC 2>/dev/null || echo absent; for n in /dev/hidg*; do test -e "$n" && ls -l "$n"; done}
 run_command {echo '[CONTAINMENT]'; printf 'TAINT='; cat /proc/sys/kernel/tainted; printf 'SOPH_MODULES='; awk '$1 ~ /^soph_/ {printf "%s,", $1}' /proc/modules; echo; printf 'MEDIA_NODES='; for n in /dev/video* /dev/media* /dev/v4l-subdev* /dev/cvi-*; do test -e "$n" && printf '%s,' "$n"; done; echo}
+run_command {printf 'RAW_FRAME_PROBE_SHA256='; sha256sum /usr/libexec/cleankvm-raw-frame-probe | cut -d' ' -f1}
 run_command {echo '[IDENTITY_FILES]'; for n in /etc/cleankvm/tls-certificate.der /etc/cleankvm/oauth-issuer-public-key.raw; do test -r "$n" && { printf '%s=' "$n"; sha256sum "$n" | cut -d' ' -f1; } || echo "$n=absent"; done}
 run_command {echo CLEANKVM_RUNTIME_REGRESSION_END}
 send "~."

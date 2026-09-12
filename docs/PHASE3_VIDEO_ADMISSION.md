@@ -283,6 +283,20 @@ flashed again and verified before ejection; the embedded boot FIT, rootfs, and
 FIP each matched the audited v22 artifacts. v22 now awaits its first controlled
 UART boot.
 
+The first controlled v22 boot matched the expected diagnostic SHA-256 and
+passed baseline containment with taint zero, no Sophgo modules, and no media
+nodes. Ethernet acquired `192.168.2.62`; both Rust services were healthy and
+the HID nodes remained root-only. With explicit approval, the bounded status
+test loaded the six quarantined modules and configured the exact stock profile:
+device 0, YUV422 8-bit, lanes `2,4,3,1,0`, and zero PN swaps. Nevertheless, all
+six physical samples were zero, every digital data lane was `hs_idle`, `CK_HS`
+was zero, and decode was unknown. The reset line again sampled low during
+assertion and high after release; bus 4/address `0x2b` still returned protected
+ID `0000`. No frame was created. All modules unloaded in reverse order, all
+media nodes disappeared, and final taint was the expected out-of-tree-only
+4096. The product-profile mismatch is now ruled out, leaving the LT6911/HDMI
+side or the physical bridge-to-SoC CSI connection as the remaining boundary.
+
 The stock `S15kvmhwd` path exports GPIO451, sets it as an output, and leaves it
 high; it does not program EDID, load LT6911 firmware, or pulse reset. The
 separate `nanokvm_update_edid` utility contains explicit LT6911C/UXC EDID read

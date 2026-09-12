@@ -27,26 +27,28 @@ Updated: 2026-09-12
   reset. The later startup wrapper selects the LT config and starts opaque
   services; strings in `kvm_system` show hardware-version detection but no
   evidence that it automatically invokes the separate EDID updater.
-- The leading receiver hypothesis is now the incorrect product wiring profile,
-  not a proven LT6911 firmware or power failure.
+- v22 booted with the exact stock product profile. The receiver accepted device
+  0, lanes `2,4,3,1,0`, and zero PN swaps, but all physical samples remained
+  zero, all data lanes remained `hs_idle`, `CK_HS` remained zero, and decode
+  remained unknown. The product-profile mismatch is therefore ruled out.
+- The remaining fault is constrained upstream of the SoC receiver: LT6911
+  power/firmware state, HDMI input/HPD/EDID state, or the physical CSI path.
 
 ## Ordered next work
 
-1. Boot the flashed and read-back-verified status-only v22 image, then verify
-   `/proc/mipi-rx` for a high-speed clock,
-   nonzero physical samples, lane state, and decoded YUV422 format. Do not enter
-   VI or allocate frame buffers yet.
-3. If v22 remains idle, finish mapping every stock action affecting LT6911
+1. Finish mapping every stock action affecting LT6911
    power, reset, clocks, EDID, HPD, interrupt pins, I2C, or CSI output to source
    where available, and prefer a read-only comparison against a stock boot.
-4. If a bridge write is required,
+2. Capture a read-only stock-boot comparison of bridge acknowledgement, HDMI
+   source/HPD behavior, and `/proc/mipi-rx` with the same HDMI cable and source.
+3. If a bridge write is required,
    admit only the smallest source-backed operation with before/after reads,
    UART visibility, time bounds, and guaranteed cleanup.
-5. Only after the bridge emits a CSI clock should bounded VI allocation and
+4. Only after the bridge emits a CSI clock should bounded VI allocation and
    one-frame copying be re-enabled.
-6. Remove temporary reset telemetry after the diagnosis is closed and rebuild
+5. Remove temporary reset telemetry after the diagnosis is closed and rebuild
    all admitted modules from the final source tree.
-7. Continue Phase 3a separately: inventory the ADC/DAC paths, confirm actual
+6. Continue Phase 3a separately: inventory the ADC/DAC paths, confirm actual
    microphone/speaker/HDMI-audio routing, and design bounded opt-in brokers.
 
 ## Explicitly deferred
@@ -71,3 +73,10 @@ Updated: 2026-09-12
   its installed probe and FIP hashes identified it unambiguously. The currently
   selected 32 GB card was then flashed with v22 and verified before ejection:
   its boot FIT, rootfs, and FIP matched the audited artifacts exactly.
+- The controlled v22 boot matched the installed probe hash. Baseline taint was
+  zero, Ethernet acquired `192.168.2.62`, both Rust services ran, HID nodes
+  remained root-only, and no media modules or nodes were present.
+- The explicitly approved status test loaded the six quarantined modules and
+  confirmed the stock receiver profile. It exited before VI/frame allocation;
+  all modules unloaded, no frame or media node remained, and final taint was
+  only the expected out-of-tree bit 4096.
