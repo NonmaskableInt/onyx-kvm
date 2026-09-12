@@ -1,0 +1,67 @@
+#!/usr/bin/expect -f
+set timeout 90
+set credential_path [lindex $argv 0]
+set fh [open $credential_path r]
+set credential_text [read $fh]
+close $fh
+if {![regexp -line {^password=(.*)$} $credential_text -> password]} {
+    exit 2
+}
+
+spawn /usr/bin/sudo /usr/bin/cu -l /dev/cu.usbserial-112440 -s 115200
+expect {
+    -re {Connected\.} {}
+    timeout { exit 7 }
+}
+send "\003\r"
+set logged_in 0
+expect {
+    -re {# $} { set logged_in 1 }
+    -re {login: *$} {}
+    timeout { send "~."; exit 3 }
+}
+if {!$logged_in} {
+    send "root\r"
+    expect {
+        -re {Password: *$} {}
+        timeout { send "~."; exit 4 }
+    }
+    log_user 0
+    send -- "$password\r"
+    expect {
+        -re {# $} {}
+        timeout { log_user 1; send "~."; exit 5 }
+    }
+}
+unset password
+unset credential_text
+log_user 1
+
+proc run_command {command} {
+    send -- "$command\r"
+    expect {
+        -re {# $} {}
+        timeout { send "~."; exit 6 }
+    }
+}
+
+run_command {echo CLEANKVM_PHASE3_EVIDENCE_V1}
+run_command {printf 'MODEL='; tr -d '\000' </proc/device-tree/model 2>/dev/null || echo unavailable; echo}
+run_command {printf 'COMPATIBLE='; tr '\000' ',' </proc/device-tree/compatible 2>/dev/null || echo unavailable; echo}
+run_command {echo '[I2C_ADAPTERS]'}
+run_command {for n in /sys/class/i2c-adapter/i2c-*/name; do test -r "$n" && { printf '%s=' "${n%/name}"; sed -n '1p' "$n"; }; done}
+run_command {echo '[I2C_DEVICE_TREE_PATHS]'}
+run_command {for n in /sys/class/i2c-adapter/i2c-*; do printf '%s=' "${n##*/}"; readlink -f "$n/device/of_node"; done}
+run_command {echo '[I2C_DEVICE_TREE_ALIASES]'}
+run_command {for n in /proc/device-tree/aliases/i2c*; do test -r "$n" && { printf '%s=' "${n##*/}"; tr -d '\000' <"$n"; echo; }; done}
+run_command {echo '[MEDIA_DEVICE_NODES]'}
+run_command {for n in /dev/video* /dev/media* /dev/v4l-subdev* /dev/cvi-* /dev/snd/*; do test -e "$n" && echo "$n"; done}
+run_command {echo '[MEDIA_MODULES]'}
+run_command {awk '$1 ~ /^(soph_|cvi|snd|videodev|v4l2)/ { print $1 }' /proc/modules 2>/dev/null || true}
+run_command {echo '[ALSA_CARDS]'; test -r /proc/asound/cards && sed -n '1,80p' /proc/asound/cards || echo absent}
+run_command {echo '[ALSA_PCM]'; test -r /proc/asound/pcm && sed -n '1,80p' /proc/asound/pcm || echo absent}
+run_command {echo '[RESERVED_MEMORY_NODES]'}
+run_command {if test -d /proc/device-tree/reserved-memory; then find /proc/device-tree/reserved-memory -mindepth 1 -maxdepth 1 -type d -exec basename '{}' \; | LC_ALL=C sort; else echo absent; fi}
+run_command {echo CLEANKVM_PHASE3_EVIDENCE_END}
+send "~."
+expect eof

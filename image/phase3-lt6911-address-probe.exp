@@ -1,0 +1,55 @@
+#!/usr/bin/expect -f
+set timeout 90
+set credential_path [lindex $argv 0]
+set fh [open $credential_path r]
+set credential_text [read $fh]
+close $fh
+if {![regexp -line {^password=(.*)$} $credential_text -> password]} {
+    exit 2
+}
+
+spawn /usr/bin/sudo /usr/bin/cu -l /dev/cu.usbserial-112440 -s 115200
+expect {
+    -re {Connected\.} {}
+    timeout { exit 7 }
+}
+send "\003\r"
+set logged_in 0
+expect {
+    -re {# $} { set logged_in 1 }
+    -re {login: *$} {}
+    timeout { send "~."; exit 3 }
+}
+if {!$logged_in} {
+    send "root\r"
+    expect {
+        -re {Password: *$} {}
+        timeout { send "~."; exit 4 }
+    }
+    log_user 0
+    send -- "$password\r"
+    expect {
+        -re {# $} {}
+        timeout { log_user 1; send "~."; exit 5 }
+    }
+}
+unset password
+unset credential_text
+log_user 1
+
+send -- "echo CLEANKVM_LT6911_ADDRESS_PROBE_V1\r"
+expect -re {# $}
+send -- "for b in 3 4; do echo I2C_BUS=\$b; i2cdetect -r -y \$b 0x2b 0x2c; done\r"
+expect {
+    -re {# $} {}
+    timeout { send "~."; exit 6 }
+}
+send -- "for b in 3 4; do echo ID_BUS=\$b; i2cset -f -y \$b 0x2b 0xff 0x80; i2cset -f -y \$b 0x2b 0xee 0x01; i2cset -f -y \$b 0x2b 0xff 0xa0; i2cget -f -y \$b 0x2b 0x00; i2cget -f -y \$b 0x2b 0x01; i2cset -f -y \$b 0x2b 0xff 0x80; i2cset -f -y \$b 0x2b 0xee 0x00; done\r"
+expect {
+    -re {# $} {}
+    timeout { send "~."; exit 6 }
+}
+send -- "echo CLEANKVM_LT6911_ADDRESS_PROBE_END\r"
+expect -re {# $}
+send "~."
+expect eof

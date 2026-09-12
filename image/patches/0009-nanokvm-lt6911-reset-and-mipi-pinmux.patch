@@ -1,0 +1,52 @@
+diff --git a/build/boards/sg200x/sg2002_licheervnano_sd/dts_riscv/sg2002_licheervnano_sd.dts b/build/boards/sg200x/sg2002_licheervnano_sd/dts_riscv/sg2002_licheervnano_sd.dts
+index 411a81587..2283c1de8 100644
+--- a/build/boards/sg200x/sg2002_licheervnano_sd/dts_riscv/sg2002_licheervnano_sd.dts
++++ b/build/boards/sg200x/sg2002_licheervnano_sd/dts_riscv/sg2002_licheervnano_sd.dts
+@@ -182,7 +182,10 @@
+ };
+ 
+ &mipi_rx {
+-        snsr-reset = <&porte 1 GPIO_ACTIVE_LOW>;
++	        /* NanoKVM Lite/PCIe HDMI reset. Correlating stock legacy GPIOs
++	         * 502..506 with A22..A26 establishes base A=480, B=448;
++	         * therefore stock HDMI reset GPIO 451 is port B line 3. */
++	        snsr-reset = <&portb 3 GPIO_ACTIVE_LOW>;
+ };
+ 
+ / {
+diff --git a/build/boards/sg200x/sg2002_licheervnano_sd/u-boot/cvi_board_init.c b/build/boards/sg200x/sg2002_licheervnano_sd/u-boot/cvi_board_init.c
+index bfd3ba9b7..91fccdffd 100644
+--- a/build/boards/sg200x/sg2002_licheervnano_sd/u-boot/cvi_board_init.c
++++ b/build/boards/sg200x/sg2002_licheervnano_sd/u-boot/cvi_board_init.c
+@@ -124,9 +124,27 @@ int cvi_board_init(void)
+ 	//mmio_write_32(0x030010ac, 0x4); // PWRGPIO 2 PWM 10
+ 	mmio_write_32(0x030010ac, 0x0); // PWRGPIO 2 GPIO_MODE
+ 
+-        // camera function
+-        //mmio_write_32(0x0300116C, 0x5); // RX4N CAM_MCLK0 for alpha
+-        mmio_write_32(0x0300118C, 0x5); // RX0N CAM_MCLK1 for beta
++	/* NanoKVM Lite/PCIe routes the LT6911 reset net through ADC1's
++	 * alternate XGPIOB_3 function.  The stock userspace reset sequence
++	 * assumes the vendor boot chain has already selected this mux. */
++	mmio_write_32(0x030010f8, 0x3); // ADC1 XGPIOB_3 (HDMI reset)
++
++        /* NanoKVM's LT6911 uses the complete five-pair MIPI RX bank.  The
++         * vendor cv182x LT6911 probe selected function 3 on these pads with
++         * devmem immediately before capture.  Configure the same immutable
++         * board routing here instead of granting userspace /dev/mem access.
++         * In particular, do not drive RX0N as CAM_MCLK1: it is a receive pad
++         * on this board. */
++        mmio_write_32(0x0300116C, 0x3); // MIPI_RX4N
++        mmio_write_32(0x03001170, 0x3); // MIPI_RX4P
++        mmio_write_32(0x03001174, 0x3); // MIPI_RX3N
++        mmio_write_32(0x03001178, 0x3); // MIPI_RX3P
++        mmio_write_32(0x0300117C, 0x3); // MIPI_RX2N
++        mmio_write_32(0x03001180, 0x3); // MIPI_RX2P
++        mmio_write_32(0x03001184, 0x3); // MIPI_RX1N
++        mmio_write_32(0x03001188, 0x3); // MIPI_RX1P
++        mmio_write_32(0x0300118C, 0x3); // MIPI_RX0N
++        mmio_write_32(0x03001190, 0x3); // MIPI_RX0P
+ 
+ 	// spi1 on mipi csi 
+ 	/*
+

@@ -1,0 +1,35 @@
+#!/bin/sh
+set -eu
+
+pidfile=/run/cleankvmd.pid
+daemon=/usr/bin/cleankvmd
+
+case "${1:-}" in
+    start)
+        test -x "$daemon"
+        test -r /etc/cleankvm/tls-certificate.der
+        test -r /etc/cleankvm/tls-private-key.pkcs8.der
+        test -r /etc/cleankvm/oauth-issuer-public-key.raw
+        export CLEANKVM_HTTPS_BIND=0.0.0.0:8443
+        export CLEANKVM_HTTPS_ORIGIN=https://cleankvm-recovery:8443
+        export CLEANKVM_MCP_RESOURCE=https://cleankvm-recovery:8443/mcp
+        export CLEANKVM_AUTHORIZATION_SERVER=https://cleankvm-owner
+        export CLEANKVM_TOKEN_ISSUER=https://cleankvm-owner
+        export CLEANKVM_TLS_CERTIFICATE_DER=/etc/cleankvm/tls-certificate.der
+        export CLEANKVM_TLS_PRIVATE_KEY_DER=/etc/cleankvm/tls-private-key.pkcs8.der
+        export CLEANKVM_ISSUER_PUBLIC_KEY_RAW=/etc/cleankvm/oauth-issuer-public-key.raw
+        start-stop-daemon -S -b -m -p "$pidfile" -c 900:900 -x "$daemon"
+        ;;
+    stop)
+        start-stop-daemon -K -p "$pidfile" -x "$daemon" || true
+        rm -f "$pidfile"
+        ;;
+    restart)
+        "$0" stop
+        "$0" start
+        ;;
+    *)
+        printf 'usage: %s {start|stop|restart}\n' "$0" >&2
+        exit 1
+        ;;
+esac

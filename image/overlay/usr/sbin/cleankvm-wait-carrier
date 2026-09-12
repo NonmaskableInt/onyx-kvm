@@ -1,0 +1,19 @@
+#!/bin/sh
+
+# Bound DHCP startup until PHY negotiation completes. Failure is deliberately
+# non-fatal so an unplugged cable can never block serial recovery boot.
+
+iface=${1:-eth0}
+limit=${2:-10}
+carrier=/sys/class/net/$iface/carrier
+elapsed=0
+
+while test "$elapsed" -lt "$limit"; do
+	if test -r "$carrier" && test "$(cat "$carrier" 2>/dev/null)" = 1; then
+		exit 0
+	fi
+	sleep 1
+	elapsed=$((elapsed + 1))
+done
+
+exit 0

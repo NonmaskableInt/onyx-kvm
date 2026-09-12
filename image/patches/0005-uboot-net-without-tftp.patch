@@ -1,0 +1,22 @@
+diff --git a/u-boot-2021.10/net/net.c b/u-boot-2021.10/net/net.c
+index 165a9a0..b204401 100644
+--- a/u-boot-2021.10/net/net.c
++++ b/u-boot-2021.10/net/net.c
+@@ -323,6 +323,7 @@ void net_auto_load(void)
+ 		net_set_state(NETLOOP_SUCCESS);
+ 		return;
+ 	}
++#ifdef CONFIG_CMD_TFTPBOOT
+ 	if (net_check_prereq(TFTPGET)) {
+ /* We aren't expecting to get a serverip, so just accept the assigned IP */
+ #ifdef CONFIG_BOOTP_SERVERIP
+@@ -336,6 +337,9 @@ void net_auto_load(void)
+ 		return;
+ 	}
+ 	tftp_start(TFTPGET);
++#else
++	net_set_state(NETLOOP_FAIL);
++#endif
+ }
+ 
+ static int net_init_loop(void)

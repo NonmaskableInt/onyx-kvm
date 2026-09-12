@@ -1,0 +1,4 @@
+# Retry quickly across direct-link negotiation and cable changes. Five
+# one-second requests run in the foreground; failure backgrounds the client,
+# which then retries every two seconds without blocking serial recovery.
+CONFIG_IFUPDOWN_UDHCPC_CMD_OPTIONS="-t5 -T1 -A2 -b -R"

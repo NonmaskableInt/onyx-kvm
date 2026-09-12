@@ -1,0 +1,17 @@
+diff --git a/u-boot-2021.10/include/configs/mars-asic.h b/u-boot-2021.10/include/configs/mars-asic.h
+index 74c61fb..e84147a 100644
+--- a/u-boot-2021.10/include/configs/mars-asic.h
++++ b/u-boot-2021.10/include/configs/mars-asic.h
+@@ -312,7 +312,11 @@
+ 	#ifdef CONFIG_ENABLE_ALIOS_UPDATE
+ 		#define CONFIG_BOOTCOMMAND	"cvi_update_rtos"
+ 	#elif CONFIG_SD_BOOT
+-		#define CONFIG_BOOTCOMMAND	"run loadenvcmd ; " SHOWLOGOCMD "run sdboot || run sdbootauto"
++		/* CleanKVM: do not import unsigned uEnv.txt or enter an automatic
++		 * update fallback. Boot exactly one SHA-256-described FIT from the
++		 * first FAT partition on the SD card.
++		 */
++		#define CONFIG_BOOTCOMMAND	"run sdboot"
+ 	#else
+ 		#define CONFIG_BOOTCOMMAND	SHOWLOGOCMD "cvi_update || run norboot || run nandboot ||run emmcboot"
+ 	#endif

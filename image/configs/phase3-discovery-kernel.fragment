@@ -1,0 +1,14 @@
+# CleanKVM Phase 3 read-only bus discovery profile.
+# Media and sound remain disabled; this adds only the SoC I2C controller and
+# root-only character-device surface needed to map the actual Lite PCB.
+CONFIG_I2C=y
+CONFIG_I2C_CHARDEV=y
+CONFIG_I2C_DESIGNWARE_PLATFORM=y
+# CONFIG_I2C_SLAVE is not set
+# CONFIG_I2C_SLAVE_EEPROM is not set
+# CONFIG_I2C_DESIGNWARE_SLAVE is not set
+# CONFIG_I2C_MUX is not set
+# CONFIG_I2C_GPIO is not set
+# CONFIG_MEDIA_SUPPORT is not set
+# CONFIG_SOUND is not set
+# CONFIG_SND is not set

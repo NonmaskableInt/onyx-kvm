@@ -1,0 +1,13 @@
+[package]
+name = "cleankvm-hid-broker"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[dependencies]
+cleankvm-core = { path = "../cleankvm-core" }
+rustix = { version = "1.1.4", features = ["fs", "net"] }
+
+[lints]
+workspace = true

@@ -1,0 +1,340 @@
+diff --git a/middleware/v2/include/cvi_vb.h b/middleware/v2/include/cvi_vb.h
+index e1c72d4f3..800196c2c 100644
+--- a/middleware/v2/include/cvi_vb.h
++++ b/middleware/v2/include/cvi_vb.h
+@@ -16,8 +16,12 @@
+ #if __cplusplus
+ extern "C"{
+ #endif
++
+ #endif /* End of #ifdef __cplusplus */
+ 
++CVI_S32 CVI_VB_CopyBlock(CVI_U64 phyAddr, CVI_U32 offset,
++	CVI_VOID *dst, CVI_U32 size);
++
+ #ifdef NOT_HAVE_GET_BLOCK_WITH_ID
+ #define CVI_VB_GET_BLOCK(id, size, MOD)	CVI_VB_GetBlock((id), (size))
+ #else
+@@ -170,4 +174,3 @@ CVI_VOID CVI_VB_PrintPool(VB_POOL Pool);
+ #endif /* End of #ifdef __cplusplus */
+ 
+ #endif /*__CVI_VB_H__ */
+-
+diff --git a/middleware/v2/modules/sys/include/vb_ioctl.h b/middleware/v2/modules/sys/include/vb_ioctl.h
+index e2f3f9df8..f76bfbaf0 100644
+--- a/middleware/v2/modules/sys/include/vb_ioctl.h
++++ b/middleware/v2/modules/sys/include/vb_ioctl.h
+@@ -21,5 +21,6 @@ int vb_ioctl_release_block(int fd, VB_BLK blk);
+ int vb_ioctl_get_pool_max_cnt(int fd, CVI_U32 *vb_max_pools);
+ int vb_ioctl_print_pool(int fd, VB_POOL poolId);
+ int vb_ioctl_unit_test(int fd, CVI_U32 op);
++int vb_ioctl_copy_block(int fd, struct cvi_vb_copy *copy);
+ 
+ #endif // MODULES_VB_IOCTL_H_
+diff --git a/middleware/v2/modules/sys/src/cvi_sys.c b/middleware/v2/modules/sys/src/cvi_sys.c
+index adafd16d9..8f8442574 100644
+--- a/middleware/v2/modules/sys/src/cvi_sys.c
++++ b/middleware/v2/modules/sys/src/cvi_sys.c
+@@ -33,7 +33,6 @@ struct bind_t {
+ TAILQ_HEAD(bind_head, bind_t) binds;
+ pthread_rwlock_t bind_lock;
+ 
+-static int devm_fd = -1, devm_cached_fd = -1;
+ static int ionFd = -1;
+ static Hashmap *ionHashmap = NULL;
+ static void *shared_mem;
+@@ -46,47 +45,6 @@ CVI_CHAR const *log_name[8] = {
+ 
+ pthread_mutex_t tdma_pio_seq_lock = PTHREAD_MUTEX_INITIALIZER;
+ static uint32_t tdma_pio_seq;
+-static pthread_once_t lp_off_once = PTHREAD_ONCE_INIT;
+-
+-static void _sys_low_power_off(void)
+-{
+-	// disable fab lowpower/slowdown
+-	// sys_ctrl clklp
+-	system("devmem 0x03002A50 32 0xFFFFFFFF");
+-	system("devmem 0x03002A60 32 0xFFFFFFFF");
+-	system("devmem 0x03002A00 32 0x003F5500");
+-	system("devmem 0x03002A04 32 0x003F5500");
+-	system("devmem 0x03002A0C 32 0x003F5500");
+-	system("devmem 0x03002A10 32 0x003F5500");
+-	system("devmem 0x03002A14 32 0x003F5500");
+-	system("devmem 0x03002A18 32 0x003F5500");
+-	system("devmem 0x03002A1C 32 0x003F5500");
+-	system("devmem 0x03002A20 32 0x003F5500");
+-	system("devmem 0x03002A24 32 0x003F5500");
+-	system("devmem 0x03002A28 32 0x003F5500");
+-	system("devmem 0x03002A2C 32 0x003F5500");
+-	system("devmem 0x03002A30 32 0x003F5500");
+-	// ddrsys clklp
+-	system("devmem 0x0800A014 32 0x00000FFF");
+-	// vipsys clklp
+-	system("devmem 0X0A0C8020 32 0x00000C01");
+-	system("devmem 0x0A0C8024 32 0x00000C01");
+-	system("devmem 0x0A0C8028 32 0x00000C01");
+-	system("devmem 0x0A0C802C 32 0x0C010C01");
+-	system("devmem 0x0A0C8038 32 0x001F0500");
+-	system("devmem 0x0A0C803C 32 0x001F0500");
+-	system("devmem 0x0A0C8040 32 0x001F0500");
+-	system("devmem 0x0A0C8044 32 0x001F0500");
+-	system("devmem 0x0A0C8048 32 0x001F0500");
+-	system("devmem 0x0A0C80C4 32 0x001F0500");
+-	system("devmem 0x0A0C80C8 32 0x001F0500");
+-	system("devmem 0x0A0C80CC 32 0x001F0500");
+-	// vc fab
+-	// system("devmem 0x0B030028 32 0x07");
+-
+-	CVI_TRACE_SYS(CVI_DBG_INFO, "low_power_off\n");
+-}
+-
+ static int _ion_hash_key(void *key)
+ {
+ 	return (((uintptr_t)key) >> 10);
+@@ -136,29 +94,11 @@ static CVI_S32 _SYS_UNMMAP(void)
+ 
+ CVI_S32 CVI_SYS_DevMem_Open(void)
+ {
+-	if (devm_fd < 0)
+-		devm_fd = devm_open();
+-
+-	if (devm_cached_fd < 0)
+-		devm_cached_fd = devm_open_cached();
+-
+-	if (devm_fd < 0 || devm_cached_fd < 0) {
+-		perror("devmem open failed\n");
+-		return CVI_FAILURE;
+-	}
+-
+-	return CVI_SUCCESS;
++	return CVI_FAILURE;
+ }
+ 
+ CVI_S32 CVI_SYS_DevMem_Close(void)
+ {
+-	if (devm_fd < 0 || devm_cached_fd < 0)
+-		return CVI_SUCCESS;
+-
+-	devm_close(devm_fd);
+-	devm_fd = -1;
+-	devm_close(devm_cached_fd);
+-	devm_cached_fd = -1;
+ 	return CVI_SUCCESS;
+ }
+ 
+@@ -195,7 +135,7 @@ CVI_S32 CVI_SYS_Init(void)
+ 	VI_VPSS_MODE_S stVIVPSSMode;
+ 	VPSS_MODE_S stVPSSMode;
+ 
+-	pthread_once(&lp_off_once, _sys_low_power_off);
++	/* CleanKVM does not execute register-writing helper programs. */
+ 
+ 	s32ret = base_dev_open();
+ 	if (s32ret != CVI_SUCCESS) {
+@@ -211,10 +151,7 @@ CVI_S32 CVI_SYS_Init(void)
+ 
+ 	CVI_TRACE_SYS(CVI_DBG_INFO, "+\n");
+ 
+-	if (CVI_SYS_DevMem_Open() != CVI_SUCCESS) {
+-		CVI_TRACE_SYS(CVI_DBG_ERR, "devmem open failed.\n");
+-		return CVI_ERR_SYS_NOTREADY;
+-	}
++	/* CleanKVM copies validated live VB blocks through /dev/cvi-base. */
+ 
+ 	if (_SYS_MMAP() != CVI_SUCCESS) {
+ 		CVI_TRACE_SYS(CVI_DBG_ERR, "_SYS_MMAP failed.\n");
+@@ -571,9 +508,9 @@ CVI_S32 CVI_SYS_GetChipVersion(CVI_U32 *pu32ChipVersion)
+ 
+ void *CVI_SYS_Mmap(CVI_U64 u64PhyAddr, CVI_U32 u32Size)
+ {
+-	CVI_SYS_DevMem_Open();
+-
+-	return devm_map(devm_fd, u64PhyAddr, u32Size);
++	(void)u64PhyAddr;
++	(void)u32Size;
++	return NULL;
+ }
+ 
+ /* CVI_SYS_MmapCache - mmap the physical address to cached virtual-address
+@@ -584,19 +521,16 @@ void *CVI_SYS_Mmap(CVI_U64 u64PhyAddr, CVI_U32 u32Size)
+  */
+ void *CVI_SYS_MmapCache(CVI_U64 u64PhyAddr, CVI_U32 u32Size)
+ {
+-	CVI_SYS_DevMem_Open();
+-
+-	void *addr = devm_map(devm_cached_fd, u64PhyAddr, u32Size);
+-
+-	if (addr)
+-		CVI_SYS_IonInvalidateCache(u64PhyAddr, addr, u32Size);
+-	return addr;
++	(void)u64PhyAddr;
++	(void)u32Size;
++	return NULL;
+ }
+ 
+ CVI_S32 CVI_SYS_Munmap(void *pVirAddr, CVI_U32 u32Size)
+ {
+-	devm_unmap(pVirAddr, u32Size);
+-	return CVI_SUCCESS;
++	(void)pVirAddr;
++	(void)u32Size;
++	return CVI_FAILURE;
+ }
+ 
+ int ionMalloc(int devFd, struct sys_ion_data *para, bool isCache)
+@@ -729,8 +663,8 @@ CVI_S32 CVI_SYS_IonFree(CVI_U64 u64PhyAddr, CVI_VOID *pVirAddr)
+ 		return CVI_ERR_SYS_ILLEGAL_PARAM;
+ 	}
+ 	hashmapRemove(ionHashmap, (void *)(uintptr_t)u64PhyAddr);
+-	if (pVirAddr)
+-		devm_unmap(pVirAddr, ion_data->size);
++	/* CleanKVM never exposes a physical-memory userspace mapping. */
++	(void)pVirAddr;
+ 	ionFree(ion_data);
+ 	free(ion_data);
+ 
+@@ -1022,4 +956,3 @@ CVI_S32 CVI_SYS_TDMACopy2D(CVI_TDMA_2D_S *param)
+ 	close(tpu_fd);
+ 	return CVI_SUCCESS;
+ }
+-
+diff --git a/middleware/v2/modules/sys/src/cvi_vb.c b/middleware/v2/modules/sys/src/cvi_vb.c
+index 7ae2e5bcc..f573d9291 100644
+--- a/middleware/v2/modules/sys/src/cvi_vb.c
++++ b/middleware/v2/modules/sys/src/cvi_vb.c
+@@ -32,6 +32,22 @@ pthread_mutex_t hash_lock;
+ 
+ static atomic_bool vb_inited = ATOMIC_VAR_INIT(false);
+ 
++CVI_S32 CVI_VB_CopyBlock(CVI_U64 phyAddr, CVI_U32 offset,
++	CVI_VOID *dst, CVI_U32 size)
++{
++	struct cvi_vb_copy copy;
++	CVI_S32 fd = get_base_fd();
++
++	if (fd == -1 || dst == NULL || size == 0)
++		return CVI_FAILURE;
++	memset(&copy, 0, sizeof(copy));
++	copy.phy_addr = phyAddr;
++	copy.offset = offset;
++	copy.size = size;
++	copy.user_ptr = (uintptr_t)dst;
++	return vb_ioctl_copy_block(fd, &copy) == 0 ? CVI_SUCCESS : CVI_FAILURE;
++}
++
+ 
+ static int _vb_hash_key(void *key)
+ {
+@@ -549,4 +565,3 @@ CVI_VOID CVI_VB_PrintPool(VB_POOL Pool)
+ 	if (s32Ret != CVI_SUCCESS)
+ 		CVI_TRACE_VB(CVI_DBG_ERR, "vb_ioctl_print_pool fail, ret(%d)\n", s32Ret);
+ }
+-
+diff --git a/middleware/v2/modules/sys/src/vb_ioctl.c b/middleware/v2/modules/sys/src/vb_ioctl.c
+index 4af30675a..51947dcf9 100644
+--- a/middleware/v2/modules/sys/src/vb_ioctl.c
++++ b/middleware/v2/modules/sys/src/vb_ioctl.c
+@@ -139,3 +139,8 @@ int vb_ioctl_unit_test(int fd, CVI_U32 op)
+ {
+ 	VB_CTRL_S_VALUE(fd, op, VB_IOCTL_UNIT_TEST);
+ }
++
++int vb_ioctl_copy_block(int fd, struct cvi_vb_copy *copy)
++{
++	VB_CTRL_PTR(fd, copy, VB_IOCTL_COPY_BLOCK);
++}
+diff --git a/osdrv/interdrv/v2/base/vb.c b/osdrv/interdrv/v2/base/vb.c
+index 38fc5c41b..eb714e912 100644
+--- a/osdrv/interdrv/v2/base/vb.c
++++ b/osdrv/interdrv/v2/base/vb.c
+@@ -39,6 +39,8 @@ DEFINE_HASHTABLE(vb_hash, 6);
+ 		}								\
+ 	} while (0)
+ 
++#define CLEANKVM_VB_COPY_MAX (4U * 1024U * 1024U)
++
+ #define CHECK_VB_POOL_VALID_WEAK(x)							\
+ 	do {									\
+ 		if ((x) == VB_STATIC_POOLID)					\
+@@ -1121,6 +1123,47 @@ long vb_ctrl(struct vb_ext_control *p)
+ 		break;
+ 	}
+ 
++	case VB_IOCTL_COPY_BLOCK: {
++		struct cvi_vb_copy req;
++		struct vb_s *vb;
++		VB_BLK block;
++		VB_POOL pool;
++
++		if (copy_from_user(&req, p->ptr, sizeof(req))) {
++			ret = -EFAULT;
++			break;
++		}
++		if (!req.size || req.size > CLEANKVM_VB_COPY_MAX) {
++			ret = -EINVAL;
++			break;
++		}
++		block = vb_physAddr2Handle(req.phy_addr);
++		if (block == VB_INVALID_HANDLE) {
++			ret = -ENOENT;
++			break;
++		}
++		vb = (struct vb_s *)block;
++		pool = vb->vb_pool;
++		if (pool >= vb_max_pools || !vbPool) {
++			ret = -EINVAL;
++			break;
++		}
++		mutex_lock(&vbPool[pool].lock);
++		if (vb->magic != CVI_VB_MAGIC || vb->phy_addr != req.phy_addr ||
++		    atomic_read(&vb->usr_cnt) <= 0 || !vb->vir_addr ||
++		    req.offset > vbPool[pool].blk_size ||
++		    req.size > vbPool[pool].blk_size - req.offset) {
++			ret = -EINVAL;
++		} else {
++			sys_cache_invalidate(req.phy_addr + req.offset,
++				vb->vir_addr + req.offset, req.size);
++			ret = copy_to_user(u64_to_user_ptr(req.user_ptr),
++				vb->vir_addr + req.offset, req.size) ? -EFAULT : 0;
++		}
++		mutex_unlock(&vbPool[pool].lock);
++		break;
++	}
++
+ 	case VB_IOCTL_GET_POOL_CFG: {
+ 		struct cvi_vb_pool_cfg pool_cfg;
+ 
+@@ -1169,5 +1212,3 @@ long vb_ctrl(struct vb_ext_control *p)
+ 	return ret;
+ }
+ EXPORT_SYMBOL_GPL(vb_ctrl);
+-
+-
+diff --git a/osdrv/interdrv/v2/include/common/uapi/linux/vb_uapi.h b/osdrv/interdrv/v2/include/common/uapi/linux/vb_uapi.h
+index 40a317685..4b2ea21c8 100644
+--- a/osdrv/interdrv/v2/include/common/uapi/linux/vb_uapi.h
++++ b/osdrv/interdrv/v2/include/common/uapi/linux/vb_uapi.h
+@@ -25,6 +25,7 @@ enum VB_IOCTL {
+ 	VB_IOCTL_GET_POOL_MAX_CNT,
+ 	VB_IOCTL_PRINT_POOL,
+ 	VB_IOCTL_UNIT_TEST,
++	VB_IOCTL_COPY_BLOCK,
+ 	VB_IOCTL_MAX,
+ };
+ 
+@@ -73,6 +74,14 @@ struct cvi_vb_blk_info {
+ 	__u32 usr_cnt;
+ };
+ 
++/* Copy a bounded range from a live kernel-owned Video Buffer block. */
++struct cvi_vb_copy {
++	__u64 phy_addr;
++	__u32 offset;
++	__u32 size;
++	__u64 user_ptr;
++};
++
+ #ifdef __cplusplus
+ 	}
+ #endif
+

@@ -1,0 +1,43 @@
+#!/bin/sh
+set -eu
+
+issuer_key=${1:?usage: mint-development-token.sh ISSUER_PRIVATE_KEY ISSUER AUDIENCE OUTPUT_FILE [read-only|hid-control]}
+issuer=${2:?usage: mint-development-token.sh ISSUER_PRIVATE_KEY ISSUER AUDIENCE OUTPUT_FILE [read-only|hid-control]}
+audience=${3:?usage: mint-development-token.sh ISSUER_PRIVATE_KEY ISSUER AUDIENCE OUTPUT_FILE [read-only|hid-control]}
+output_file=${4:?usage: mint-development-token.sh ISSUER_PRIVATE_KEY ISSUER AUDIENCE OUTPUT_FILE [read-only|hid-control]}
+profile=${5:-read-only}
+
+test -f "$issuer_key"
+test ! -e "$output_file"
+temporary_dir=$(mktemp -d)
+trap 'rm -rf "$temporary_dir"' EXIT HUP INT TERM
+umask 077
+
+encode() {
+    openssl base64 -A | tr '+/' '-_' | tr -d '='
+}
+
+header=$(printf '%s' '{"alg":"EdDSA","typ":"at+jwt"}' | encode)
+expiry=$(( $(date +%s) + 300 ))
+case "$profile" in
+    read-only)
+        scope=kvm:read
+        mutation=false
+        ;;
+    hid-control)
+        scope='kvm:read kvm:control'
+        mutation=true
+        ;;
+    *) printf 'unknown development token profile: %s\n' "$profile" >&2; exit 1 ;;
+esac
+claims=$(printf '{"iss":"%s","aud":"%s","exp":%s,"scope":"%s","cleankvm_mutation":%s}' \
+    "$issuer" "$audience" "$expiry" "$scope" "$mutation" | encode)
+signing_input="$header.$claims"
+printf '%s' "$signing_input" >"$temporary_dir/signing-input"
+signature=$(openssl pkeyutl -sign -rawin -inkey "$issuer_key" \
+    -in "$temporary_dir/signing-input" | encode)
+printf '%s.%s\n' "$signing_input" "$signature" >"$output_file"
+chmod 0600 "$output_file"
+unset header claims expiry signature signing_input scope mutation
+
+printf 'minted owner-only five-minute development token: %s\n' "$output_file"

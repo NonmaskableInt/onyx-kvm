@@ -1,0 +1,8 @@
+# Development builder identity, observed 2026-09-03.
+# Release builds require a snapshot-pinned package repository and reproduction.
+base-manifest | docker.io/library/ubuntu:22.04 amd64 | sha256:79676deb51ebb02885b0b9d33788e78a37cf1045ad79d1bb04c6a222c3556b3d
+local-image | localhost/cleankvm-builder:ubuntu-22.04-amd64 | sha256:2ee18ac76897e9641ac75b4ac52684b1627058e08670696c5bcadec8cdb5b1d0
+package-manifest | dpkg-query sorted package=version | sha256:8b923f3ceadd6c8773418595793692e02e6b9f603cbf577a686db35ded8f0a4c
+apt-repository-snapshot | PENDING-REVIEW
+development-riscv-musl-toolchain | https://github.com/sophgo/host-tools.git | commit:103c66f126fa98fcaa8b54f37fa06f6b293fd074 | tree:1d017c307a51e2237d92c09a80b180be2b7132e9 | tree-archive-sha256:f0d1e9ae13671e74ef9241f1f8e1707cb30f620047f488d9f69f86d9af94b971 | gcc-10.2.0-sha256:24c7816360c46b9b1dc8ab02ab79e4f8fb5f465a3568a8bd7d14dac1ff4cdd66 | DEVELOPMENT-ONLY; subtree lacks bundled license texts and corresponding-source proof
+development-riscv-gnu-toolchain | https://github.com/sophgo/host-tools.git | commit:103c66f126fa98fcaa8b54f37fa06f6b293fd074 | tree:070e88e425d3fed8ae2feef43c872ce6018c3dfb | tree-archive-sha256:8918ae8325c00f50f20dac3482e56ef77d02a0a5a2468634a7ade827d4eedd06 | gcc-10.2.0-sha256:9951f36d9a5dac2792c928183abe771156f5d1c03960ecc026b073d8d8c2e37e | DEVELOPMENT-ONLY; FSBL compiler; subtree lacks bundled license texts and corresponding-source proof

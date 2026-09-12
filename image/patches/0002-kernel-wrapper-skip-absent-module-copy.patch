@@ -1,0 +1,11 @@
+--- a/build/Makefile
++++ b/build/Makefile
+@@ -225,7 +225,7 @@ endef
+ 
+ define copy_ko_action
+ 	${Q}mkdir -p ${SYSTEM_OUT_DIR}/ko
+-	${Q}find ${1} -name '*.ko' -exec cp -f {} ${SYSTEM_OUT_DIR}/ko/ \;
++	${Q}test ! -d ${1} || find ${1} -name '*.ko' -exec cp -f {} ${SYSTEM_OUT_DIR}/ko/ \;
+ endef
+ 
+ ifeq ($(CHIP_ARCH),$(filter $(CHIP_ARCH),CV181X CV180X SG200X))

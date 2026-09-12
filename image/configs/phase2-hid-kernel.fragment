@@ -1,0 +1,35 @@
+# CleanKVM Phase 2 HID: device-side USB only.
+# Layer this after the Phase-1 kernel profile. Host USB, generic HID/input,
+# storage, networking, serial, audio, and video gadget functions stay absent.
+
+CONFIG_USB_SUPPORT=y
+# CONFIG_USB is not set
+CONFIG_USB_GADGET=y
+CONFIG_USB_DWC2=y
+CONFIG_USB_DWC2_PERIPHERAL=y
+# CONFIG_USB_DWC2_HOST is not set
+# CONFIG_USB_DWC2_DUAL_ROLE is not set
+
+CONFIG_CONFIGFS_FS=y
+CONFIG_USB_LIBCOMPOSITE=y
+CONFIG_USB_CONFIGFS=y
+CONFIG_USB_CONFIGFS_F_HID=y
+CONFIG_USB_F_HID=y
+
+# The kernel's host-side input and HID parsers are unnecessary for a gadget.
+# CONFIG_INPUT is not set
+# CONFIG_HID is not set
+
+# Keep all other gadget functions outside this narrowly scoped phase.
+# CONFIG_USB_CONFIGFS_SERIAL is not set
+# CONFIG_USB_CONFIGFS_ACM is not set
+# CONFIG_USB_CONFIGFS_NCM is not set
+# CONFIG_USB_CONFIGFS_ECM is not set
+# CONFIG_USB_CONFIGFS_RNDIS is not set
+# CONFIG_USB_CONFIGFS_EEM is not set
+# CONFIG_USB_CONFIGFS_MASS_STORAGE is not set
+# CONFIG_USB_CONFIGFS_F_FS is not set
+# CONFIG_USB_CONFIGFS_F_UAC1 is not set
+# CONFIG_USB_CONFIGFS_F_UAC2 is not set
+# CONFIG_USB_CONFIGFS_F_MIDI is not set
+# CONFIG_USB_CONFIGFS_F_UVC is not set

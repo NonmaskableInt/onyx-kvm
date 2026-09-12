@@ -1,0 +1,5 @@
+/* CleanKVM Phase 2: the managed-host USB-C path is device-only. */
+&usb {
+	dr_mode = "peripheral";
+	status = "okay";
+};

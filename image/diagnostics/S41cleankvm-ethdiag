@@ -1,0 +1,53 @@
+#!/bin/sh
+
+# Development-only boot diagnostics. This emits read-only Ethernet state to
+# UART and does not configure an address or open a socket.
+
+report()
+{
+	label=$1
+	iface=eth0
+	base=/sys/class/net/$iface
+
+	echo "CleanKVM Ethernet diagnostic: $label" >/dev/console
+	if ! test -d "$base"; then
+		echo "  eth0: absent" >/dev/console
+		return
+	fi
+
+	for field in address carrier operstate speed duplex mtu; do
+		if test -r "$base/$field"; then
+			value=$(cat "$base/$field" 2>/dev/null || echo unreadable)
+			echo "  $field=$value" >/dev/console
+		fi
+	done
+
+	for counter in rx_packets rx_bytes rx_errors rx_dropped tx_packets tx_bytes tx_errors tx_dropped; do
+		value=$(cat "$base/statistics/$counter" 2>/dev/null || echo unreadable)
+		echo "  $counter=$value" >/dev/console
+	done
+
+	device=$(readlink "$base/device" 2>/dev/null || echo unavailable)
+	driver=$(readlink "$base/device/driver" 2>/dev/null || echo unavailable)
+	phy=$(readlink "$base/phydev" 2>/dev/null || echo unavailable)
+	echo "  device=$device" >/dev/console
+	echo "  driver=$driver" >/dev/console
+	echo "  phydev=$phy" >/dev/console
+	ip address show dev "$iface" >/dev/console 2>&1 || true
+}
+
+case "${1:-start}" in
+	start)
+		report startup
+		(
+			sleep 3
+			report after-3s
+			sleep 12
+			report after-15s
+		) &
+		;;
+	stop|restart|reload)
+		;;
+esac
+
+exit 0

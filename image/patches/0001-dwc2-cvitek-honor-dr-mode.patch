@@ -1,0 +1,18 @@
+--- a/drivers/usb/dwc2/platform.c
++++ b/drivers/usb/dwc2/platform.c
+@@ -1063,6 +1063,15 @@ static int dwc2_driver_probe(struct platform_device *dev)
+ 	retval = dwc2_get_dr_mode(hsotg);
+ 	if (retval)
+ 		goto error;
++#if IS_ENABLED(CONFIG_ARCH_CVITEK)
++	/*
++	 * CVITEK's private PHY override defaults to host mode before dr_mode is
++	 * resolved.  Keep that hardware override consistent with a fixed
++	 * peripheral-only kernel; otherwise the gadget binds but never attaches.
++	 */
++	hsotg->cviusb.id_override = hsotg->dr_mode == USB_DR_MODE_PERIPHERAL;
++	dwc2_set_hw_id(hsotg, hsotg->cviusb.id_override);
++#endif
+ 
+ 	hsotg->need_phy_for_wake =
+ 		of_property_read_bool(dev->dev.of_node,

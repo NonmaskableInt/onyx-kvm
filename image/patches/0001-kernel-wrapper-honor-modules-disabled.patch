@@ -1,0 +1,17 @@
+--- a/build/Makefile
++++ b/build/Makefile
+@@ -287,8 +287,12 @@ kernel-build: ${KERNEL_OUTPUT_CONFIG_PATH}
+ 	$(call print_target)
+ 	${Q}echo LOCALVERSION=${LOCALVERSION}
+ 	${Q}$(MAKE) -j${NPROC} -C ${KERNEL_PATH} O=${KERNEL_PATH}/${KERNEL_OUTPUT_FOLDER} olddefconfig
+-	${Q}$(MAKE) -j${NPROC} -C ${KERNEL_PATH}/${KERNEL_OUTPUT_FOLDER} Image modules
+-	${Q}$(MAKE) -j${NPROC} -C ${KERNEL_PATH}/${KERNEL_OUTPUT_FOLDER} modules_install headers_install INSTALL_HDR_PATH=${KERNEL_PATH}/${KERNEL_OUTPUT_FOLDER}/$(ARCH)/usr
++	${Q}$(MAKE) -j${NPROC} -C ${KERNEL_PATH}/${KERNEL_OUTPUT_FOLDER} Image
++	${Q}if grep -q '^CONFIG_MODULES=y' ${KERNEL_PATH}/${KERNEL_OUTPUT_FOLDER}/.config; then \
++		$(MAKE) -j${NPROC} -C ${KERNEL_PATH}/${KERNEL_OUTPUT_FOLDER} modules; \
++		$(MAKE) -j${NPROC} -C ${KERNEL_PATH}/${KERNEL_OUTPUT_FOLDER} modules_install; \
++	fi
++	${Q}$(MAKE) -j${NPROC} -C ${KERNEL_PATH}/${KERNEL_OUTPUT_FOLDER} headers_install INSTALL_HDR_PATH=${KERNEL_PATH}/${KERNEL_OUTPUT_FOLDER}/$(ARCH)/usr
+ 	${Q} ln -sf ${KERNEL_PATH}/${KERNEL_OUTPUT_FOLDER}/$(ARCH)/usr/include ${KERNEL_PATH}/${KERNEL_OUTPUT_FOLDER}/usr/include
+ ifeq ($(patsubst "%",%,$(CONFIG_ARCH)),arm64)
+ 	# Since we will support aarch32 user space even if the kernel is aarch64, install aarch32 headers also

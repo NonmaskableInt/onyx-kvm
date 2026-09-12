@@ -1,0 +1,84 @@
+# CleanKVM Phase 1 recovery kernel: serial, SD, and wired Ethernet only.
+# Applied after the SG2002 LicheeRV Nano defconfig and checked with olddefconfig.
+
+# Expose security-relevant opt-out prompts whose upstream defaults are hidden.
+CONFIG_EXPERT=y
+
+# Keep loadable modules unavailable until module signing and provenance exist.
+# CONFIG_MODULES is not set
+
+# No wireless stack or radio drivers in the recovery image.
+# CONFIG_CFG80211 is not set
+# CONFIG_RFKILL is not set
+# CONFIG_WLAN is not set
+# CONFIG_BT is not set
+
+# Audio is a later, explicitly enabled privacy-sensitive phase.
+# CONFIG_SOUND is not set
+
+# Video and multimedia are a later isolated-adapter phase.
+# CONFIG_MEDIA_SUPPORT is not set
+# CONFIG_FB is not set
+# CONFIG_DRM is not set
+# CONFIG_BACKLIGHT_CLASS_DEVICE is not set
+# Keep serial TTY support, but remove display/keyboard virtual consoles. The
+# vendor kernel's VT option otherwise selects the generic input subsystem.
+# CONFIG_VT is not set
+# CONFIG_INPUT is not set
+
+# No host USB, serial adapters, storage, raw HID, or gadget functions in the
+# recovery image. USB KVM functions are admitted only in a later scoped phase.
+# CONFIG_USB is not set
+# CONFIG_USB_GADGET is not set
+# CONFIG_USB_DWC2 is not set
+# CONFIG_USB_LIBCOMPOSITE is not set
+# CONFIG_USB_CONFIGFS is not set
+# CONFIG_HID is not set
+
+# Remove raw hardware control interfaces not required for serial/SD/Ethernet.
+# CONFIG_GPIO_SYSFS is not set
+# CONFIG_I2C is not set
+# CONFIG_I2C_CHARDEV is not set
+# CONFIG_SPI is not set
+# CONFIG_SPI_SPIDEV is not set
+# CONFIG_STAGING is not set
+# CONFIG_ION is not set
+
+# Wired DHCP needs IPv4 sockets and the on-board MAC, not tunnelling, virtual
+# interfaces, VPN, packet filtering, or remote filesystems.
+# CONFIG_IPV6 is not set
+# CONFIG_NETFILTER is not set
+# CONFIG_NFS_FS is not set
+# CONFIG_SUNRPC is not set
+# CONFIG_WIREGUARD is not set
+# CONFIG_TUN is not set
+# CONFIG_VETH is not set
+# CONFIG_VXLAN is not set
+
+# SD is the only Phase-1 storage transport. U-Boot reads the FAT boot
+# partition; Linux mounts the local root filesystem directly.
+# CONFIG_MTD is not set
+# CONFIG_SCSI is not set
+# CONFIG_BLK_DEV_LOOP is not set
+# CONFIG_JFFS2_FS is not set
+# CONFIG_UBIFS_FS is not set
+
+# Remove unnecessary legacy/debug interfaces from the recovery image.
+# CONFIG_IKCONFIG is not set
+# CONFIG_DEBUG_FS is not set
+# CONFIG_MAGIC_SYSRQ is not set
+# CONFIG_COREDUMP is not set
+# CONFIG_KEXEC is not set
+# CONFIG_DEVKMEM is not set
+# CONFIG_DEVMEM is not set
+# CONFIG_USER_NS is not set
+# CONFIG_BPF_SYSCALL is not set
+
+# Baseline hardening. Availability must be confirmed against the vendor kernel.
+CONFIG_STRICT_KERNEL_RWX=y
+CONFIG_STRICT_MODULE_RWX=y
+CONFIG_STACKPROTECTOR=y
+CONFIG_STACKPROTECTOR_STRONG=y
+CONFIG_SECURITY_DMESG_RESTRICT=y
+
+# This vendor RISC-V 5.10 tree has no RANDOMIZE_BASE/KASLR implementation.

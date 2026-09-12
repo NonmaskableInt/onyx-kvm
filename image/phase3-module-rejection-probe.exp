@@ -1,0 +1,34 @@
+#!/usr/bin/expect -f
+set timeout 90
+set fh [open [lindex $argv 0] r]
+set credential_text [read $fh]
+close $fh
+if {![regexp -line {^password=(.*)$} $credential_text -> password]} { exit 2 }
+
+spawn /usr/bin/sudo /usr/bin/cu -l /dev/cu.usbserial-112440 -s 115200
+expect -re {Connected\.}
+send "\003\r"
+expect -re {login: *$}
+send "root\r"
+expect -re {Password: *$}
+log_user 0
+send -- "$password\r"
+expect -re {# $}
+unset password
+unset credential_text
+log_user 1
+
+send {printf 'PRE_TAINT='; cat /proc/sys/kernel/tainted}
+send "\r"
+expect -re {# $}
+send {insmod /usr/lib/cleankvm/video-quarantine/soph_sys.ko; echo LOAD_RC=$?}
+send "\r"
+expect -re {# $}
+send {dmesg | grep -E 'soph_sys|vermagic|module' | tail -n 20}
+send "\r"
+expect -re {# $}
+send {printf 'POST_TAINT='; cat /proc/sys/kernel/tainted}
+send "\r"
+expect -re {# $}
+send "~."
+expect eof

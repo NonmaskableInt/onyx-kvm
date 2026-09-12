@@ -1,0 +1,9 @@
+--- a/linux_5.10/arch/riscv/mach-cvitek/Kconfig
++++ b/linux_5.10/arch/riscv/mach-cvitek/Kconfig
+@@ -1,6 +1,5 @@
+ config ARCH_CVITEK
+ 	bool "Cvitek SoC Family"
+-	select ION_CVITEK
+ 	select SCHED_CVITEK
+ 	help
+ 	  This enables support for Cvitek SoC family.

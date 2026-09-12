@@ -1,0 +1,27 @@
+diff --git a/u-boot-2021.10/board/cvitek/mars/board.c b/u-boot-2021.10/board/cvitek/mars/board.c
+index af47a98..220a6ac 100644
+--- a/u-boot-2021.10/board/cvitek/mars/board.c
++++ b/u-boot-2021.10/board/cvitek/mars/board.c
+@@ -155,7 +155,12 @@ static void set_rtc_register_for_power(void)
+ 
+ #include "../cvi_board_init.c"
+ 
+-#if defined(CONFIG_PHY_CVITEK) /* config cvitek cv181x eth internal phy on ASIC board */
++/*
++ * This is board-level power/reset bootstrap, not a network-stack operation.
++ * Linux needs it to publish the internal PHY on MDIO before its PHY driver can
++ * bind, so keep it on CV181X ASIC builds even when U-Boot networking is absent.
++ */
++#if defined(CONFIG_TARGET_CVITEK_CV181X_ASIC)
+ static void cv181x_ephy_id_init(void)
+ {
+ 	// set rg_ephy_apb_rw_sel 0x0804@[0]=1/APB by using APB interface
+@@ -225,7 +230,7 @@ int board_init(void)
+ 
+ 	cpu_pwr_ctrl();
+ 
+-#if defined(CONFIG_PHY_CVITEK) /* config cvitek cv181x eth internal phy on ASIC board */
++#if defined(CONFIG_TARGET_CVITEK_CV181X_ASIC)
+ 	cv181x_ephy_id_init();
+ 	cv181x_ephy_led_pinmux();
+ #endif

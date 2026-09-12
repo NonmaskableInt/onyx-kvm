@@ -1,0 +1,61 @@
+#!/bin/sh
+set -eu
+
+gadget=/sys/kernel/config/usb_gadget/cleankvm
+
+start_gadget() {
+    mkdir -p /sys/kernel/config
+    if ! grep -q ' /sys/kernel/config configfs ' /proc/mounts; then
+        mount -t configfs none /sys/kernel/config
+    fi
+    test ! -e "$gadget" || return 0
+    mkdir "$gadget"
+    # This vendor kernel accepts newline-terminated ConfigFS values but reports
+    # a short write.  BusyBox printf then returns failure and `set -e` aborts
+    # gadget creation, so all textual ConfigFS attributes must omit newlines.
+    printf %s '0x1d6b' >"$gadget/idVendor"
+    printf %s '0x0104' >"$gadget/idProduct"
+    printf %s '0x0200' >"$gadget/bcdUSB"
+    printf %s '0x0100' >"$gadget/bcdDevice"
+    mkdir "$gadget/strings/0x409"
+    printf %s 'CleanKVM development' >"$gadget/strings/0x409/manufacturer"
+    printf %s 'Fail-closed HID probe' >"$gadget/strings/0x409/product"
+    mkdir "$gadget/configs/c.1"
+    mkdir "$gadget/configs/c.1/strings/0x409"
+    printf %s 'Keyboard and pointer' >"$gadget/configs/c.1/strings/0x409/configuration"
+    printf %s '50' >"$gadget/configs/c.1/MaxPower"
+
+    mkdir "$gadget/functions/hid.keyboard"
+    printf %s '1' >"$gadget/functions/hid.keyboard/protocol"
+    printf %s '1' >"$gadget/functions/hid.keyboard/subclass"
+    printf %s '8' >"$gadget/functions/hid.keyboard/report_length"
+    printf '\005\001\011\006\241\001\005\007\031\340\051\347\025\000\045\001\165\001\225\010\201\002\225\001\165\010\201\001\225\005\165\001\005\010\031\001\051\005\221\002\225\001\165\003\221\001\225\006\165\010\025\000\045\145\005\007\031\000\051\145\201\000\300' \
+        >"$gadget/functions/hid.keyboard/report_desc"
+
+    mkdir "$gadget/functions/hid.pointer"
+    printf %s '2' >"$gadget/functions/hid.pointer/protocol"
+    printf %s '1' >"$gadget/functions/hid.pointer/subclass"
+    printf %s '4' >"$gadget/functions/hid.pointer/report_length"
+    printf '\005\001\011\002\241\001\011\001\241\000\005\011\031\001\051\003\025\000\045\001\225\003\165\001\201\002\225\001\165\005\201\001\005\001\011\060\011\061\011\070\025\201\045\177\165\010\225\003\201\006\300\300' \
+        >"$gadget/functions/hid.pointer/report_desc"
+
+    (cd "$gadget" && ln -s functions/hid.keyboard configs/c.1/hid.keyboard)
+    (cd "$gadget" && ln -s functions/hid.pointer configs/c.1/hid.pointer)
+    set -- /sys/class/udc/*
+    test "$#" -eq 1
+    test -e "$1"
+    udc_name=${1##*/}
+    printf %s "$udc_name" >"$gadget/UDC"
+}
+
+stop_gadget() {
+    test -d "$gadget" || return 0
+    : >"$gadget/UDC"
+}
+
+case "${1:-}" in
+    start) start_gadget ;;
+    stop) stop_gadget ;;
+    restart) stop_gadget; start_gadget ;;
+    *) printf 'usage: %s {start|stop|restart}\n' "$0" >&2; exit 1 ;;
+esac

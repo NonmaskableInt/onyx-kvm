@@ -1,0 +1,31 @@
+#!/usr/bin/expect -f
+set timeout 30
+set credential_path [lindex $argv 0]
+set fh [open $credential_path r]
+set credential_text [read $fh]
+close $fh
+regexp -line {^password=(.*)$} $credential_text -> password
+
+spawn /usr/bin/sudo /usr/bin/cu -l /dev/cu.usbserial-112440 -s 115200
+expect -re {Connected\.}
+send "\r"
+expect {
+    -re {# $} {}
+    -re {login: *$} {
+        send "root\r"
+        expect -re {Password: *$}
+        log_user 0
+        send -- "$password\r"
+        expect -re {# $}
+        log_user 1
+    }
+}
+unset password
+unset credential_text
+send -- "echo RESET_TRACE_BEGIN; dmesg | grep cleankvm-reset; echo RESET_TRACE_END\r"
+expect {
+    -re {RESET_TRACE_END} {}
+    timeout { send "~."; exit 6 }
+}
+send "~."
+expect eof

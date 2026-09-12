@@ -1,0 +1,56 @@
+#!/usr/bin/expect -f
+set timeout 20
+set credential_path [lindex $argv 0]
+set fh [open $credential_path r]
+set credential_text [read $fh]
+close $fh
+if {![regexp -line {^password=(.*)$} $credential_text -> password]} { exit 2 }
+
+spawn /usr/bin/sudo /usr/bin/cu -l /dev/cu.usbserial-112440 -s 115200
+expect {
+    -re {Connected\.} {}
+    timeout { exit 7 }
+}
+send "\003\r\r"
+set logged_in 0
+expect {
+    -re {# $} { set logged_in 1 }
+    -re {login: *$} {}
+    timeout { send "~."; exit 3 }
+}
+if {!$logged_in} {
+    send "root\r"
+    expect {
+        -re {Password: *$} {}
+        timeout { send "~."; exit 4 }
+    }
+    log_user 0
+    send -- "$password\r"
+    expect {
+        -re {# $} {}
+        timeout { log_user 1; send "~."; exit 5 }
+    }
+}
+unset password
+unset credential_text
+log_user 1
+
+proc run_command {command} {
+    send -- "$command\r"
+    expect {
+        -re {# $} {}
+        timeout { send "~."; exit 6 }
+    }
+}
+
+run_command {echo CLEANKVM_RUNTIME_REGRESSION_V1}
+run_command {printf 'UPTIME='; cut -d' ' -f1 /proc/uptime}
+run_command {echo '[NETWORK]'; ip -br link 2>/dev/null || ip link; ip -4 -br addr 2>/dev/null || ip -4 addr; ip route}
+run_command {echo '[LISTENERS]'; netstat -lnt 2>/dev/null || true}
+run_command {echo '[SERVICES]'; for p in cleankvmd cleankvm-hid-broker; do printf "$p="; pidof "$p" || echo absent; done}
+run_command {echo '[USB_GADGET]'; printf 'UDC='; cat /sys/kernel/config/usb_gadget/cleankvm/UDC 2>/dev/null || echo absent; for n in /dev/hidg*; do test -e "$n" && ls -l "$n"; done}
+run_command {echo '[CONTAINMENT]'; printf 'TAINT='; cat /proc/sys/kernel/tainted; printf 'SOPH_MODULES='; awk '$1 ~ /^soph_/ {printf "%s,", $1}' /proc/modules; echo; printf 'MEDIA_NODES='; for n in /dev/video* /dev/media* /dev/v4l-subdev* /dev/cvi-*; do test -e "$n" && printf '%s,' "$n"; done; echo}
+run_command {echo '[IDENTITY_FILES]'; for n in /etc/cleankvm/tls-certificate.der /etc/cleankvm/oauth-issuer-public-key.raw; do test -r "$n" && { printf '%s=' "$n"; sha256sum "$n" | cut -d' ' -f1; } || echo "$n=absent"; done}
+run_command {echo CLEANKVM_RUNTIME_REGRESSION_END}
+send "~."
+expect eof

@@ -1,0 +1,4 @@
+/etc/cleankvm d 0750 0 900 - - - - -
+/etc/cleankvm/tls-certificate.der f 0644 0 0 - - - - -
+/etc/cleankvm/tls-private-key.pkcs8.der f 0640 0 900 - - - - -
+/etc/cleankvm/oauth-issuer-public-key.raw f 0644 0 0 - - - - -

@@ -1,0 +1,44 @@
+diff --git a/osdrv/interdrv/v2/cif/chip/mars/cif.c b/osdrv/interdrv/v2/cif/chip/mars/cif.c
+index 539878a3a..2337c73c8 100644
+--- a/osdrv/interdrv/v2/cif/chip/mars/cif.c
++++ b/osdrv/interdrv/v2/cif/chip/mars/cif.c
+@@ -2350,6 +2350,8 @@ static int cif_reset_snsr_gpio(struct cvi_cif_dev *dev,
+ 			       unsigned int devno, uint8_t on)
+ {
+ 	struct cvi_link *link;
++	void __iomem *mux;
++	void __iomem *gpio_b;
+ 	int reset;
+ 
+ 	if (devno >= MAX_LINK_NUM)
+@@ -2360,10 +2362,29 @@ static int cif_reset_snsr_gpio(struct cvi_cif_dev *dev,
+ 
+ 	if (!gpio_is_valid(link->snsr_rst_pin))
+ 		return 0;
++	mux = ioremap(0x030010f8, sizeof(u32));
++	gpio_b = ioremap(0x03021000, 0x54);
++	if (mux && gpio_b)
++		dev_err(dev->miscdev.this_device,
++			 "cleankvm-reset before: dev=%u pin=%d pol=%u on=%u mux=%08x out=%08x dir=%08x sample=%08x\n",
++			 devno, link->snsr_rst_pin, link->snsr_rst_pol, on,
++			 readl(mux), readl(gpio_b), readl(gpio_b + 0x04),
++			 readl(gpio_b + 0x50));
+ 	if (on)
+ 		gpio_direction_output(link->snsr_rst_pin, reset);
+ 	else
+ 		gpio_direction_output(link->snsr_rst_pin, !reset);
++	if (mux && gpio_b)
++		dev_err(dev->miscdev.this_device,
++			 "cleankvm-reset after: dev=%u pin=%d value=%d mux=%08x out=%08x dir=%08x sample=%08x\n",
++			 devno, link->snsr_rst_pin,
++			 gpio_get_value(link->snsr_rst_pin), readl(mux),
++			 readl(gpio_b), readl(gpio_b + 0x04),
++			 readl(gpio_b + 0x50));
++	if (gpio_b)
++		iounmap(gpio_b);
++	if (mux)
++		iounmap(mux);
+ 
+ 	return 0;
+ }
+
