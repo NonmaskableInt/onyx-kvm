@@ -237,3 +237,23 @@ GPIO entry while the LT6911 attributes select MIPI device 1. A blind reset
 sequence change is therefore unjustified. The next diagnostic must distinguish
 absent HDMI/bridge output from reset routing or bridge firmware state before
 any register writes are admitted.
+
+## LT6911 reset and MIPI-pad qualification
+
+The v19 hardware trace proves the stock GPIO451 mapping is port B line 3 with
+active-low polarity. U-Boot selects ADC1's GPIOB3 function, assertion changes
+the line to an output sampled low, and release is sampled high. The LT6911
+continues to acknowledge only bus 4/address `0x2b` and returns ID `0000` in all
+three states. Reset routing, polarity, mux, and pad behavior are therefore no
+longer candidate causes.
+
+The cv182x LT6911 source also selects function 3 on all ten MIPI-RX pads before
+capture. v20 moves that immutable routing into U-Boot and removes the conflicting
+CAM_MCLK1 assignment on MIPI_RX0N without exposing `/dev/mem`. v21 then performs
+only reset and MIPI receiver configuration, waits 500 ms, and exits before VI
+or frame allocation. On hardware, the receiver configuration is accepted, but
+all six physical samples remain zero, all four digital data lanes report
+`hs_idle`, `CK_HS` remains zero, and decode remains unknown. The corrected pad
+mux is therefore not sufficient: the evidence now points upstream to LT6911
+power, firmware release, or HDMI/EDID state. No LT6911 initialization table will
+be guessed or written without corresponding-source evidence.

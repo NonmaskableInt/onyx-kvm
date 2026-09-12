@@ -52,7 +52,7 @@ run_command {rm -f /run/cleankvm-frame.yuv422p}
 run_command {test -e /dev/mem || mknod -m 0600 /dev/mem c 1 1}
 run_command {printf 'PRE_TAINT='; cat /proc/sys/kernel/tainted}
 run_command {printf 'PRELOADED='; awk '$1 ~ /^soph_/ {printf "%s,", $1}' /proc/modules; echo}
-run_command {dmesg -n 8; echo CONSOLE_LOGLEVEL_RC=$?}
+run_command {dmesg -n 4; echo CONSOLE_LOGLEVEL_RC=$?}
 
 foreach module {soph_sys soph_base soph_mipi_rx soph_snsr_i2c soph_vi soph_vpss} {
     run_command "insmod $module_dir/$module.ko; echo LOAD_${module}_RC=\$?"
