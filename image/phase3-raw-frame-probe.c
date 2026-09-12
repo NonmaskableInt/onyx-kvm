@@ -16,7 +16,6 @@
 
 #include <linux/audit.h>
 #include <linux/filter.h>
-#include <linux/i2c-dev.h>
 #include <linux/seccomp.h>
 
 #include <linux/cif_uapi.h>
@@ -52,90 +51,6 @@ static int check(const char *name, CVI_S32 rc)
 		return 0;
 	fprintf(stderr, "%s failed: %#x\n", name, (unsigned int)rc);
 	return -1;
-}
-
-static int i2c_write_pair(int fd, uint8_t reg, uint8_t value)
-{
-	uint8_t pair[2] = {reg, value};
-
-	return write(fd, pair, sizeof(pair)) == (ssize_t)sizeof(pair) ? 0 : -1;
-}
-
-static int i2c_read_reg(int fd, uint8_t reg, uint8_t *value)
-{
-	return write(fd, &reg, 1) == 1 && read(fd, value, 1) == 1 ? 0 : -1;
-}
-
-static int lt6911_read_unlocked(int fd, uint8_t bank, uint8_t reg,
-				uint8_t *value)
-{
-	int rc;
-
-	/* Match the stock SG2002 driver exactly: each logical register read is
-	 * bracketed by its own access-enable and access-disable sequence. */
-	rc = i2c_write_pair(fd, 0xff, 0x80) ||
-	     i2c_write_pair(fd, 0xee, 0x01) ||
-	     i2c_write_pair(fd, 0xff, bank) ||
-	     i2c_read_reg(fd, reg, value);
-	if (i2c_write_pair(fd, 0xff, 0x80) ||
-	    i2c_write_pair(fd, 0xee, 0x00))
-		rc = -1;
-	return rc;
-}
-
-static int probe_lt6911_identity(unsigned int bus, unsigned int address,
-				 const char *state)
-{
-	char path[32];
-	int fd = -1, rc = -1;
-	uint8_t id_hi = 0, id_lo = 0;
-
-	snprintf(path, sizeof(path), "/dev/i2c-%u", bus);
-	fd = open(path, O_RDWR | O_CLOEXEC);
-	if (fd < 0 || ioctl(fd, I2C_SLAVE_FORCE, address) < 0) {
-		printf("LT6911_%s_BUS_%u_ADDR_%02x_OPEN_SELECT_ERRNO=%d\n",
-		       state, bus, address, errno);
-		goto out;
-	}
-	if (lt6911_read_unlocked(fd, 0xa0, 0x00, &id_hi) ||
-	    lt6911_read_unlocked(fd, 0xa0, 0x01, &id_lo)) {
-		printf("LT6911_%s_BUS_%u_ADDR_%02x_READ_ERRNO=%d\n",
-		       state, bus, address, errno);
-		goto out;
-	}
-	printf("LT6911_%s_BUS_%u_ADDR_%02x_CHIP_ID=%02x%02x\n",
-	       state, bus, address, id_hi, id_lo);
-	rc = 0;
-out:
-	if (fd >= 0)
-		close(fd);
-	return rc;
-}
-
-static void report_reset_registers(const char *state)
-{
-	static const off_t page = 0x03001000;
-	int fd;
-	volatile uint32_t *regs;
-
-	fd = open("/dev/mem", O_RDONLY | O_CLOEXEC | O_SYNC);
-	if (fd < 0) {
-		printf("RESET_REG_%s_OPEN_ERRNO=%d\n", state, errno);
-		return;
-	}
-	regs = mmap(NULL, 0x21000, PROT_READ, MAP_SHARED, fd, page);
-	if (regs == MAP_FAILED) {
-		printf("RESET_REG_%s_MMAP_ERRNO=%d\n", state, errno);
-		close(fd);
-		return;
-	}
-	/* ADC1 mux is 0x030010f8. GPIO B registers are based at 0x03021000:
-	 * output data +0x00, direction +0x04, sampled external port +0x50. */
-	printf("RESET_REG_%s_MUX=%08x OUT=%08x DIR=%08x SAMPLE=%08x\n",
-	       state, regs[0x00f8 / 4], regs[0x20000 / 4],
-	       regs[0x20004 / 4], regs[0x20050 / 4]);
-	munmap((void *)regs, 0x21000);
-	close(fd);
 }
 
 static int install_boundary(void)
@@ -179,7 +94,6 @@ int main(int argc, char **argv)
 	VIDEO_FRAME_INFO_S frame = {0};
 	struct combo_dev_attr_s mipi = {0};
 	CVI_U32 mipi_dev = 0;
-	CVI_U32 sensor_reset_dev = 0;
 	int mipi_fd = -1, out_fd = -1, rc = 1;
 	int sys_up = 0, dev_up = 0, pipe_created = 0, pipe_up = 0, chn_up = 0;
 	unsigned int i;
@@ -230,40 +144,16 @@ int main(int argc, char **argv)
 		perror("open /dev/cvi-mipi-rx");
 		goto cleanup;
 	}
-	report_reset_registers("BOOT");
-	(void)probe_lt6911_identity(4, 0x2b, "BOOT");
-	(void)probe_lt6911_identity(4, 0x2c, "BOOT");
-	/* The Mars driver reset operation asserts and deasserts both PHY resets and
-	 * toggles the MAC reset. Its UAPI marks UNRESET_MIPI unsupported. */
-	/* Match the stock Lite/PCIe utility's bounded HDMI reset pulse: active
-	 * for 100 ms, then released for 100 ms. */
-	if (ioctl(mipi_fd, CVI_MIPI_RESET_SENSOR, &sensor_reset_dev) < 0) {
-		perror("LT6911 reset assert");
-		goto cleanup;
-	}
-	usleep(100000);
-	report_reset_registers("ASSERTED");
-	(void)probe_lt6911_identity(4, 0x2b, "ASSERTED");
-	(void)probe_lt6911_identity(4, 0x2c, "ASSERTED");
-	if (ioctl(mipi_fd, CVI_MIPI_UNRESET_SENSOR, &sensor_reset_dev) < 0) {
-		perror("LT6911 reset release");
-		goto cleanup;
-	}
-	usleep(500000);
-	report_reset_registers("RELEASED");
-	(void)probe_lt6911_identity(3, 0x2b, "RELEASED");
-	(void)probe_lt6911_identity(4, 0x2b, "RELEASED");
-	(void)probe_lt6911_identity(4, 0x2c, "RELEASED");
-	fflush(stdout);
 	/* Configure only the bounded MIPI receiver using the stock NanoKVM Lite
-	 * sensor_cfg.ini.LT wiring profile. Stop before the vendor VI capture path,
-	 * whose failed-frame cleanup can block indefinitely. */
+	 * sensor_cfg.ini.LT wiring profile. Preserve the bridge's power-on/reset
+	 * state and perform no I2C transaction. Stop before the vendor VI capture
+	 * path, whose failed-frame cleanup can block indefinitely. */
 	if (ioctl(mipi_fd, CVI_MIPI_RESET_MIPI, &mipi_dev) < 0 ||
 	    ioctl(mipi_fd, CVI_MIPI_SET_DEV_ATTR, &mipi) < 0) {
 		perror("MIPI configuration");
 		goto cleanup;
 	}
-	usleep(500000);
+	sleep(5);
 	return 0;
 
 	dev.enIntfMode = VI_MODE_MIPI_YUV422;

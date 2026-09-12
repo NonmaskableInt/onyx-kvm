@@ -61,10 +61,10 @@ Updated: 2026-09-12
 
 ## Prepared next image
 
-- Path: `out/phase3-mipi-status-v22/cleankvm-phase1.img`
+- Path: `out/phase3-mipi-status-v23/cleankvm-phase1.img`
 - Size: 79,692,288 bytes
 - SHA-256:
-  `7162fa38bf50bcb248a7b14f8fc58f8464d87d26ff287d43b7974b87c3f1b98e`
+  `fd83345a8f3a2a1f84c50dcf41e7cd88b895445db55c68c85f673c75071b23c4`
 - The build was performed with networking disabled. Source-cache verification,
   normalized video-foundation configuration, rootfs audit, identity ownership,
   diagnostic ownership, FIT hashes, embedded artifacts, and final image hashes
@@ -80,3 +80,8 @@ Updated: 2026-09-12
   confirmed the stock receiver profile. It exited before VI/frame allocation;
   all modules unloaded, no frame or media node remained, and final taint was
   only the expected out-of-tree bit 4096.
+- v23 removes the protected-ID I2C transactions and reset pulse from the
+  diagnostic. It preserves the LT6911 power-on state, configures only the stock
+  SoC receiver profile, waits five seconds for HDMI negotiation, and exits
+  before VI or frame allocation. Its card read-back verified the exact boot
+  FIT, rootfs, and FIP before ejection.

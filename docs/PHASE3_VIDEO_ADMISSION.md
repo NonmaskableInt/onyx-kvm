@@ -297,6 +297,17 @@ media nodes disappeared, and final taint was the expected out-of-tree-only
 4096. The product-profile mismatch is now ruled out, leaving the LT6911/HDMI
 side or the physical bridge-to-SoC CSI connection as the remaining boundary.
 
+The next source-backed discriminator is reset timing. Normal stock startup only
+leaves GPIO451 released high; v22 instead pulsed reset and sampled after 500 ms.
+v23 therefore performs no LT6911 I2C transaction and no reset operation. It
+configures only the exact stock SoC receiver profile, waits five seconds for
+HDMI negotiation, reports status, and still exits before VI/frame allocation.
+The network-disabled build and all rootfs/FIT/image audits passed. Its
+79,692,288-byte image is `out/phase3-mipi-status-v23/cleankvm-phase1.img`,
+SHA-256 `fd83345a8f3a2a1f84c50dcf41e7cd88b895445db55c68c85f673c75071b23c4`.
+The resolved card passed immediate read-back for the exact boot FIT, rootfs,
+and FIP and was safely ejected for the controlled boot.
+
 The stock `S15kvmhwd` path exports GPIO451, sets it as an output, and leaves it
 high; it does not program EDID, load LT6911 firmware, or pulse reset. The
 separate `nanokvm_update_edid` utility contains explicit LT6911C/UXC EDID read
