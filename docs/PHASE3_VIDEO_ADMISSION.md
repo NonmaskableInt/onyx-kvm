@@ -276,6 +276,13 @@ is `out/phase3-mipi-status-v22/cleankvm-phase1.img`, SHA-256
 It awaits removable-media resolution, flashing, read-back, and one controlled
 UART boot.
 
+The first card later presented for read-back proved to be the prior v21 card:
+its installed probe and FIP hashes matched v21 rather than v22. No result from
+that boot is attributed to v22. The subsequently resolved 32 GB card was
+flashed again and verified before ejection; the embedded boot FIT, rootfs, and
+FIP each matched the audited v22 artifacts. v22 now awaits its first controlled
+UART boot.
+
 The stock `S15kvmhwd` path exports GPIO451, sets it as an output, and leaves it
 high; it does not program EDID, load LT6911 firmware, or pulse reset. The
 separate `nanokvm_update_edid` utility contains explicit LT6911C/UXC EDID read

@@ -32,7 +32,7 @@ Updated: 2026-09-12
 
 ## Ordered next work
 
-1. Flash and boot the completed status-only v22 image, then verify
+1. Boot the flashed and read-back-verified status-only v22 image, then verify
    `/proc/mipi-rx` for a high-speed clock,
    nonzero physical samples, lane state, and decoded YUV422 format. Do not enter
    VI or allocate frame buffers yet.
@@ -67,3 +67,7 @@ Updated: 2026-09-12
   normalized video-foundation configuration, rootfs audit, identity ownership,
   diagnostic ownership, FIT hashes, embedded artifacts, and final image hashes
   all passed.
+- The first post-boot card presented for verification was a separate v21 card;
+  its installed probe and FIP hashes identified it unambiguously. The currently
+  selected 32 GB card was then flashed with v22 and verified before ejection:
+  its boot FIT, rootfs, and FIP matched the audited artifacts exactly.
