@@ -42,7 +42,7 @@ Updated: 2026-09-13
 - Sipeed has now published the complete GPL-3.0 EDID utility source. Review of
   commit `bd070b2f5ce27d22618e8a1c8d2bdca543429882` closed the opaque-protocol
   blocker and identified the exact LT6911UXC programming sequence.
-- CleanKVM v24 contains an independently compiled, bounded derivative for only
+- CleanKVM v25 contains an independently compiled, bounded derivative for only
   `/dev/i2c-4`, address `0x2b`, and its embedded checksum-validated E21 payload.
   It is root-only, never starts automatically, reads before writing, requires
   `--program-e21`, verifies all 256 bytes, and resumes the MCU on exit.
@@ -86,17 +86,20 @@ programming procedure.
 
 ## Prepared next image
 
-- Path: `out/phase3-edid-v24/cleankvm-phase1.img`
+- Path: `out/phase3-edid-v25/cleankvm-phase1.img`
 - Size: 79,692,288 bytes
 - SHA-256:
-  `0b04ac40f25b700fa096a52ff7dac524f9b13006f4513a7a2b6bbc7eab86df35`
+  `e9c18dfbadc571a33fea56310a811685a005e5d92784e9c6e4d538993bab33e4`
 - Embedded root-only programmer SHA-256:
   `3f8b4ced84e4445a25c8a058e3d7e194f01af5b757021206e0367c45d0db0195`.
   It is mode `0500`, owned by root, and has no init entry.
-- The resolved 31.0 GB external card was flashed, exactly read back, and safely
+- v24 was stopped before bridge mutation when its UART baseline revealed that
+  packaging had inherited the prior audio kernel and lacked `/dev/i2c-4`.
+  v25 combines the already verified v23 video FIT with the audited new rootfs.
+- The resolved 32.0 GB external card was flashed with v25, exactly read back, and safely
   ejected. Boot FIT, rootfs, and FIP matched the audited artifacts. macOS FAT
   bookkeeping changed the whole read-back hash to
-  `65ffff153df9583374e7ccbe71095e9f69ef8ae4de4f221b71501ce7fb221342`;
+  `60050eca74c28d874f499a177f3a2f30a86069d68297e08a1d6fc345969959fe`;
   embedded-artifact verification passed and is authoritative.
 
 - Path: `out/phase3-mipi-status-v23/cleankvm-phase1.img`

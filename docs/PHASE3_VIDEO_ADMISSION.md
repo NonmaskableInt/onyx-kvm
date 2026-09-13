@@ -333,7 +333,7 @@ and write paths and GPIO451 toggles, but the normal startup scripts do not invok
 it. This is consistent with a persistently configured bridge and further
 reduces the justification for speculative register writes.
 
-## Source-backed EDID candidate v24
+## Source-backed EDID candidate v25
 
 Sipeed subsequently published the GPL-3.0 EDID utility source. The reviewed
 revision is `bd070b2f5ce27d22618e8a1c8d2bdca543429882`; source and E21 hashes are
@@ -347,15 +347,17 @@ resumes the MCU during cleanup. It is root-only mode `0500`, with no init hook.
 Its SHA-256 is
 `3f8b4ced84e4445a25c8a058e3d7e194f01af5b757021206e0367c45d0db0195`.
 
-The network-disabled v24 build passed rootfs, FIT/FIP, embedded-artifact, and
-image verification. The 79,692,288-byte image is
-`out/phase3-edid-v24/cleankvm-phase1.img`, SHA-256
-`0b04ac40f25b700fa096a52ff7dac524f9b13006f4513a7a2b6bbc7eab86df35`.
-Hardware mutation is pending card flash/read-back, UART baseline, one explicit
-local run, physical power removal, host enumeration, and status-only CSI test.
+The first v24 boot was stopped before bridge mutation: its baseline exposed an
+audio-kernel packaging carryover, `/dev/i2c-4` was absent, and the programmer
+never ran. The UART test now makes I2C presence, `/proc/modules`, and absence of
+audio nodes mandatory pre-mutation gates.
 
-The resolved 31.0 GB external card was then flashed and exactly read back.
-Boot FIT, rootfs, and FIP matched the audited v24 artifacts before safe ejection.
-The whole-card read-back SHA-256 was
-`65ffff153df9583374e7ccbe71095e9f69ef8ae4de4f221b71501ce7fb221342` after
-macOS FAT bookkeeping. Hardware mutation remains pending the controlled boot.
+Corrected v25 combines the already verified v23 video FIT with the audited new
+rootfs and FIP. Its 79,692,288-byte image is
+`out/phase3-edid-v25/cleankvm-phase1.img`, SHA-256
+`e9c18dfbadc571a33fea56310a811685a005e5d92784e9c6e4d538993bab33e4`.
+The resolved 32.0 GB card was flashed and exactly read back; boot FIT, rootfs,
+and FIP matched before safe ejection. macOS FAT bookkeeping produced whole-card
+read-back SHA-256
+`60050eca74c28d874f499a177f3a2f30a86069d68297e08a1d6fc345969959fe`.
+Hardware mutation remains pending the controlled v25 boot.
