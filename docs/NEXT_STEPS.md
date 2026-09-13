@@ -133,3 +133,9 @@ programming procedure.
 - No capture/playback utility or audio broker is installed. The first hardware
   gate is root-only enumeration over UART without opening a PCM device and
   requires fresh explicit authorization before flashing or booting this image.
+- The resolved 32 GB removable card was flashed after explicit authorization.
+  Exact-length read-back verified the embedded boot FIT, root filesystem, and
+  FIP against the audited artifacts before safe ejection. macOS FAT bookkeeping
+  changed the whole-device read-back hash to
+  `3b3a8dd1c1e8d2d5f9327fb9a2408e4c097f0049cf7f95e4a593e9914bf5f6cf`;
+  embedded-artifact verification passed and remains authoritative.
