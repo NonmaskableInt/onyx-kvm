@@ -59,6 +59,18 @@ Updated: 2026-09-12
 6. Continue Phase 3a separately: inventory the ADC/DAC paths, confirm actual
    microphone/speaker/HDMI-audio routing, and design bounded opt-in brokers.
 
+The public-source search did not find an auditable EDID writer. Public drivers
+require pre-flashed Lontium firmware, while Lontium's product brief documents
+the embedded MCU/SPI architecture but not its register protocol. The exact
+material and admission criteria now live in `docs/LT6911_UPSTREAM_REQUIREMENTS.md`.
+Bridge mutation is blocked on that upstream evidence; offline analysis and the
+independent OS/control-plane work may continue.
+
+Phase 3a evidence and its staged privacy boundary are now specified in
+`docs/PHASE3A_AUDIO_ADMISSION.md`. The next independent build task is a minimal
+enumeration-only audio profile and validator. USB Audio, PDM, external I2S, and
+all PCM access remain unauthorized pending a separate hardware authorization.
+
 The retained `E21_NanoKVM.bin` has passed offline structural validation: it is
 exactly 256 bytes, begins with the standard EDID header, declares one extension
 block, and both 128-byte checksums equal zero. Its SHA-256 is
@@ -103,3 +115,21 @@ programming procedure.
 - The approved v23 hardware test again reported all six physical samples zero,
   every data lane `hs_idle`, `CK_HS=0`, and unknown decode. All modules unloaded,
   no frame or media node remained, and final taint was 4096.
+
+## Prepared Phase 3a image
+
+- Path: `out/phase3a-audio-enumeration-v1/cleankvm-phase1.img`
+- Size: 79,692,288 bytes
+- SHA-256:
+  `208a811401849a2504257bb5e641fd077f0ec3cc96eef7b071907b8141fbdaf7`
+- The build ran with networking disabled and reused the established device
+  identity and recovery credential. Source-cache verification, normalized
+  configuration, rootfs audit, identity ownership, FIT hashes, embedded
+  artifacts, and final image hashes passed.
+- The kernel is module-free and admits only ALSA core/PCM, its mandatory timer
+  support, the CV182XA ADC/DAC machine and codec drivers, internal I2S, and the
+  required clock/reset plumbing. Media, USB sound/UAC, PDM, external codecs,
+  MIDI, sequencer, and OSS compatibility remain disabled.
+- No capture/playback utility or audio broker is installed. The first hardware
+  gate is root-only enumeration over UART without opening a PCM device and
+  requires fresh explicit authorization before flashing or booting this image.

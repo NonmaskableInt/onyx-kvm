@@ -58,6 +58,7 @@ fi
             phase2-hid) /repo/image/validate-phase2-hid-config.sh /work/sdk ;;
             phase3-discovery) /repo/image/validate-phase3-discovery-config.sh /work/sdk ;;
             phase3-video-foundation) /repo/image/validate-phase3-video-foundation-config.sh /work/sdk ;;
+            phase3a-audio-enumeration) /repo/image/validate-phase3a-audio-enumeration-config.sh /work/sdk ;;
             *) printf "unknown configuration profile: %s\n" "$CLEANKVM_CONFIG_PROFILE" >&2; exit 1 ;;
         esac
         source build/cvisetup.sh
@@ -87,7 +88,8 @@ fi
         video_modules=
         if [ "$CLEANKVM_CONFIG_PROFILE" = phase2-hid ] || \
            [ "$CLEANKVM_CONFIG_PROFILE" = phase3-discovery ] || \
-           [ "$CLEANKVM_CONFIG_PROFILE" = phase3-video-foundation ]; then
+           [ "$CLEANKVM_CONFIG_PROFILE" = phase3-video-foundation ] || \
+           [ "$CLEANKVM_CONFIG_PROFILE" = phase3a-audio-enumeration ]; then
             hid_broker=/repo/out/phase2-rust/cleankvm-hid-broker
         fi
         if [ "$CLEANKVM_CONFIG_PROFILE" = phase3-video-foundation ]; then

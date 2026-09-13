@@ -51,6 +51,20 @@ after its complete dependency and license closure is recorded.
   load or mute GPIO, and it does not establish the microphone route.
 - No current evidence establishes HDMI audio extraction or a routed USB Audio
   Class path. Both remain unsupported until signal-level tests pass.
+- Sipeed documents an onboard analog microphone on the shared LicheeRV Nano
+  design. Its NanoKVM documentation also says MIC/amplifier circuitry was
+  retained for production compatibility while later software removed the
+  drivers because of privacy concerns.
+- The pinned product kernel configuration enables the CV182XA ADC/DAC machine
+  and codec drivers, internal I2S clocking, generic USB sound, USB Audio, and
+  UAC1. CleanKVM currently disables all of them.
+- The product DTS enables the DAC and removes the reference mute GPIO. Its
+  inherited QFN description retains the internal ADC/DAC cards while deleting
+  PDM and two external-I2S paths. This supports a tightly scoped ADC/DAC-only
+  enumeration image; it does not establish USB Audio or HDMI-audio routing.
+- The staged admission and privacy requirements are recorded in
+  `docs/PHASE3A_AUDIO_ADMISSION.md`. No PCM may be opened during the initial
+  enumeration test.
 
 ## Next evidence gates
 

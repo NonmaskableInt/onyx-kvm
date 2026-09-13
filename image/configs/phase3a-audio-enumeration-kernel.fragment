@@ -1,0 +1,36 @@
+# CleanKVM Phase 3a audio enumeration profile.
+# Admit only the internal CV182XA analog ADC/DAC path. Enumeration does not
+# authorize opening a PCM device or exposing audio over USB or the network.
+CONFIG_SOUND=y
+CONFIG_SND=y
+CONFIG_SND_PCM=y
+CONFIG_SND_SOC=y
+CONFIG_SND_SOC_GENERIC_DMAENGINE_PCM=y
+CONFIG_SND_SOC_CV182XA_CV182XAADC=y
+CONFIG_SND_SOC_CV182XA_CV182XADAC=y
+CONFIG_SND_CV1835_I2S=y
+CONFIG_SND_SOC_CV182XAADC=y
+CONFIG_SND_SOC_CV182XADAC=y
+CONFIG_SND_SOC_CV1835_USE_AUDIO_PLL=y
+CONFIG_CV1835_I2S_SUBSYS=y
+
+# Keep unrelated and externally exposed audio surfaces absent.
+# CONFIG_SND_PROC_FS is not set
+# CONFIG_SND_SEQUENCER is not set
+# CONFIG_SND_OSSEMUL is not set
+# CONFIG_SND_RAWMIDI is not set
+# CONFIG_SND_DRIVERS is not set
+# CONFIG_SND_SPI is not set
+# CONFIG_SND_USB is not set
+# CONFIG_SND_USB_AUDIO is not set
+# CONFIG_SND_SOC_CV1835_ADAU1372 is not set
+# CONFIG_SND_SOC_CV1835_CV1835PDM is not set
+# CONFIG_SND_SOC_CV182X_CV182XPDM is not set
+# CONFIG_SND_SOC_CV1835PDM is not set
+# CONFIG_SND_SOC_CV1835_CONCURRENT_I2S is not set
+# CONFIG_SND_SOC_CV183x_DUMMY_CARD is not set
+# CONFIG_SND_SOC_CV1835_LT9611 is not set
+# CONFIG_USB_CONFIGFS_F_UAC1 is not set
+# CONFIG_USB_CONFIGFS_F_UAC2 is not set
+# CONFIG_USB_CONFIGFS_F_MIDI is not set
+# CONFIG_MEDIA_SUPPORT is not set
