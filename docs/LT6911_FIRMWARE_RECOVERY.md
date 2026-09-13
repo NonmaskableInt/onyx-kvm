@@ -4,10 +4,11 @@ Updated: 2026-09-13
 
 ## Finding
 
-NanoKVM's stock v1.4.2 root filesystem contains no LT6911UXC application
-firmware and no firmware loader. Offline extraction found only the E21 EDID,
-`libsns_lt6911.so`, and normal application code. The stock startup script
-selects the bridge variant and releases reset; it does not load bridge firmware.
+NanoKVM's stock v1.4.2 root filesystem contains no separately identifiable
+LT6911UXC application firmware and no firmware-upgrade loader. Offline
+extraction found the E21 EDID, `libsns_lt6911.so`, and stripped normal
+application code. The stock startup script selects the bridge variant and
+releases reset; it does not load bridge firmware.
 The normal design therefore boots an embedded MCU from firmware already stored
 in the LT6911UXC's attached/on-chip SPI flash.
 
@@ -21,8 +22,11 @@ but does not distinguish those cases.
 
 - Sipeed NanoKVM commit `bd070b2f5ce27d22618e8a1c8d2bdca543429882`
   publishes an EDID programmer but no LT6911UXC firmware or firmware loader.
-- Stock image `20260123_NanoKVM_Rev1_4_2.img` contains no LT6911 firmware
-  payload or loader.
+- Stock image `20260123_NanoKVM_Rev1_4_2.img` contains no separately
+  identifiable LT6911 firmware payload or upgrade loader. Its stripped
+  `libkvm.so` contains a `lt6911_read_fw` diagnostic, so an embedded opaque
+  payload cannot be ruled out solely from filenames or strings; no upgrade
+  call or payload has been found.
 - Espressif's Apache-2.0 driver identifies a compatible LT6911 through MCU-stop,
   bank `0xe1`, registers `0x00..0x01`, expecting PID `0x2102`; it does not load
   firmware.
@@ -64,3 +68,29 @@ automatically or appear through MCP.
 No bridge application firmware erase or write has been attempted. Only the
 source-backed E21 EDID area was changed and verified. The incompatible public
 LT6911C dump and proprietary Windows updater remain unexecuted and excluded.
+
+## Stock behavioral reference, without execution
+
+The extracted stock startup path copies `sensor_cfg.ini.LT` into place, then
+launches the stripped `kvm_system` and server programs. The configuration is
+bus 4, MIPI device 0, lane order `2,4,3,1,0`, no polarity swaps, no MCLK, and
+60 fps. The hardware script leaves GPIO451 (the documented HDMI reset signal)
+high; it does not pulse reset or program the LT during ordinary startup.
+
+The stock `libkvm.so` symbol and string tables match Sipeed's published
+`kvm_vision.cpp`, including `lt6911_enable`, `lt6911_disable`, status and
+dimension reads, EDID access, and `lt6911_read_fw`. The UXC normal path stops
+the embedded MCU through bank `0x80`, register `0xee = 1`, reads bank `0x86`
+register `0xa3` for signal state and bank `0x85` registers `0xea`/`0xf0` for
+CSI dimensions, then resumes the MCU with `0xee = 0`. It does not contain an
+application-firmware upload in the published path.
+
+The published `lt6911_read_fw` function is a read-only SPI-controller sequence.
+It uses three address bytes and surveys 49,999 16-byte records after address
+zero (through approximately 800 KB), printing each record. This is the basis
+for CleanKVM's independently compiled, root-only backup utility. The utility
+reads the complete 800,000-byte reference range twice, requires byte-identical
+results, uses an exclusive fixed output path, and restores the MCU after each
+pass. It contains no erase/program opcode and is never started automatically.
+The v2 static RISC-V diagnostic has SHA-256
+`24df815d4e32e003b37ad013de950cd49a73ecf2a0c64978a9c6dd1d4c05da6d`.
