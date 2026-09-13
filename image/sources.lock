@@ -7,3 +7,4 @@ opensbi | SDK tree 21bbe9fa4ada20c2e8fa8c9ca09396584e0ea656 | d4003f15b35d43ad48
 uboot | SDK tree dc2947e802dfd796dc8c3b4400e5ad5e12ee0caa | d4003f15b35d43ad4842f427050ab2bba0114fa5:u-boot-2021.10 | manifest-sha256:53826962c879b87501e23b0567624d126616a0002c94aa1b48636be6ed8298aa | GPL-2.0-or-later
 fsbl | SDK tree a7ff72edc7332a1abab12b298aef97fa093a24a3 | d4003f15b35d43ad4842f427050ab2bba0114fa5:fsbl | manifest-sha256:f7c6c98018ae536cc5dca65efa113f98d966453a012fd42e12599e4c8b270bc8 | PENDING-REVIEW
 sg2002-multimedia | SDK tree cc28c8372568501f33ee2eab0130b33d72dc8c44 | d4003f15b35d43ad4842f427050ab2bba0114fa5:middleware | manifest-sha256:a1ef5acf8fe8f8314d26b7e77a52e2feb0ac2bff89f9e56eac3e6225a623496e | PENDING-REVIEW
+tinyalsa | https://github.com/tinyalsa/tinyalsa/archive/refs/tags/v2.0.0.tar.gz | v2.0.0 | sha256:573ae0b2d3480851c1d2a12503ead2beea27f92d44ed47b74b553ba947994ef1 | BSD-3-Clause

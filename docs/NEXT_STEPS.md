@@ -147,3 +147,8 @@ programming procedure.
 - Next: implement a one-second, memory-only local capture probe with fixed
   format/byte bounds, structural metrics only, explicit cleanup/zeroization,
   and a post-run FD audit. Do not add raw-audio export or MCP audio access.
+- Capture-v2 is now built, audited, flashed, read back, and safely ejected. Its
+  image SHA-256 is
+  `a60d95083c7d8f97181d02175005be85da563ba4b70e83ef3aff0f480e8399c2`.
+  After insertion and boot, run its device-free self-test first, then one
+  explicitly bounded capture and a post-run PCM-FD/taint/containment audit.

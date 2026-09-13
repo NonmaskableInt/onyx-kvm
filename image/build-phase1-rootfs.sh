@@ -12,6 +12,7 @@ identity_dir=${CLEANKVM_IDENTITY_DIR:-}
 config_profile=${CLEANKVM_CONFIG_PROFILE:-phase1}
 video_module_dir=${CLEANKVM_VIDEO_MODULE_DIR:-$repo_root/out/phase3-video-modules-v1}
 raw_frame_probe=${CLEANKVM_RAW_FRAME_PROBE:-}
+audio_capture_probe=${CLEANKVM_AUDIO_CAPTURE_PROBE:-}
 identity_source=
 set --
 if test -n "$identity_dir"; then
@@ -22,6 +23,10 @@ fi
 if test -n "$raw_frame_probe"; then
     test -f "$raw_frame_probe"
     set -- "$@" -v "$raw_frame_probe:/raw-frame-probe:ro"
+fi
+if test -n "$audio_capture_probe"; then
+    test -f "$audio_capture_probe"
+    set -- "$@" -v "$audio_capture_probe:/audio-capture-probe:ro"
 fi
 credential_hash=!
 if test -n "$credential_hash_file"; then
@@ -46,6 +51,7 @@ fi
     -e CLEANKVM_CONFIG_PROFILE="$config_profile" \
     -e CLEANKVM_VIDEO_MODULE_DIR=/video-modules \
     -e CLEANKVM_RAW_FRAME_PROBE="${raw_frame_probe:+/raw-frame-probe}" \
+    -e CLEANKVM_AUDIO_CAPTURE_PROBE="${audio_capture_probe:+/audio-capture-probe}" \
     -v "$video_module_dir:/video-modules:ro" \
     "$builder" bash -lc '
         set -e
@@ -69,6 +75,14 @@ fi
             grep -qF "/usr/libexec/cleankvm-raw-frame-probe f 0500 0 0" \
                 cleankvm/phase1-devices.txt || \
                 printf "%s\n" "/usr/libexec/cleankvm-raw-frame-probe f 0500 0 0 - - - - -" \
+                    >> cleankvm/phase1-devices.txt
+        fi
+        if [ -n "$CLEANKVM_AUDIO_CAPTURE_PROBE" ]; then
+            install -D -m 0500 "$CLEANKVM_AUDIO_CAPTURE_PROBE" \
+                cleankvm/phase1-overlay/usr/libexec/cleankvm-audio-capture-probe
+            grep -qF "/usr/libexec/cleankvm-audio-capture-probe f 0500 0 0" \
+                cleankvm/phase1-devices.txt || \
+                printf "%s\n" "/usr/libexec/cleankvm-audio-capture-probe f 0500 0 0 - - - - -" \
                     >> cleankvm/phase1-devices.txt
         fi
         if [ "$CLEANKVM_INCREMENTAL_ROOTFS" != 1 ]; then
@@ -102,7 +116,8 @@ fi
             "$CLEANKVM_IDENTITY_SOURCE" \
             "$hid_broker" \
             "$video_modules" \
-            "$CLEANKVM_RAW_FRAME_PROBE"
+            "$CLEANKVM_RAW_FRAME_PROBE" \
+            "$CLEANKVM_AUDIO_CAPTURE_PROBE"
         if [ -n "$CLEANKVM_IDENTITY_SOURCE" ]; then
             debugfs=/work/sdk/buildroot/output/host/sbin/debugfs
             root_image=/work/sdk/buildroot/output/images/rootfs.ext4
@@ -125,5 +140,14 @@ fi
             printf "%s\n" "$probe_stat" | grep -q "Mode: *0500"
             printf "%s\n" "$probe_stat" | grep -q "User: *0 *Group: *0"
             printf "%s\n" "finished ext4 raw-frame probe ownership audit passed"
+        fi
+        if [ -n "$CLEANKVM_AUDIO_CAPTURE_PROBE" ]; then
+            debugfs=/work/sdk/buildroot/output/host/sbin/debugfs
+            root_image=/work/sdk/buildroot/output/images/rootfs.ext4
+            probe_stat=$($debugfs -R "stat /usr/libexec/cleankvm-audio-capture-probe" \
+                "$root_image" 2>/dev/null)
+            printf "%s\n" "$probe_stat" | grep -q "Mode: *0500"
+            printf "%s\n" "$probe_stat" | grep -q "User: *0 *Group: *0"
+            printf "%s\n" "finished ext4 audio capture probe ownership audit passed"
         fi
     '

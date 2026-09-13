@@ -104,3 +104,19 @@ found no open `/dev/snd` node. No PCM was opened during either evidence pass.
 
 Stage A therefore passes. Stage B remains a separate operation: implement and
 offline-test a bounded local capture probe before any microphone PCM is opened.
+
+The Stage B probe is now built from pinned TinyALSA v2.0.0 source. It is a
+46,976-byte static, stripped RISC-V ELF installed root-only (`0500`), is not
+referenced by init, and cannot be invoked by the unprivileged daemon. It fixes
+capture to card 0/device 0, mono S16_LE at 16 kHz, exactly 16,000 frames and
+32,000 bytes. A four-second alarm bounds a stalled driver. Output is limited to
+frame/byte/format counts plus peak, mean-absolute, integer RMS, clipped-sample,
+and zero-sample metrics. The locked sample buffer is explicitly zeroized and
+unlocked on every normal or interrupted return; no sample is written or sent.
+
+The resulting v2 image is `out/phase3a-capture-v2/cleankvm-phase1.img`, SHA-256
+`a60d95083c7d8f97181d02175005be85da563ba4b70e83ef3aff0f480e8399c2`.
+All offline rootfs, ownership, FIT, and embedded-artifact audits passed. Its
+31 GB card read-back verified every embedded artifact before safe ejection;
+macOS FAT bookkeeping produced whole read-back hash
+`3f4d216e0067c554fcb9880be08973704451f45d489aa2624b4d5b4831fbd78b`.
