@@ -122,3 +122,12 @@ but no reviewed normal-startup script invokes it. The stripped `kvm_system` ELF
 references hardware-version detection and MIPI-driver replacement but yielded
 no string evidence of an automatic EDID update. This evidence supports testing
 the product lane profile before admitting any LT6911 register write.
+
+The retained `/kvmapp/system/tool/E21_NanoKVM.bin` was extracted as data only
+and validated offline. It is a structurally valid two-block EDID: 256 bytes,
+standard `00ffffffffffff00` header, one declared extension, and a zero checksum
+for each 128-byte block. SHA-256 is
+`526e33a7d63d8deddbcbb00bc3b89a3a88fae1059f8d16a5b5b3fbd28742146e`.
+The payload includes `NanoKVM` display descriptors. This closes payload
+integrity but does not admit the stock updater or its unexplained register
+sequence.

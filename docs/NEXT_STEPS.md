@@ -33,14 +33,22 @@ Updated: 2026-09-12
   remained unknown. The product-profile mismatch is therefore ruled out.
 - The remaining fault is constrained upstream of the SoC receiver: LT6911
   power/firmware state, HDMI input/HPD/EDID state, or the physical CSI path.
+- v23 preserved the bridge's power-on state, performed no I2C transaction or
+  reset pulse, and waited five seconds; CSI remained identically idle. Reset
+  sequencing and the 500 ms v22 delay are therefore ruled out.
+- macOS display enumeration while the HDMI cable was connected showed only the
+  built-in display and `S34CG50`; NanoKVM did not appear as a display. This is
+  direct host-side evidence that the device is not presenting usable HPD/EDID.
 
 ## Ordered next work
 
-1. Finish mapping every stock action affecting LT6911
-   power, reset, clocks, EDID, HPD, interrupt pins, I2C, or CSI output to source
-   where available, and prefer a read-only comparison against a stock boot.
-2. Capture a read-only stock-boot comparison of bridge acknowledgement, HDMI
-   source/HPD behavior, and `/proc/mipi-rx` with the same HDMI cable and source.
+1. Recover or locate auditable source for the LT6911UXC EDID path. Sipeed's
+   official NanoKVM FAQ instructs Cube/Lite users to run the separate
+   `nanokvm_update_edid` utility with the 256-byte `E21_NanoKVM.bin` and then
+   power-cycle, corroborating that EDID is persistent bridge state.
+2. Validate the retained E21 payload structurally and map the updater's exact
+   enable/write/readback/disable sequence. Do not execute the stock utility or
+   translate an unexplained register table into CleanKVM.
 3. If a bridge write is required,
    admit only the smallest source-backed operation with before/after reads,
    UART visibility, time bounds, and guaranteed cleanup.
@@ -50,6 +58,13 @@ Updated: 2026-09-12
    all admitted modules from the final source tree.
 6. Continue Phase 3a separately: inventory the ADC/DAC paths, confirm actual
    microphone/speaker/HDMI-audio routing, and design bounded opt-in brokers.
+
+The retained `E21_NanoKVM.bin` has passed offline structural validation: it is
+exactly 256 bytes, begins with the standard EDID header, declares one extension
+block, and both 128-byte checksums equal zero. Its SHA-256 is
+`526e33a7d63d8deddbcbb00bc3b89a3a88fae1059f8d16a5b5b3fbd28742146e`.
+It contains `NanoKVM` display strings. This validates the payload, not the opaque
+programming procedure.
 
 ## Explicitly deferred
 
@@ -85,3 +100,6 @@ Updated: 2026-09-12
   SoC receiver profile, waits five seconds for HDMI negotiation, and exits
   before VI or frame allocation. Its card read-back verified the exact boot
   FIT, rootfs, and FIP before ejection.
+- The approved v23 hardware test again reported all six physical samples zero,
+  every data lane `hs_idle`, `CK_HS=0`, and unknown decode. All modules unloaded,
+  no frame or media node remained, and final taint was 4096.

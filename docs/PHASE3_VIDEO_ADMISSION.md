@@ -308,6 +308,24 @@ SHA-256 `fd83345a8f3a2a1f84c50dcf41e7cd88b895445db55c68c85f673c75071b23c4`.
 The resolved card passed immediate read-back for the exact boot FIT, rootfs,
 and FIP and was safely ejected for the controlled boot.
 
+The controlled v23 test confirmed the exact installed probe and clean baseline,
+then loaded the quarantined modules with explicit approval. With no bridge I2C
+transaction, no reset pulse, and a five-second negotiation interval, the result
+was unchanged: all physical samples zero, all data lanes `hs_idle`, `CK_HS=0`,
+and unknown decode. Cleanup removed every module and media node; no frame was
+created and final taint was 4096. This rules out the diagnostic reset pulse and
+the shorter v22 wait.
+
+The connected Mac simultaneously failed to enumerate NanoKVM as a display; it
+listed only its internal panel and `S34CG50`. This host-side result promotes
+missing HPD/EDID presentation above a downstream CSI wiring fault. Sipeed's
+official NanoKVM FAQ independently instructs Cube/Lite users to program the
+retained 256-byte `E21_NanoKVM.bin` with `nanokvm_update_edid` and power-cycle:
+<https://github.com/sipeed/sipeed_wiki/blob/main/docs/hardware/en/kvm/NanoKVM/faq.md>.
+The stock utility remains unexecuted and excluded. CleanKVM will not reproduce
+its writes until the sequence has auditable source or an independently justified
+register-level specification with readback and rollback bounds.
+
 The stock `S15kvmhwd` path exports GPIO451, sets it as an output, and leaves it
 high; it does not program EDID, load LT6911 firmware, or pulse reset. The
 separate `nanokvm_update_edid` utility contains explicit LT6911C/UXC EDID read
