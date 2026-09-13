@@ -382,3 +382,29 @@ With only documented bank-selection writes, HDMI status `0x86:0xa3` returned
 CSI Vactive (`0x85:0xf0`) and Hactive (`0x85:0xea`) were both `0x0000`. No I2C
 descriptor remained open. This rules out missing EDID bytes as the sole cause
 and promotes bridge firmware/execution or HPD control state as the next target.
+
+## Resident-flash evidence image v26
+
+Static stock inspection found no separately identifiable LT6911UXC application
+payload or upgrade loader. It did find `lt6911_read_fw` in the stripped stock
+library, matching Sipeed's published three-byte-address SPI-read routine. Normal
+stock startup does not call an upload path and therefore still appears to rely
+on firmware resident in the bridge SPI flash.
+
+CleanKVM's independently compiled backup utility reproduces only that published
+read transaction. It contains no erase/program opcode, has a fixed bus/address
+and output path, reads the 800,000-byte stock reference range twice, requires
+identical copies, and resumes the LT MCU during cleanup. The installed binary
+is root-owned mode `0500`, non-autostart, and has SHA-256
+`24df815d4e32e003b37ad013de950cd49a73ecf2a0c64978a9c6dd1d4c05da6d`.
+
+The resulting v26 image is 79,692,288 bytes with SHA-256
+`53d9c4679f5443073564639d00307fcacbce35dd2c68f9df8411665a0e3a266b`.
+It reuses the hardware-proven v23 FIT and unchanged verified FIP. The resolved
+31.0 GB removable card was written at the exact image length and read back
+before ejection. Its macOS-adjusted whole-card SHA-256 was
+`2621c015585db5ff77efa06e675a1f3abbbade6fd0391904e1870df47d91a167`;
+embedded FIT, rootfs, and FIP comparisons all passed. The next bounded gate is
+one boot, baseline containment verification, one backup run, immediate output
+hashing, and confirmation that taint and I2C file-descriptor state return to
+baseline.

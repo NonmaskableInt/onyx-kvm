@@ -49,10 +49,9 @@ Updated: 2026-09-13
 
 ## Ordered next work
 
-1. Map the official UXC firmware/version and HPD status paths, then perform a
-   bounded read-only comparison against the `0x00` signal state. Do not flash
-   bridge firmware without a pinned redistributable artifact and source-built
-   loader protocol.
+1. Boot v26 and run its bounded LT flash backup once. Preserve and hash the
+   resulting 800,000-byte dump before any further bridge mutation, then map its
+   structure/version indicators against the published stock read routine.
 2. Determine whether reset release starts the embedded MCU and whether HPD has
    a separately documented control/status bit.
 3. Only after the bridge emits a CSI clock should bounded VI allocation and
@@ -120,12 +119,33 @@ programming procedure.
   returned `0x0000`. No I2C descriptor remained open. Valid persistent EDID is
   therefore insufficient; LT6911UXC firmware/execution or HPD control is now
   the leading boundary.
-- Offline extraction of stock v1.4.2 proves it contains no LT6911UXC application
-  firmware or loader; stock also depends on bridge-resident SPI firmware. Public
-  driver projects likewise require firmware directly from Lontium. The only
-  located public blob is an unlicensed 10,007-byte dump from an incompatible
-  LT6911C display board with no known upload protocol and is rejected. Exact
-  acquisition and loader requirements are in `docs/LT6911_FIRMWARE_RECOVERY.md`.
+- Offline extraction of stock v1.4.2 found no separately identifiable
+  LT6911UXC application payload or upgrade loader; ordinary stock startup
+  depends on bridge-resident SPI firmware. Its stripped application contains a
+  firmware-read diagnostic matching Sipeed's published source, but no upgrade
+  path has been found. Exact acquisition and loader requirements are in
+  `docs/LT6911_FIRMWARE_RECOVERY.md`.
+
+## Prepared LT flash-backup image
+
+- Path: `out/phase3-lt-backup-v26/cleankvm-phase1.img`
+- Size: 79,692,288 bytes
+- SHA-256:
+  `53d9c4679f5443073564639d00307fcacbce35dd2c68f9df8411665a0e3a266b`
+- v26 combines the hardware-proven v23 FIT with a newly audited root filesystem
+  and unchanged FIP. Its independently compiled LT backup utility is mode
+  `0500`, owned by root, has no init entry, and hashes to
+  `24df815d4e32e003b37ad013de950cd49a73ecf2a0c64978a9c6dd1d4c05da6d`.
+  It implements only the source-backed 24-bit SPI-read sequence, reads the
+  800,000-byte stock reference range twice, suppresses differing output, and
+  restores the embedded MCU after both passes and final cleanup.
+- The freshly resolved removable target was `/dev/disk4`, 30,992,760,832 bytes.
+  Flashing wrote exactly 79,692,288 bytes. Immediate sector-exact readback had
+  SHA-256
+  `2621c015585db5ff77efa06e675a1f3abbbade6fd0391904e1870df47d91a167`;
+  macOS FAT bookkeeping changed the whole-image hash, while the embedded boot
+  FIT, root filesystem, and FIP each matched the audited v26 artifacts. The card
+  was safely ejected and is ready for the controlled boot.
 
 - Path: `out/phase3-mipi-status-v23/cleankvm-phase1.img`
 - Size: 79,692,288 bytes

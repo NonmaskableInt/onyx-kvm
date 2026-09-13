@@ -126,6 +126,16 @@ fi
             BR2_DL_DIR=/downloads \
             BR2_TOOLCHAIN_EXTERNAL_PATH=/work/sdk/host-tools/gcc/riscv64-linux-musl-x86_64 \
             "BR2_STRIP_EXCLUDE_FILES=cleankvmd cleankvm-memtest cleankvm-hid-broker"
+        # Incremental Buildroot finalization may retain the prior target-tree
+        # mode even though the filesystem device table correctly applies 0500.
+        # Normalize both views so the pre-image audit cannot disagree with the
+        # generated ext4 ownership audit.
+        if [ -n "$CLEANKVM_EDID_PROGRAMMER" ]; then
+            chmod 0500 /work/sdk/buildroot/output/target/usr/libexec/cleankvm-lt6911uxc-edid-programmer
+        fi
+        if [ -n "$CLEANKVM_LT_BACKUP" ]; then
+            chmod 0500 /work/sdk/buildroot/output/target/usr/libexec/cleankvm-lt6911uxc-flash-backup
+        fi
         hid_broker=
         video_modules=
         if [ "$CLEANKVM_CONFIG_PROFILE" = phase2-hid ] || \
