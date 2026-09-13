@@ -120,6 +120,12 @@ programming procedure.
   returned `0x0000`. No I2C descriptor remained open. Valid persistent EDID is
   therefore insufficient; LT6911UXC firmware/execution or HPD control is now
   the leading boundary.
+- Offline extraction of stock v1.4.2 proves it contains no LT6911UXC application
+  firmware or loader; stock also depends on bridge-resident SPI firmware. Public
+  driver projects likewise require firmware directly from Lontium. The only
+  located public blob is an unlicensed 10,007-byte dump from an incompatible
+  LT6911C display board with no known upload protocol and is rejected. Exact
+  acquisition and loader requirements are in `docs/LT6911_FIRMWARE_RECOVERY.md`.
 
 - Path: `out/phase3-mipi-status-v23/cleankvm-phase1.img`
 - Size: 79,692,288 bytes
