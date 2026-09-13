@@ -1,6 +1,6 @@
 # Next steps
 
-Updated: 2026-09-12
+Updated: 2026-09-13
 
 ## Current state
 
@@ -39,19 +39,21 @@ Updated: 2026-09-12
 - macOS display enumeration while the HDMI cable was connected showed only the
   built-in display and `S34CG50`; NanoKVM did not appear as a display. This is
   direct host-side evidence that the device is not presenting usable HPD/EDID.
+- Sipeed has now published the complete GPL-3.0 EDID utility source. Review of
+  commit `bd070b2f5ce27d22618e8a1c8d2bdca543429882` closed the opaque-protocol
+  blocker and identified the exact LT6911UXC programming sequence.
+- CleanKVM v24 contains an independently compiled, bounded derivative for only
+  `/dev/i2c-4`, address `0x2b`, and its embedded checksum-validated E21 payload.
+  It is root-only, never starts automatically, reads before writing, requires
+  `--program-e21`, verifies all 256 bytes, and resumes the MCU on exit.
 
 ## Ordered next work
 
-1. Recover or locate auditable source for the LT6911UXC EDID path. Sipeed's
-   official NanoKVM FAQ instructs Cube/Lite users to run the separate
-   `nanokvm_update_edid` utility with the 256-byte `E21_NanoKVM.bin` and then
-   power-cycle, corroborating that EDID is persistent bridge state.
-2. Validate the retained E21 payload structurally and map the updater's exact
-   enable/write/readback/disable sequence. Do not execute the stock utility or
-   translate an unexplained register table into CleanKVM.
-3. If a bridge write is required,
-   admit only the smallest source-backed operation with before/after reads,
-   UART visibility, time bounds, and guaranteed cleanup.
+1. Flash and verify v24, boot with UART visible, and run its bounded local
+   programmer exactly once. Do not run the retained vendor executable.
+2. Remove power as required upstream, reconnect HDMI, and confirm the Mac
+   enumerates NanoKVM as a display.
+3. Run the existing status-only CSI gate; require a clock and non-idle lanes.
 4. Only after the bridge emits a CSI clock should bounded VI allocation and
    one-frame copying be re-enabled.
 5. Remove temporary reset telemetry after the diagnosis is closed and rebuild
@@ -59,12 +61,8 @@ Updated: 2026-09-12
 6. Continue Phase 3a separately: inventory the ADC/DAC paths, confirm actual
    microphone/speaker/HDMI-audio routing, and design bounded opt-in brokers.
 
-The public-source search did not find an auditable EDID writer. Public drivers
-require pre-flashed Lontium firmware, while Lontium's product brief documents
-the embedded MCU/SPI architecture but not its register protocol. The exact
-material and admission criteria now live in `docs/LT6911_UPSTREAM_REQUIREMENTS.md`.
-Bridge mutation is blocked on that upstream evidence; offline analysis and the
-independent OS/control-plane work may continue.
+The former upstream-source blocker is closed. Sipeed's published GPL-3.0 source
+is pinned in `image/sources.lock`; the retained stock executable remains excluded.
 
 Phase 3a evidence and its staged privacy boundary are now specified in
 `docs/PHASE3A_AUDIO_ADMISSION.md`. The next independent build task is a minimal
@@ -87,6 +85,19 @@ programming procedure.
   stock-state comparison.
 
 ## Prepared next image
+
+- Path: `out/phase3-edid-v24/cleankvm-phase1.img`
+- Size: 79,692,288 bytes
+- SHA-256:
+  `0b04ac40f25b700fa096a52ff7dac524f9b13006f4513a7a2b6bbc7eab86df35`
+- Embedded root-only programmer SHA-256:
+  `3f8b4ced84e4445a25c8a058e3d7e194f01af5b757021206e0367c45d0db0195`.
+  It is mode `0500`, owned by root, and has no init entry.
+- The resolved 31.0 GB external card was flashed, exactly read back, and safely
+  ejected. Boot FIT, rootfs, and FIP matched the audited artifacts. macOS FAT
+  bookkeeping changed the whole read-back hash to
+  `65ffff153df9583374e7ccbe71095e9f69ef8ae4de4f221b71501ce7fb221342`;
+  embedded-artifact verification passed and is authoritative.
 
 - Path: `out/phase3-mipi-status-v23/cleankvm-phase1.img`
 - Size: 79,692,288 bytes

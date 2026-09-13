@@ -11,6 +11,7 @@ expected_hid_broker=${6:-}
 expected_video_modules=${7:-}
 expected_raw_frame_probe=${8:-}
 expected_audio_capture_probe=${9:-}
+expected_edid_programmer=${10:-}
 test -d "$rootfs" || {
     printf 'not a root filesystem directory: %s\n' "$rootfs" >&2
     exit 1
@@ -171,6 +172,14 @@ if test -n "$expected_audio_capture_probe"; then
     test -f "$installed_probe"
     cmp "$expected_audio_capture_probe" "$installed_probe"
     ! find "$rootfs/etc/init.d" -type f -exec grep -l 'cleankvm-audio-capture-probe' '{}' + | grep -q .
+fi
+
+if test -n "$expected_edid_programmer"; then
+    installed_probe="$rootfs/usr/libexec/cleankvm-lt6911uxc-edid-programmer"
+    test -f "$installed_probe"
+    cmp "$expected_edid_programmer" "$installed_probe"
+    test "$(stat -c %a "$installed_probe")" = 500
+    ! find "$rootfs/etc/init.d" -type f -exec grep -l 'cleankvm-lt6911uxc-edid-programmer' '{}' + | grep -q .
 fi
 
 printf '%s\n' 'Phase-1 root filesystem audit passed'

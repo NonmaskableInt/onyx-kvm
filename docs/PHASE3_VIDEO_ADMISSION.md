@@ -332,3 +332,30 @@ separate `nanokvm_update_edid` utility contains explicit LT6911C/UXC EDID read
 and write paths and GPIO451 toggles, but the normal startup scripts do not invoke
 it. This is consistent with a persistently configured bridge and further
 reduces the justification for speculative register writes.
+
+## Source-backed EDID candidate v24
+
+Sipeed subsequently published the GPL-3.0 EDID utility source. The reviewed
+revision is `bd070b2f5ce27d22618e8a1c8d2bdca543429882`; source and E21 hashes are
+recorded in `image/sources.lock`, closing the opaque-table blocker without
+admitting the stock executable.
+
+`image/lt6911uxc-edid-programmer.c` is limited to the established Lite endpoint
+and embedded validated E21 bytes. It has no arbitrary file/register interface,
+requires `--program-e21`, pre-reads, skips a match, verifies all 256 bytes, and
+resumes the MCU during cleanup. It is root-only mode `0500`, with no init hook.
+Its SHA-256 is
+`3f8b4ced84e4445a25c8a058e3d7e194f01af5b757021206e0367c45d0db0195`.
+
+The network-disabled v24 build passed rootfs, FIT/FIP, embedded-artifact, and
+image verification. The 79,692,288-byte image is
+`out/phase3-edid-v24/cleankvm-phase1.img`, SHA-256
+`0b04ac40f25b700fa096a52ff7dac524f9b13006f4513a7a2b6bbc7eab86df35`.
+Hardware mutation is pending card flash/read-back, UART baseline, one explicit
+local run, physical power removal, host enumeration, and status-only CSI test.
+
+The resolved 31.0 GB external card was then flashed and exactly read back.
+Boot FIT, rootfs, and FIP matched the audited v24 artifacts before safe ejection.
+The whole-card read-back SHA-256 was
+`65ffff153df9583374e7ccbe71095e9f69ef8ae4de4f221b71501ce7fb221342` after
+macOS FAT bookkeeping. Hardware mutation remains pending the controlled boot.

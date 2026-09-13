@@ -13,6 +13,7 @@ config_profile=${CLEANKVM_CONFIG_PROFILE:-phase1}
 video_module_dir=${CLEANKVM_VIDEO_MODULE_DIR:-$repo_root/out/phase3-video-modules-v1}
 raw_frame_probe=${CLEANKVM_RAW_FRAME_PROBE:-}
 audio_capture_probe=${CLEANKVM_AUDIO_CAPTURE_PROBE:-}
+edid_programmer=${CLEANKVM_EDID_PROGRAMMER:-}
 identity_source=
 set --
 if test -n "$identity_dir"; then
@@ -27,6 +28,10 @@ fi
 if test -n "$audio_capture_probe"; then
     test -f "$audio_capture_probe"
     set -- "$@" -v "$audio_capture_probe:/audio-capture-probe:ro"
+fi
+if test -n "$edid_programmer"; then
+    test -f "$edid_programmer"
+    set -- "$@" -v "$edid_programmer:/edid-programmer:ro"
 fi
 credential_hash=!
 if test -n "$credential_hash_file"; then
@@ -52,6 +57,7 @@ fi
     -e CLEANKVM_VIDEO_MODULE_DIR=/video-modules \
     -e CLEANKVM_RAW_FRAME_PROBE="${raw_frame_probe:+/raw-frame-probe}" \
     -e CLEANKVM_AUDIO_CAPTURE_PROBE="${audio_capture_probe:+/audio-capture-probe}" \
+    -e CLEANKVM_EDID_PROGRAMMER="${edid_programmer:+/edid-programmer}" \
     -v "$video_module_dir:/video-modules:ro" \
     "$builder" bash -lc '
         set -e
@@ -83,6 +89,14 @@ fi
             grep -qF "/usr/libexec/cleankvm-audio-capture-probe f 0500 0 0" \
                 cleankvm/phase1-devices.txt || \
                 printf "%s\n" "/usr/libexec/cleankvm-audio-capture-probe f 0500 0 0 - - - - -" \
+                    >> cleankvm/phase1-devices.txt
+        fi
+        if [ -n "$CLEANKVM_EDID_PROGRAMMER" ]; then
+            install -D -m 0500 "$CLEANKVM_EDID_PROGRAMMER" \
+                cleankvm/phase1-overlay/usr/libexec/cleankvm-lt6911uxc-edid-programmer
+            grep -qF "/usr/libexec/cleankvm-lt6911uxc-edid-programmer f 0500 0 0" \
+                cleankvm/phase1-devices.txt || \
+                printf "%s\n" "/usr/libexec/cleankvm-lt6911uxc-edid-programmer f 0500 0 0 - - - - -" \
                     >> cleankvm/phase1-devices.txt
         fi
         if [ "$CLEANKVM_INCREMENTAL_ROOTFS" != 1 ]; then
@@ -117,7 +131,8 @@ fi
             "$hid_broker" \
             "$video_modules" \
             "$CLEANKVM_RAW_FRAME_PROBE" \
-            "$CLEANKVM_AUDIO_CAPTURE_PROBE"
+            "$CLEANKVM_AUDIO_CAPTURE_PROBE" \
+            "$CLEANKVM_EDID_PROGRAMMER"
         if [ -n "$CLEANKVM_IDENTITY_SOURCE" ]; then
             debugfs=/work/sdk/buildroot/output/host/sbin/debugfs
             root_image=/work/sdk/buildroot/output/images/rootfs.ext4
@@ -149,5 +164,14 @@ fi
             printf "%s\n" "$probe_stat" | grep -q "Mode: *0500"
             printf "%s\n" "$probe_stat" | grep -q "User: *0 *Group: *0"
             printf "%s\n" "finished ext4 audio capture probe ownership audit passed"
+        fi
+        if [ -n "$CLEANKVM_EDID_PROGRAMMER" ]; then
+            debugfs=/work/sdk/buildroot/output/host/sbin/debugfs
+            root_image=/work/sdk/buildroot/output/images/rootfs.ext4
+            probe_stat=$($debugfs -R "stat /usr/libexec/cleankvm-lt6911uxc-edid-programmer" \
+                "$root_image" 2>/dev/null)
+            printf "%s\n" "$probe_stat" | grep -q "Mode: *0500"
+            printf "%s\n" "$probe_stat" | grep -q "User: *0 *Group: *0"
+            printf "%s\n" "finished ext4 EDID programmer ownership audit passed"
         fi
     '

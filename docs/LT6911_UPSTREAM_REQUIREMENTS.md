@@ -1,8 +1,8 @@
 # LT6911UXC upstream requirements
 
-Updated: 2026-09-12
+Updated: 2026-09-13
 
-## Why this is a release blocker
+## Resolution
 
 CleanKVM has proved that the NanoKVM Lite LT6911UXC acknowledges on I2C bus 4
 at address `0x2b`, its reset line works, the SoC MIPI pads are muxed correctly,
@@ -10,9 +10,11 @@ and the exact stock receiver profile is accepted. Both reset-pulse and
 power-on-state tests report no CSI clock or lane activity. The attached Mac also
 does not enumerate NanoKVM as a display, indicating absent usable HPD/EDID.
 
-The retained stock image contains a valid 256-byte E21 EDID and an updater with
-symbols, but not corresponding source. Executing or translating that opaque
-binary would violate the independent-image and source-audit boundary.
+Sipeed published the corresponding source under GPL-3.0 in the official NanoKVM
+repository. CleanKVM pins commit `bd070b2f5ce27d22618e8a1c8d2bdca543429882`;
+the reference source SHA-256 is
+`68829704293fbbb050f4ccb95b8bae7e891d7c71c4ff1d95ca64c7a66f93df06`.
+This closes the protocol-source blocker. Hardware admission is still pending.
 
 ## Public evidence
 
@@ -24,6 +26,8 @@ binary would violate the independent-image and source-audit boundary.
 - Sipeed's NanoKVM FAQ instructs Cube/Lite users to run the binary
   `nanokvm_update_edid` with `E21_NanoKVM.bin` and then power-cycle:
   <https://github.com/sipeed/sipeed_wiki/blob/main/docs/hardware/en/kvm/NanoKVM/faq.md>
+- The official repository now includes the utility source and E21 payload:
+  <https://github.com/sipeed/NanoKVM/tree/main/tools/nanokvm_update_edid>
 - The ZHAW open-source LT6911UXC driver explicitly requires separately flashed
   Lontium firmware and does not supply an EDID writer:
   <https://github.com/InES-HPMM/Lontium_lt6911uxc>
@@ -32,22 +36,15 @@ binary would violate the independent-image and source-audit boundary.
   Lontium:
   <https://github.com/JakubVanek/lt6911uxc-hacks>
 
-## Minimum acceptable upstream material
+## Source review outcome
 
-One of the following is required before CleanKVM writes bridge state:
-
-1. Source code, under a compatible redistributable license, for the exact
-   LT6911UXC EDID enable/write/readback/disable sequence used by NanoKVM Lite.
-2. A public register-level programming specification from Lontium covering the
-   same sequence, including access locking, shadow commit, HPD behavior, timing,
-   failure recovery, and write endurance.
-3. A signed, redistributable firmware artifact plus a documented source-built
-   loader protocol and a reproducible method to identify its version and hash
-   after programming.
-
-The material must also identify the NanoKVM Lite bridge firmware version,
-whether E21 is written to volatile shadow or persistent SPI, and whether HPD is
-asserted automatically after a valid EDID commit.
+The upstream UXC path suspends the MCU, erases the EDID area, checks and
+acknowledges status `0xee`, writes eight 32-byte EDID pages plus a zero metadata
+page, checks status again, and reads all eight pages back. CleanKVM limits its
+derivative to the hardware-established UXC endpoint and adds an exact argument
+gate, pre-read, checksum validation, matching-payload no-op, byte comparison,
+and unconditional MCU resume. Arbitrary payloads, other chip variants,
+shell-based GPIO reset, and interactive mode were removed.
 
 ## Admission test after source arrives
 
@@ -60,4 +57,3 @@ asserted automatically after a valid EDID commit.
 - Power-cycle once, confirm macOS display enumeration, then run the status-only
   CSI gate before enabling VI or allocating a frame.
 - Keep bridge programming local-only; do not expose it through MCP.
-
