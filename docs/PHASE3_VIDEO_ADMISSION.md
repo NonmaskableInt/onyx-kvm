@@ -369,3 +369,16 @@ structurally invalid. The source-backed operation completed with return code
 zero and byte-for-byte verified all 256 E21 bytes. Cleanup left taint zero and
 no open I2C file descriptor. The device must now lose power completely before
 testing Mac display enumeration and the existing status-only CSI path.
+
+After complete power removal, the Mac still did not enumerate NanoKVM as a
+display. The bounded post-EDID status run loaded all six modules normally and
+again reported all physical samples zero, all four data lanes `hs_idle`,
+`CK_HS=0`, and unknown decode. No frame was allocated, every module unloaded,
+and final taint was the expected 4096.
+
+The published Sipeed UXC status path supplied a second read-only discriminator.
+With only documented bank-selection writes, HDMI status `0x86:0xa3` returned
+`0x00` instead of the documented `0x55` stable or `0x88` disappeared values;
+CSI Vactive (`0x85:0xf0`) and Hactive (`0x85:0xea`) were both `0x0000`. No I2C
+descriptor remained open. This rules out missing EDID bytes as the sole cause
+and promotes bridge firmware/execution or HPD control state as the next target.

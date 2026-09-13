@@ -49,9 +49,12 @@ Updated: 2026-09-13
 
 ## Ordered next work
 
-1. Remove power as required upstream, reconnect HDMI, and confirm the Mac
-   enumerates NanoKVM as a display.
-2. Run the existing status-only CSI gate; require a clock and non-idle lanes.
+1. Map the official UXC firmware/version and HPD status paths, then perform a
+   bounded read-only comparison against the `0x00` signal state. Do not flash
+   bridge firmware without a pinned redistributable artifact and source-built
+   loader protocol.
+2. Determine whether reset release starts the embedded MCU and whether HPD has
+   a separately documented control/status bit.
 3. Only after the bridge emits a CSI clock should bounded VI allocation and
    one-frame copying be re-enabled.
 4. Remove temporary reset telemetry after the diagnosis is closed and rebuild
@@ -106,6 +109,17 @@ programming procedure.
   256-byte read-back matched E21. Final taint remained zero and no process held
   `/dev/i2c-4`. A complete physical power removal is now required before host
   HDMI enumeration and the status-only CSI gate.
+- After full power removal and restart, macOS still enumerated only `S34CG50`
+  and its internal panel. The post-EDID MIPI gate loaded and unloaded all six
+  modules successfully, created no frame, and remained completely idle:
+  physical samples all zero, four `hs_idle` data lanes, `CK_HS=0`, and unknown
+  decode. Final taint was the expected out-of-tree-only 4096.
+- Source-documented bridge reads sharpened the fault: UXC HDMI signal register
+  bank `0x86`, address `0xa3` returned `0x00`, rather than upstream's `0x55`
+  stable or `0x88` disappeared values. Bank `0x85` CSI Vactive and Hactive both
+  returned `0x0000`. No I2C descriptor remained open. Valid persistent EDID is
+  therefore insufficient; LT6911UXC firmware/execution or HPD control is now
+  the leading boundary.
 
 - Path: `out/phase3-mipi-status-v23/cleankvm-phase1.img`
 - Size: 79,692,288 bytes

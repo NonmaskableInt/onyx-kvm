@@ -1,0 +1,40 @@
+#!/usr/bin/expect -f
+set timeout 35
+set credential_path [lindex $argv 0]
+set fh [open $credential_path r]
+set credential_text [read $fh]
+close $fh
+if {![regexp -line {^password=(.*)$} $credential_text -> password]} { exit 2 }
+spawn /usr/bin/sudo /usr/bin/cu -l /dev/cu.usbserial-112440 -s 115200
+expect { -re {Connected\.} {} timeout { exit 7 } }
+send "\003\r\r"
+set logged_in 0
+expect {
+    -re {\r\n# $} { set logged_in 1 }
+    -re {login: *$} {}
+    timeout { send "~."; exit 3 }
+}
+if {!$logged_in} {
+    send "root\r"
+    expect { -re {Password: *$} {} timeout { send "~."; exit 4 } }
+    log_user 0
+    send -- "$password\r"
+    expect { -re {\r\n# $} {} timeout { log_user 1; send "~."; exit 5 } }
+}
+unset password
+unset credential_text
+log_user 1
+proc run_command {command} {
+    send -- "$command\r"
+    expect { -re {# $} {} timeout { send "~."; exit 6 } }
+}
+run_command {echo CLEANKVM_LT6911_SOURCE_STATUS_BEGIN}
+run_command {test -c /dev/i2c-4 && printf 'TAINT=' && cat /proc/sys/kernel/tainted}
+# Sipeed NanoKVM kvm_vision.cpp UXC signal path: bank 0x86, register 0xa3.
+run_command {i2cset -y 4 0x2b 0xff 0x86 && printf 'HDMI_SIGNAL_A3=' && i2cget -y 4 0x2b 0xa3}
+# UXC CSI dimensions: bank 0x85, Vactive 0xf0..f1, Hactive 0xea..eb.
+run_command {i2cset -y 4 0x2b 0xff 0x85 && printf 'CSI_VACTIVE=' && i2ctransfer -y 4 w1@0x2b 0xf0 r2 && printf 'CSI_HACTIVE=' && i2ctransfer -y 4 w1@0x2b 0xea r2}
+run_command {printf 'FINAL_TAINT='; cat /proc/sys/kernel/tainted; printf 'I2C_FDS='; for p in /proc/[0-9]*/fd/*; do test "$(readlink "$p" 2>/dev/null)" = /dev/i2c-4 && printf '%s,' "$p"; done; echo}
+run_command {echo CLEANKVM_LT6911_SOURCE_STATUS_END}
+send "~."
+expect eof
