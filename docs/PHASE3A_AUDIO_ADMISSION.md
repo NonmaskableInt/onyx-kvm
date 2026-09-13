@@ -88,3 +88,19 @@ Build it as a separate image from video diagnostics, inspect its normalized
 diff, and audit that no UAC, USB sound, PDM, external I2S, or unrelated media
 surface enters the root filesystem. Hardware loading or PCM access will require
 fresh explicit approval.
+
+## Enumeration-v1 hardware result
+
+The explicitly authorized image booted successfully. Kernel taint remained
+zero, no loadable module or media node existed, and no UAC function was present.
+Ethernet acquired `192.168.2.64`; `cleankvmd` and the HID broker remained live.
+
+ALSA enumerated `cv182xaadc` as card 0 with capture PCM `pcmC0D0c` and
+`cv182xadac` as card 1 with playback PCM `pcmC1D0p`. Both controls, both PCMs,
+and the mandatory timer node were owned by UID/GID 0 with mode `0600`. The
+device tree exposed `sound_adc`, `sound_dac`, ADC/DAC register nodes, internal
+I2S nodes, its master clock, and the I2S subsystem. A full process-FD audit
+found no open `/dev/snd` node. No PCM was opened during either evidence pass.
+
+Stage A therefore passes. Stage B remains a separate operation: implement and
+offline-test a bounded local capture probe before any microphone PCM is opened.

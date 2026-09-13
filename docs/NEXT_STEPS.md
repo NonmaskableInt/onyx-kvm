@@ -139,3 +139,11 @@ programming procedure.
   changed the whole-device read-back hash to
   `3b3a8dd1c1e8d2d5f9327fb9a2408e4c097f0049cf7f95e4a593e9914bf5f6cf`;
   embedded-artifact verification passed and remains authoritative.
+- The authorized hardware boot passed Phase 3a Stage A. ALSA enumerated root-only
+  `cv182xaadc` capture (`pcmC0D0c`) and `cv182xadac` playback (`pcmC1D0p`)
+  endpoints. Kernel taint was zero; no process held a sound FD; modules, media
+  nodes, and UAC were absent. Ethernet acquired `192.168.2.64`, and both Rust
+  services remained live. No PCM was opened.
+- Next: implement a one-second, memory-only local capture probe with fixed
+  format/byte bounds, structural metrics only, explicit cleanup/zeroization,
+  and a post-run FD audit. Do not add raw-audio export or MCP audio access.

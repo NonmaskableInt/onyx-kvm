@@ -1,0 +1,60 @@
+#!/usr/bin/expect -f
+set timeout 30
+set credential_path [lindex $argv 0]
+set fh [open $credential_path r]
+set credential_text [read $fh]
+close $fh
+if {![regexp -line {^password=(.*)$} $credential_text -> password]} { exit 2 }
+
+spawn /usr/bin/sudo /usr/bin/cu -l /dev/cu.usbserial-112440 -s 115200
+expect {
+    -re {Connected\.} {}
+    timeout { exit 7 }
+}
+send "\003\r\r"
+set logged_in 0
+expect {
+    -re {# $} { set logged_in 1 }
+    -re {login: *$} {}
+    timeout { send "~."; exit 3 }
+}
+if {!$logged_in} {
+    send "root\r"
+    expect {
+        -re {Password: *$} {}
+        timeout { send "~."; exit 4 }
+    }
+    log_user 0
+    send -- "$password\r"
+    expect {
+        -re {# $} {}
+        timeout { log_user 1; send "~."; exit 5 }
+    }
+}
+unset password
+unset credential_text
+log_user 1
+
+proc run_command {command} {
+    send -- "$command\r"
+    expect {
+        -re {# $} {}
+        timeout { send "~."; exit 6 }
+    }
+}
+
+run_command {echo CLEANKVM_PHASE3A_ENUMERATION_V1}
+run_command {printf 'UPTIME='; cut -d' ' -f1 /proc/uptime; printf 'TAINT='; cat /proc/sys/kernel/tainted}
+run_command {echo '[SERVICES]'; for p in cleankvmd cleankvm-hid-broker; do printf "$p="; pidof "$p" || echo absent; done}
+run_command {echo '[NETWORK]'; ip -4 -br addr 2>/dev/null || ip -4 addr; netstat -lnt 2>/dev/null || true}
+run_command {echo '[SOUND_SYSFS]'; for n in /sys/class/sound/*; do test -e "$n" && { printf '%s -> ' "${n##*/}"; readlink -f "$n"; }; done}
+run_command {echo '[CARD_IDS]'; for n in /sys/class/sound/card*/id; do test -r "$n" && { printf '%s=' "${n%/id}"; cat "$n"; }; done}
+run_command {echo '[SOUND_NODES]'; for n in /dev/snd/*; do test -e "$n" && ls -ln "$n"; done}
+run_command {echo '[ALSA_UEVENTS]'; for n in /sys/class/sound/card*/uevent /sys/class/sound/pcm*/uevent; do test -r "$n" && { echo "--$n"; sed -n '1,40p' "$n"; }; done}
+run_command {echo '[AUDIO_DT_STATUS]'; find /sys/firmware/devicetree/base -type d \( -iname '*sound*' -o -iname '*adc*' -o -iname '*dac*' -o -iname '*i2s*' \) 2>/dev/null | LC_ALL=C sort}
+run_command {echo '[AUDIO_LOG]'; dmesg | grep -Ei 'alsa|asoc|audio|sound|cv18.*(adc|dac|i2s)' | tail -80 || true}
+run_command {echo '[PCM_OPEN_AUDIT]'; found=0; for f in /proc/[0-9]*/fd/*; do target=$(readlink "$f" 2>/dev/null || true); case "$target" in /dev/snd/*) echo "$f -> $target"; found=1;; esac; done; test "$found" = 1 || echo none}
+run_command {echo '[CONTAINMENT]'; printf 'MODULES='; awk 'NR<=5 {print}' /proc/modules 2>/dev/null; printf 'MEDIA_NODES='; for n in /dev/video* /dev/media* /dev/v4l-subdev* /dev/cvi-*; do test -e "$n" && printf '%s,' "$n"; done; echo; printf 'UAC='; find /sys/kernel/config/usb_gadget -type d \( -name 'uac.*' -o -name 'uac1.*' -o -name 'uac2.*' \) 2>/dev/null | head -10}
+run_command {echo CLEANKVM_PHASE3A_ENUMERATION_END}
+send "~."
+expect eof
