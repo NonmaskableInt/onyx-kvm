@@ -361,3 +361,11 @@ and FIP matched before safe ejection. macOS FAT bookkeeping produced whole-card
 read-back SHA-256
 `60050eca74c28d874f499a177f3a2f30a86069d68297e08a1d6fc345969959fe`.
 Hardware mutation remains pending the controlled v25 boot.
+
+The controlled v25 boot passed every pre-mutation gate: kernel taint zero,
+root-only `/dev/i2c-4`, exact programmer hash, zero loaded modules, no media or
+audio nodes, and both Rust services live. The bridge's pre-write EDID was
+structurally invalid. The source-backed operation completed with return code
+zero and byte-for-byte verified all 256 E21 bytes. Cleanup left taint zero and
+no open I2C file descriptor. The device must now lose power completely before
+testing Mac display enumeration and the existing status-only CSI path.

@@ -49,16 +49,14 @@ Updated: 2026-09-13
 
 ## Ordered next work
 
-1. Flash and verify v24, boot with UART visible, and run its bounded local
-   programmer exactly once. Do not run the retained vendor executable.
-2. Remove power as required upstream, reconnect HDMI, and confirm the Mac
+1. Remove power as required upstream, reconnect HDMI, and confirm the Mac
    enumerates NanoKVM as a display.
-3. Run the existing status-only CSI gate; require a clock and non-idle lanes.
-4. Only after the bridge emits a CSI clock should bounded VI allocation and
+2. Run the existing status-only CSI gate; require a clock and non-idle lanes.
+3. Only after the bridge emits a CSI clock should bounded VI allocation and
    one-frame copying be re-enabled.
-5. Remove temporary reset telemetry after the diagnosis is closed and rebuild
+4. Remove temporary reset telemetry after the diagnosis is closed and rebuild
    all admitted modules from the final source tree.
-6. Continue Phase 3a separately: inventory the ADC/DAC paths, confirm actual
+5. Continue Phase 3a separately: inventory the ADC/DAC paths, confirm actual
    microphone/speaker/HDMI-audio routing, and design bounded opt-in brokers.
 
 The former upstream-source blocker is closed. Sipeed's published GPL-3.0 source
@@ -101,6 +99,13 @@ programming procedure.
   bookkeeping changed the whole read-back hash to
   `60050eca74c28d874f499a177f3a2f30a86069d68297e08a1d6fc345969959fe`;
   embedded-artifact verification passed and is authoritative.
+- The controlled v25 boot passed the video-profile gate with taint zero,
+  `/dev/i2c-4` root-only, zero loaded modules, no media/audio nodes, the exact
+  installed programmer hash, and both Rust services live. The pre-write EDID
+  was structurally invalid. The bounded operation returned zero and its full
+  256-byte read-back matched E21. Final taint remained zero and no process held
+  `/dev/i2c-4`. A complete physical power removal is now required before host
+  HDMI enumeration and the status-only CSI gate.
 
 - Path: `out/phase3-mipi-status-v23/cleankvm-phase1.img`
 - Size: 79,692,288 bytes

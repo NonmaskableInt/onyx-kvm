@@ -9,19 +9,15 @@ if {![regexp -line {^password=(.*)$} $credential_text -> password]} { exit 2 }
 spawn /usr/bin/sudo /usr/bin/cu -l /dev/cu.usbserial-112440 -s 115200
 expect { -re {Connected\.} {} timeout { exit 7 } }
 send "\003\r\r"
-set logged_in 0
 expect {
-    -re {# $} { set logged_in 1 }
     -re {login: *$} {}
     timeout { send "~."; exit 3 }
 }
-if {!$logged_in} {
-    send "root\r"
-    expect { -re {Password: *$} {} timeout { send "~."; exit 4 } }
-    log_user 0
-    send -- "$password\r"
-    expect { -re {# $} {} timeout { log_user 1; send "~."; exit 5 } }
-}
+send "root\r"
+expect { -re {Password: *$} {} timeout { send "~."; exit 4 } }
+log_user 0
+send -- "$password\r"
+expect { -re {\r\n# $} {} timeout { log_user 1; send "~."; exit 5 } }
 unset password
 unset credential_text
 log_user 1
@@ -31,7 +27,7 @@ proc run_command {command} {
     expect { -re {# $} {} timeout { send "~."; exit 6 } }
 }
 
-run_command {echo CLEANKVM_EDID_V24_BEGIN}
+run_command {echo CLEANKVM_EDID_V25_BEGIN}
 run_command {printf 'UPTIME='; cut -d' ' -f1 /proc/uptime; printf 'TAINT='; cat /proc/sys/kernel/tainted}
 run_command {printf 'PROGRAMMER_SHA256='; sha256sum /usr/libexec/cleankvm-lt6911uxc-edid-programmer | cut -d' ' -f1}
 run_command {test -c /dev/i2c-4 && test -r /proc/modules && test ! -e /dev/snd/controlC0 && echo VIDEO_PROFILE_GATE=passed || { echo VIDEO_PROFILE_GATE=failed; exit 91; }}
@@ -40,6 +36,6 @@ run_command {printf 'SERVICES='; for p in cleankvmd cleankvm-hid-broker; do prin
 run_command {printf 'BASELINE_MODULES='; awk 'END {print NR}' /proc/modules; printf 'BASELINE_MEDIA='; for n in /dev/video* /dev/media* /dev/v4l-subdev* /dev/cvi-* /dev/snd/*; do test -e "$n" && printf '%s,' "$n"; done; echo}
 run_command {/usr/libexec/cleankvm-lt6911uxc-edid-programmer --program-e21; printf 'PROGRAM_RC=%s\n' "$?"}
 run_command {printf 'FINAL_TAINT='; cat /proc/sys/kernel/tainted; printf 'FINAL_I2C_FDS='; for p in /proc/[0-9]*/fd/*; do test "$(readlink "$p" 2>/dev/null)" = /dev/i2c-4 && printf '%s,' "$p"; done; echo}
-run_command {echo CLEANKVM_EDID_V24_END}
+run_command {echo CLEANKVM_EDID_V25_END}
 send "~."
 expect eof
