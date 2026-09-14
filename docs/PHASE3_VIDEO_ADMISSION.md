@@ -475,3 +475,25 @@ continued to report high-speed activity. This rules out a simple delayed-start
 explanation and points to a receiver framing or lane-interpretation mismatch.
 No frame file was created, every module unloaded successfully, and final taint
 was only the expected out-of-tree bit 4096. No media capability is admitted.
+
+## Source-bounded lane discriminator v31
+
+Pinned SG200x driver inspection shows that the displayed decode value comes
+from the receiver's `CSI_DECODE_FORMAT` status register. Thus `raw12` is observed
+wire interpretation, not the configured YUV422 value. The same ISR masks CSI
+error interrupts after a counter exceeds `0xffff`, explaining v30's plateau.
+
+The pinned LT6911 profile lists exactly five lane maps: `2,4,3,1,0`,
+`3,0,1,2,4`, `1,4,3,2,0`, `2,0,1,3,4`, and `3,1,2,4,0`. v31 tests only these
+source-preserved candidates. Each receives a fresh module load, bounded timing
+samples, frame-absence check, and reverse unload before the next candidate.
+The probe contains no LT transaction and still returns before VI configuration
+or frame allocation. Probe SHA-256 is
+`3bd78f43f757026d4629cbce003499709c4484fde2eaae65d990fd81ba3aa26a`.
+
+The independently built image is
+`out/phase3-lane-discriminator-v31/cleankvm-phase1.img`, 79,692,288 bytes,
+SHA-256 `5e3915396bcb46f6232620010c8ea6ccbc6b3929424c0b9f62a2ae2e99b68fd9`.
+Offline rootfs and embedded-artifact audits passed. The resolved removable
+32.0 GB card was flashed, its embedded boot FIT, rootfs, and FIP verified on
+readback, and safely ejected. Hardware execution remains the next gate.

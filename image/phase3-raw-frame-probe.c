@@ -110,7 +110,14 @@ static int install_boundary(void)
 
 int main(int argc, char **argv)
 {
-	const char *output = argc == 2 ? argv[1] : "/run/cleankvm-frame.yuv422p";
+	static const int16_t lane_profiles[][5] = {
+		{2, 4, 3, 1, 0},
+		{3, 0, 1, 2, 4},
+		{1, 4, 3, 2, 0},
+		{2, 0, 1, 3, 4},
+		{3, 1, 2, 4, 0},
+	};
+	const char *output = "/run/cleankvm-frame.yuv422p";
 	VB_CONFIG_S vb = {0};
 	VI_DEV_ATTR_S dev = {0};
 	VI_DEV_BIND_PIPE_S bind = {0};
@@ -121,11 +128,22 @@ int main(int argc, char **argv)
 	CVI_U32 mipi_dev = 0;
 	int mipi_fd = -1, out_fd = -1, rc = 1;
 	int sys_up = 0, dev_up = 0, pipe_created = 0, pipe_up = 0, chn_up = 0;
-	unsigned int i;
+	unsigned int i, lane_profile = 0;
 
 	if (argc > 2) {
-		fprintf(stderr, "usage: %s [output]\n", argv[0]);
+		fprintf(stderr, "usage: %s [lane-profile-0..4]\n", argv[0]);
 		return 2;
+	}
+	if (argc == 2) {
+		char *end = NULL;
+		unsigned long selected = strtoul(argv[1], &end, 10);
+
+		if (!argv[1][0] || !end || *end || selected >=
+		    sizeof(lane_profiles) / sizeof(lane_profiles[0])) {
+			fprintf(stderr, "invalid lane profile: %s\n", argv[1]);
+			return 2;
+		}
+		lane_profile = (unsigned int)selected;
 	}
 	if (install_boundary() < 0) {
 		perror("install syscall boundary");
@@ -150,19 +168,20 @@ int main(int argc, char **argv)
 	mipi.mclk.cam = 0;
 	mipi.mclk.freq = CAMPLL_FREQ_NONE;
 	mipi.mipi_attr.raw_data_type = YUV422_8BIT;
-	mipi.mipi_attr.lane_id[0] = 2;
-	mipi.mipi_attr.lane_id[1] = 4;
-	mipi.mipi_attr.lane_id[2] = 3;
-	mipi.mipi_attr.lane_id[3] = 1;
-	mipi.mipi_attr.lane_id[4] = 0;
-	for (i = 0; i < 5; ++i)
+	for (i = 0; i < 5; ++i) {
+		mipi.mipi_attr.lane_id[i] = lane_profiles[lane_profile][i];
 		mipi.mipi_attr.pn_swap[i] = 0;
+	}
 	mipi.mipi_attr.wdr_mode = CVI_MIPI_WDR_MODE_NONE;
 	mipi.mipi_attr.dphy.enable = 1;
 	mipi.mipi_attr.dphy.hs_settle = 8;
 	mipi.devno = mipi_dev;
 	mipi.img_size.width = WIDTH;
 	mipi.img_size.height = HEIGHT;
+	printf("CLEANKVM_LANE_PROFILE=%u LANES=%d,%d,%d,%d,%d\n",
+		lane_profile, lane_profiles[lane_profile][0],
+		lane_profiles[lane_profile][1], lane_profiles[lane_profile][2],
+		lane_profiles[lane_profile][3], lane_profiles[lane_profile][4]);
 
 	mipi_fd = open("/dev/cvi-mipi-rx", O_RDWR | O_CLOEXEC);
 	if (mipi_fd < 0) {

@@ -229,6 +229,20 @@ programming procedure.
   Next: correlate the driver's decode/status fields with the pinned SDK source
   and admit only a bounded receiver-profile discriminator justified by that
   source; do not introduce an LT firmware write or frame allocation.
+- Pinned-driver correlation confirms that `/proc/mipi-rx` `decode` is the
+  receiver's observed `CSI_DECODE_FORMAT` bitset, not an echo of the configured
+  datatype. It also confirms the apparent plateau: once any error count exceeds
+  `0xffff`, the driver masks CSI error interrupts. The pinned SG200x LT6911
+  profile documents four alternate lane maps beside the current map. v31 admits
+  only those five source-listed maps, each in a fresh six-module load/unload
+  cycle with bounded samples and no VI setup, frame allocation, or LT access.
+  Probe SHA-256 is
+  `3bd78f43f757026d4629cbce003499709c4484fde2eaae65d990fd81ba3aa26a`;
+  image SHA-256 is
+  `5e3915396bcb46f6232620010c8ea6ccbc6b3929424c0b9f62a2ae2e99b68fd9`.
+  The resolved 32.0 GB card was flashed, embedded artifacts verified on
+  readback, and safely ejected. Next: boot and run the five-profile discriminator
+  once, rejecting every profile that accumulates ECC/header/word-count errors.
 
 - Path: `out/phase3-mipi-status-v23/cleankvm-phase1.img`
 - Size: 79,692,288 bytes
