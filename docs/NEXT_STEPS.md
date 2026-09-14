@@ -290,6 +290,17 @@ programming procedure.
   The resolved 31.0 GB card was flashed, embedded artifacts verified on raw
   readback, and safely ejected. Next: boot v34, require the non-audio baseline,
   run profile 5 once, and perform full reverse cleanup.
+- v34 hardware execution rejects profile 5. The exact probe identity and
+  non-audio baseline passed. MIPI device 1 accepted lanes `2,0,1,3,4` with all
+  PN swaps enabled, but every sample from T0 through T5000 ms remained
+  `hs_idle`, with `CK_HS=0`, idle deskew, unknown decode, and all protocol
+  counters at zero. This proves that the active LT CSI stream is not routed to
+  receiver device 1. The probe created no frame; all six modules unloaded with
+  return code zero; the final module set was empty; final taint was the expected
+  4096. Next: stop enumerating speculative lane maps. Boot the known-working
+  stock image and capture source-attributable LT and receiver initialization
+  state for differential analysis, without copying or retaining vendor
+  executables in the clean image.
 
 - Path: `out/phase3-mipi-status-v23/cleankvm-phase1.img`
 - Size: 79,692,288 bytes

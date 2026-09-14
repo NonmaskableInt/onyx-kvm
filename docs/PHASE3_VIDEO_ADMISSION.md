@@ -562,3 +562,18 @@ non-audio ext4, identity, probe, FIT, and embedded-artifact audits. Path:
 `dfc6e5d15a94317d2ab0edc55eb058503a2935d4eb926767f51cad2bb6c49d40`.
 The resolved 31.0 GB removable card was flashed, raw-readback verified, and
 safely ejected. Hardware execution remains the next gate.
+
+The v34 hardware gate completed and profile 5 is rejected. Receiver device 1
+reported zero physical samples, four `hs_idle` data lanes, `CK_HS=0`, idle
+deskew, unknown decode, and zero ECC/CRC/header/word-count/FIFO errors at every
+sample from T0 through T5000 ms. Thus the candidate selected a valid but
+inactive receiver port; it did not observe the LT's live CSI output. No frame
+artifact was created. All six quarantined modules unloaded successfully, the
+final `soph_*` module list was empty, and the final taint was the expected 4096.
+
+The source-bounded static receiver candidates are now exhausted. The next
+admissible step is differential observation on a known-working stock boot:
+record the LT runtime status and SoC receiver initialization/state, attribute
+each observation to source or a read-only trace, and use the delta to implement
+an independently built configuration. Vendor executables remain analysis-only
+and must not be transferred into or executed by the clean image.
