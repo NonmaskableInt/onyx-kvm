@@ -182,6 +182,14 @@ programming procedure.
   descriptor remained open. Preserve this owner-only backup as evidence; next,
   perform offline structure/version analysis and compare read-only LT state
   against a known-working stock boot before proposing any initialization write.
+- Offline structure analysis identifies identical `0x18120`-byte slots at
+  offsets `0x00000` and `0x80000`, each hashing to
+  `07df59ea6e7cc79f46840317abe0d48b61b11ba89ecd4718e389e677d7c1d11e`.
+  Each contains `0x18000` bytes of apparent 8051 LT application code followed
+  by the pinned, checksum-valid 256-byte E21 EDID and 32 zero bytes; all other
+  surveyed space is erased. Next: obtain read-only runtime version/status from
+  a known-working stock boot and correlate it with this preserved layout. Do
+  not execute, redistribute, or program the extracted application bytes.
 
 - Path: `out/phase3-mipi-status-v23/cleankvm-phase1.img`
 - Size: 79,692,288 bytes

@@ -120,3 +120,16 @@ The device and owner-only host copy both hash to
 The test started and ended with kernel taint zero, loaded no modules, left no
 I2C descriptor open, and performed no flash mutation. This is now the preserved
 resident-flash evidence baseline, not yet an authenticated vendor release.
+
+Offline, non-executing structure analysis finds two byte-identical slots at
+flash offsets `0x00000` and `0x80000`. Each occupied span is `0x18120` bytes
+and hashes to
+`07df59ea6e7cc79f46840317abe0d48b61b11ba89ecd4718e389e677d7c1d11e`.
+The first `0x18000` bytes contain 8051-style code and LT HDMI, MIPI, audio, and
+firmware-version diagnostic strings. Bytes `0x18000..0x180ff` are a valid
+two-block NanoKVM E21 EDID: both block checksums are zero and its SHA-256 is the
+pinned published E21 hash
+`526e33a7d63d8deddbcbb00bc3b89a3a88fae1059f8d16a5b5b3fbd28742146e`.
+The remaining 32 bytes of each occupied span are zero. All bytes from
+`0x18120..0x7ffff` and after `0x98120` through the surveyed range are erased
+`0xff`. No extracted byte is committed, loaded, or executed.
