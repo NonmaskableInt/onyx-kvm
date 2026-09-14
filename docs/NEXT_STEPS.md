@@ -165,8 +165,23 @@ programming procedure.
   `5d150df4085a50ddb9fd541e399dafb41c9bc3ab9d96a90bfc0d2b00fdf13493`;
   reader SHA-256 is
   `63ac141aaa76d06dea2e6290d4292eee5d14d319a13f0771ca51efb4b2ed473a`.
-  Next: flash and run v28 once to locate the stable-range boundary before
-  changing range or timing.
+  Its hardware run localized every mismatch to the first 32-byte transaction:
+  all remaining 799,968 bytes agreed. This is consistent with stale pipeline
+  data immediately after controller setup, not unstable resident flash.
+- v29 discards one address-zero transaction after each controller setup and
+  then rereads address zero as compared data. It adds no LT register write or
+  flash mutation. Image SHA-256 is
+  `01047bab4733d6f312b43f4192753d47db841c490f5b691aced370d7747285b6`;
+  reader SHA-256 is
+  `5a08f5ad68212d42e07877c8d1bac89b1ac90babb1d912334e573ecf61c8d607`.
+  On hardware, both complete 800,000-byte reads agreed and passed the diversity
+  gates (`unique=255`, `non_ff=46620`, `non_zero=797282`). Device and host
+  SHA-256 both equal
+  `e4b1bd5944264ab8f192025056f849558dd30d37d00ed404e47a59f3e4ba25a5`.
+  Baseline and final kernel taint were zero, no modules were loaded, and no I2C
+  descriptor remained open. Preserve this owner-only backup as evidence; next,
+  perform offline structure/version analysis and compare read-only LT state
+  against a known-working stock boot before proposing any initialization write.
 
 - Path: `out/phase3-mipi-status-v23/cleankvm-phase1.img`
 - Size: 79,692,288 bytes

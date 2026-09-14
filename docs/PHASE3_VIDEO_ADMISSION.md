@@ -422,3 +422,12 @@ same fail-closed suppression. Its image SHA-256 is
 `5d150df4085a50ddb9fd541e399dafb41c9bc3ab9d96a90bfc0d2b00fdf13493`
 and its reader SHA-256 is
 `63ac141aaa76d06dea2e6290d4292eee5d14d319a13f0771ca51efb4b2ed473a`.
+
+v28 proved that only the first 32-byte transaction was unstable. v29 adds a
+discarded address-zero pipeline-prime read after each setup and no new write.
+Two full 800,000-byte reads then matched, passed diversity checks, and yielded
+SHA-256
+`e4b1bd5944264ab8f192025056f849558dd30d37d00ed404e47a59f3e4ba25a5`.
+Cleanup left taint zero, zero loaded modules, and no open I2C descriptor. This
+admits the dump only as offline evidence; it does not admit firmware execution,
+programming, video modules, frames, or MCP media access.

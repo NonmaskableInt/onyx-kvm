@@ -66,7 +66,7 @@ try:
         password = ""
         credential = ""
         read_until(rb"\r?\n# ", 10)
-    command("echo CLEANKVM_LT_FLASH_BACKUP_V26_BEGIN")
+    command("echo CLEANKVM_LT_FLASH_BACKUP_V29_BEGIN")
     command("printf 'UPTIME='; cut -d' ' -f1 /proc/uptime; printf 'TAINT='; cat /proc/sys/kernel/tainted")
     command("printf 'BACKUP_SHA256='; sha256sum /usr/libexec/cleankvm-lt6911uxc-flash-backup | cut -d' ' -f1")
     command("test -c /dev/i2c-4 && test ! -e /dev/snd/controlC0 && test ! -e %s && echo CONTAINMENT_GATE=passed || { echo CONTAINMENT_GATE=failed; exit 91; }" % REMOTE_DUMP)
@@ -91,7 +91,7 @@ try:
     os.fsync(output)
     os.close(output)
     print(f"HOST_DUMP_BYTES={len(dump)} HOST_DUMP_SHA256={digest}")
-    command("echo CLEANKVM_LT_FLASH_BACKUP_V26_END")
+    command("echo CLEANKVM_LT_FLASH_BACKUP_V29_END")
 finally:
     password = ""
     credential = ""

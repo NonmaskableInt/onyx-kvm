@@ -100,3 +100,23 @@ address bytes across the same bounded 800,000-byte range, reads twice, requires
 byte-identical results with at least four distinct byte values, uses an
 exclusive fixed output path, and restores the MCU after each pass. It contains
 no erase/program opcode and is never started automatically.
+
+The v28 hardware evidence showed that exactly the first 32-byte transaction
+differed while the remaining 799,968 bytes matched. The first samples were
+`024d0190b00b7410f0222202554cffff` and
+`00001e0000000000000000000000024d`. This localizes the problem to stale
+pipeline data immediately after each controller setup.
+
+v29 therefore adds one discarded address-zero read after setup, then rereads
+address zero as the first compared block. It introduces no register operation
+and no erase/program path. Its independently built image SHA-256 is
+`01047bab4733d6f312b43f4192753d47db841c490f5b691aced370d7747285b6` and
+the installed reader SHA-256 is
+`5a08f5ad68212d42e07877c8d1bac89b1ac90babb1d912334e573ecf61c8d607`.
+Both full hardware reads agreed. The accepted 800,000-byte result has 255
+distinct values, 46,620 bytes other than `0xff`, and 797,282 nonzero bytes.
+The device and owner-only host copy both hash to
+`e4b1bd5944264ab8f192025056f849558dd30d37d00ed404e47a59f3e4ba25a5`.
+The test started and ended with kernel taint zero, loaded no modules, left no
+I2C descriptor open, and performed no flash mutation. This is now the preserved
+resident-flash evidence baseline, not yet an authenticated vendor release.

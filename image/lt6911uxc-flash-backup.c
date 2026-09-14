@@ -62,11 +62,17 @@ static int read_page(uint32_t address, uint8_t *out) {
 }
 
 static int survey(uint8_t *out) {
+    uint8_t warmup[PAGE];
     uint32_t address;
     bank = 0xff;
     if (put(0xff,0x80) || put(0xee,0x01) || put(0x5a,0x84) ||
         put(0x5a,0x80))
         return -1;
+    /* The first FIFO result after controller setup is a pipeline artifact on
+     * the target UXC. Prime it with the same bounded address-zero read, then
+     * read address zero again as part of the compared result. */
+    if (read_page(0, warmup)) return -1;
+    memset(warmup, 0, sizeof(warmup));
     for (address = 0; address < FLASH_BYTES; address += PAGE)
         if (read_page(address, out + address)) return -1;
     return 0;
