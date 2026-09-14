@@ -265,7 +265,10 @@ programming procedure.
   with the corrected audited v32 rootfs and unchanged FIP. Its complete image
   SHA-256 is
   `afdea272fec92417adbba90f8f09b7313afcbccfc595fbc9625f8b34e659b677`.
-  Next: flash v33 and require the explicit baseline gate before module loading.
+  The resolved 32.0 GB card was flashed; raw readback verified the embedded
+  video-only FIT, rootfs, and FIP, and the FIT retained its required hash. The
+  card was safely ejected. Next: boot v33 and require the explicit baseline gate
+  before module loading.
 
 - Path: `out/phase3-mipi-status-v23/cleankvm-phase1.img`
 - Size: 79,692,288 bytes

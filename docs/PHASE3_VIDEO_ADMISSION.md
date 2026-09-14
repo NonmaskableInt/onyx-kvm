@@ -526,4 +526,6 @@ v33 uses the already hardware-qualified video-only v30 FIT, SHA-256
 with the corrected non-audio v32 rootfs and unchanged FIP. Embedded verification
 passed. The complete image SHA-256 is
 `afdea272fec92417adbba90f8f09b7313afcbccfc595fbc9625f8b34e659b677`.
-It has not yet been flashed or executed.
+The resolved 32.0 GB removable card was flashed. Raw readback verified the
+embedded boot FIT, rootfs, and FIP, including the required video-only FIT hash,
+before safe ejection. Hardware execution remains the next gate.
