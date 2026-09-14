@@ -116,6 +116,7 @@ int main(int argc, char **argv)
 		{1, 4, 3, 2, 0},
 		{2, 0, 1, 3, 4},
 		{3, 1, 2, 4, 0},
+		{2, 0, 1, 3, 4},
 	};
 	const char *output = "/run/cleankvm-frame.yuv422p";
 	VB_CONFIG_S vb = {0};
@@ -131,7 +132,7 @@ int main(int argc, char **argv)
 	unsigned int i, lane_profile = 0;
 
 	if (argc > 2) {
-		fprintf(stderr, "usage: %s [lane-profile-0..4]\n", argv[0]);
+		fprintf(stderr, "usage: %s [lane-profile-0..5]\n", argv[0]);
 		return 2;
 	}
 	if (argc == 2) {
@@ -168,9 +169,11 @@ int main(int argc, char **argv)
 	mipi.mclk.cam = 0;
 	mipi.mclk.freq = CAMPLL_FREQ_NONE;
 	mipi.mipi_attr.raw_data_type = YUV422_8BIT;
+	if (lane_profile == 5)
+		mipi_dev = 1;
 	for (i = 0; i < 5; ++i) {
 		mipi.mipi_attr.lane_id[i] = lane_profiles[lane_profile][i];
-		mipi.mipi_attr.pn_swap[i] = 0;
+		mipi.mipi_attr.pn_swap[i] = lane_profile == 5 ? 1 : 0;
 	}
 	mipi.mipi_attr.wdr_mode = CVI_MIPI_WDR_MODE_NONE;
 	mipi.mipi_attr.dphy.enable = 1;
@@ -178,8 +181,11 @@ int main(int argc, char **argv)
 	mipi.devno = mipi_dev;
 	mipi.img_size.width = WIDTH;
 	mipi.img_size.height = HEIGHT;
-	printf("CLEANKVM_LANE_PROFILE=%u LANES=%d,%d,%d,%d,%d\n",
-		lane_profile, lane_profiles[lane_profile][0],
+	printf("CLEANKVM_LANE_PROFILE=%u DEV=%u PN=%u,%u,%u,%u,%u LANES=%d,%d,%d,%d,%d\n",
+		lane_profile, mipi_dev,
+		mipi.mipi_attr.pn_swap[0], mipi.mipi_attr.pn_swap[1],
+		mipi.mipi_attr.pn_swap[2], mipi.mipi_attr.pn_swap[3],
+		mipi.mipi_attr.pn_swap[4], lane_profiles[lane_profile][0],
 		lane_profiles[lane_profile][1], lane_profiles[lane_profile][2],
 		lane_profiles[lane_profile][3], lane_profiles[lane_profile][4]);
 

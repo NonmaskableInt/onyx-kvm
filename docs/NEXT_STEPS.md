@@ -280,6 +280,16 @@ programming procedure.
   the expected 4096. Next: evaluate the exact generic SDK candidate—device 1,
   lanes `2,0,1,3,4`, all PN swaps enabled—as a single bounded polarity/port
   discriminator before considering any broader permutation.
+- v34 implements only that exact generic SDK candidate as profile 5: MIPI
+  device 1, lanes `2,0,1,3,4`, all five PN swaps enabled, YUV422 8-bit, 600 MHz
+  MAC clock, and HS settle 8. The UART harness runs only profile 5 in a fresh
+  module cycle. Probe SHA-256 is
+  `085d4a346440e22ba8825f7145777a802c1c6944b8b1414ecfc03ea431e22106`.
+  The final image uses the hash-gated video-only FIT and has SHA-256
+  `dfc6e5d15a94317d2ab0edc55eb058503a2935d4eb926767f51cad2bb6c49d40`.
+  The resolved 31.0 GB card was flashed, embedded artifacts verified on raw
+  readback, and safely ejected. Next: boot v34, require the non-audio baseline,
+  run profile 5 once, and perform full reverse cleanup.
 
 - Path: `out/phase3-mipi-status-v23/cleankvm-phase1.img`
 - Size: 79,692,288 bytes

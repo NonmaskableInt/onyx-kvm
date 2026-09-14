@@ -545,3 +545,20 @@ and final taint was the expected 4096. The next admissible discriminator is the
 one exact generic SDK LT6911 candidate previously documented: MIPI device 1,
 lanes `2,0,1,3,4`, and all PN swaps enabled. This tests a source-backed polarity
 and receiver-port alternative without expanding to invented permutations.
+
+## Generic-SDK polarity discriminator v34
+
+v34 adds only the exact generic SDK LT6911 receiver candidate: MIPI device 1,
+lanes `2,0,1,3,4`, PN swaps `1,1,1,1,1`, YUV422 8-bit, 600 MHz MAC, and HS
+settle 8. The harness executes profile 5 alone from a fresh six-module state,
+retains the frame-absence gate, and unloads in reverse order. The probe still
+contains no LT transaction and returns before VI configuration or allocation.
+Its SHA-256 is
+`085d4a346440e22ba8825f7145777a802c1c6944b8b1414ecfc03ea431e22106`.
+
+The final image retains the required video-only FIT hash and passed rootfs,
+non-audio ext4, identity, probe, FIT, and embedded-artifact audits. Path:
+`out/phase3-polarity-discriminator-v34/cleankvm-phase1.img`; SHA-256:
+`dfc6e5d15a94317d2ab0edc55eb058503a2935d4eb926767f51cad2bb6c49d40`.
+The resolved 31.0 GB removable card was flashed, raw-readback verified, and
+safely ejected. Hardware execution remains the next gate.

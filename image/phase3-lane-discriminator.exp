@@ -33,7 +33,7 @@ set reverse_modules {soph_vpss soph_vi soph_snsr_i2c soph_mipi_rx soph_base soph
 run_command {echo CLEANKVM_LANE_DISCRIMINATOR_V1_BEGIN}
 run_command {test -r /proc/modules && test ! -e /dev/snd/controlC0 && echo BASELINE_GATE=passed || { echo BASELINE_GATE=failed; exit 91; }}
 run_command {printf 'PROBE_SHA256='; sha256sum /usr/libexec/cleankvm-raw-frame-probe | cut -d' ' -f1; printf 'PRE_TAINT='; cat /proc/sys/kernel/tainted}
-for {set profile 0} {$profile < 5} {incr profile} {
+for {set profile 5} {$profile < 6} {incr profile} {
     run_command "echo LANE_PROFILE_${profile}_BEGIN"
     foreach module $modules {
         run_command "insmod $module_dir/$module.ko; echo LOAD_${profile}_${module}_RC=\$?"
