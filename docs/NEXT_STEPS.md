@@ -216,6 +216,19 @@ programming procedure.
   Next: boot v30, run the corrected stop/read/resume LT status snapshot, run the
   bounded six-snapshot receiver probe once, and confirm module, node, frame,
   file-descriptor, and taint cleanup before interpreting timing or lane state.
+- The v30 hardware gate passed containment and exposed a deterministic receiver
+  transition. The corrected LT snapshot again reported HDMI `0x55` and
+  1920x1080, with MCU resume, final taint zero, and no I2C FD. The receiver saw
+  clock/high-speed activity at T0; ECC/WC counters rose from `16/0` at T0 to
+  `4690/174` at 100 ms, `22689/981` at 500 ms, `44922/2012` at 1 s, and
+  `65536/2894` at 2 s. Decode alternated `unknown`/`raw12` despite the configured
+  YUV422 profile. Counters then remained fixed through 7 s while CK_HS and D2/D3
+  activity persisted. No frame existed; every module unloaded; final taint was
+  the expected out-of-tree bit 4096. This localizes the failure to receiver
+  framing/lane interpretation rather than HDMI detection or delayed link start.
+  Next: correlate the driver's decode/status fields with the pinned SDK source
+  and admit only a bounded receiver-profile discriminator justified by that
+  source; do not introduce an LT firmware write or frame allocation.
 
 - Path: `out/phase3-mipi-status-v23/cleankvm-phase1.img`
 - Size: 79,692,288 bytes

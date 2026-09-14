@@ -459,3 +459,19 @@ readback hash to
 `7803c04ac5db693b774038db2a3faa4e1f17584428d89e183fad9374f44265fd`;
 embedded verification is authoritative. The card was safely ejected. Hardware
 admission remains pending one boot and one bounded status run with full cleanup.
+
+The v30 hardware run passed that gate. Before loading modules, the corrected LT
+sequence again returned stable HDMI `0x55`, CSI Vactive `0x0438`, and Hactive
+`0x0780`; cleanup resumed the MCU, left taint zero, and leaked no I2C descriptor.
+The installed probe hash matched the audited v30 binary and all six modules
+loaded normally from a zero-taint baseline.
+
+Receiver counters then established a bounded timeline: ECC/WC were `16/0` at
+T0, `4690/174` at 100 ms, `22689/981` at 500 ms, `44922/2012` at 1 s, and
+`65536/2894` at 2 s. Decode alternated between `unknown` and `raw12`, although
+the receiver profile was YUV422. At 5 s and the two later samples through 7 s,
+the counters remained `65536/13/2894` (ECC/CRC/WC) while `CK_HS=1` and D2/D3
+continued to report high-speed activity. This rules out a simple delayed-start
+explanation and points to a receiver framing or lane-interpretation mismatch.
+No frame file was created, every module unloaded successfully, and final taint
+was only the expected out-of-tree bit 4096. No media capability is admitted.
