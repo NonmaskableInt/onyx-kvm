@@ -529,3 +529,19 @@ passed. The complete image SHA-256 is
 The resolved 32.0 GB removable card was flashed. Raw readback verified the
 embedded boot FIT, rootfs, and FIP, including the required video-only FIT hash,
 before safe ejection. Hardware execution remains the next gate.
+
+v33 passed the non-audio baseline, exact probe identity, and zero-taint gates.
+The five zero-PN-swap lane candidates then ran in isolated module cycles.
+Profile 0 entered high-speed transfer but saturated ECC and accumulated 2,551
+word-count errors while observed datatype wandered. Profile 1 produced no
+protocol-count growth but left a lane in `hs_err`; profiles 2 and 3 never
+decoded a datatype and remained idle/sync. Profile 4 uniquely reached completed
+deskew, but two logical lanes remained in `hs_sync` and no datatype decoded.
+Consequently none is a valid receiver profile.
+
+All five probes returned before VI setup, every frame-absence check passed,
+every module unloaded with return code zero, the final module list was empty,
+and final taint was the expected 4096. The next admissible discriminator is the
+one exact generic SDK LT6911 candidate previously documented: MIPI device 1,
+lanes `2,0,1,3,4`, and all PN swaps enabled. This tests a source-backed polarity
+and receiver-port alternative without expanding to invented permutations.

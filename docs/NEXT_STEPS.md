@@ -269,6 +269,17 @@ programming procedure.
   video-only FIT, rootfs, and FIP, and the FIT retained its required hash. The
   card was safely ejected. Next: boot v33 and require the explicit baseline gate
   before module loading.
+- v33 passed its explicit non-audio baseline with the expected probe hash and
+  zero taint. All five source-listed zero-PN-swap lane maps were tested from
+  fresh module state. Profile 0 (`2,4,3,1,0`) entered high-speed transfer but
+  saturated ECC and accumulated word-count errors while decode wandered.
+  Profile 1 held one lane in `hs_err`; profiles 2 and 3 stayed idle/sync with no
+  decode. Profile 4 (`3,1,2,4,0`) uniquely reached `Deskew=done`, but two lanes
+  remained in `hs_sync` and no datatype decoded. No map is admitted. Every
+  frame-absence and unload gate passed; final modules were empty and taint was
+  the expected 4096. Next: evaluate the exact generic SDK candidate—device 1,
+  lanes `2,0,1,3,4`, all PN swaps enabled—as a single bounded polarity/port
+  discriminator before considering any broader permutation.
 
 - Path: `out/phase3-mipi-status-v23/cleankvm-phase1.img`
 - Size: 79,692,288 bytes
