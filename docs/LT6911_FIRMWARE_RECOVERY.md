@@ -85,12 +85,18 @@ register `0xa3` for signal state and bank `0x85` registers `0xea`/`0xf0` for
 CSI dimensions, then resumes the MCU with `0xee = 0`. It does not contain an
 application-firmware upload in the published path.
 
-The published `lt6911_read_fw` function is a read-only SPI-controller sequence.
-It uses three address bytes and surveys 49,999 16-byte records after address
-zero (through approximately 800 KB), printing each record. This is the basis
-for CleanKVM's independently compiled, root-only backup utility. The utility
-reads the complete 800,000-byte reference range twice, requires byte-identical
-results, uses an exclusive fixed output path, and restores the MCU after each
-pass. It contains no erase/program opcode and is never started automatically.
-The v2 static RISC-V diagnostic has SHA-256
-`24df815d4e32e003b37ad013de950cd49a73ecf2a0c64978a9c6dd1d4c05da6d`.
+The published `lt6911_read_fw` function uses three address bytes and surveys
+49,999 16-byte records after address zero. The v26 reproduction returned the
+setup byte `0x51` for every address in two passes. That zero-entropy output is a
+stable controller artifact, not a firmware backup, and is rejected. The v26
+reader SHA-256 was
+`24df815d4e32e003b37ad013de950cd49a73ecf2a0c64978a9c6dd1d4c05da6d`;
+its rejected output SHA-256 was
+`4308ea800a49ddcac2214fc1b35e3afacd7903b8b21a7028b8d478dccb06372b`.
+
+The corrected candidate instead generalizes the source-backed 32-byte EDID
+read transaction already proven on this hardware. It changes only the three
+address bytes across the same bounded 800,000-byte range, reads twice, requires
+byte-identical results with at least four distinct byte values, uses an
+exclusive fixed output path, and restores the MCU after each pass. It contains
+no erase/program opcode and is never started automatically.

@@ -146,6 +146,27 @@ programming procedure.
   macOS FAT bookkeeping changed the whole-image hash, while the embedded boot
   FIT, root filesystem, and FIP each matched the audited v26 artifacts. The card
   was safely ejected and is ready for the controlled boot.
+- v26 booted cleanly with HDMI present, taint zero, zero loaded modules, and no
+  open I2C descriptor. Its two passes agreed, but every one of the 800,000 bytes
+  was the stale controller setup value `0x51`. SHA-256 was
+  `4308ea800a49ddcac2214fc1b35e3afacd7903b8b21a7028b8d478dccb06372b`.
+  This is rejected as a zero-entropy controller artifact, not firmware.
+- v27 generalized the separately source-backed, hardware-proven 32-byte EDID
+  read transaction to 24-bit addressing and added a low-diversity rejection
+  gate. Image SHA-256 was
+  `29ea8fe9b575d3b614a75fbfe7601d70923ebe6193044e3f04e9abe8756b8b26`;
+  reader SHA-256 was
+  `4ed79af80cd59f6adc636abdec7547f76f6155395b9abc07f26c09758a520de5`.
+  Two unchanged hardware runs both rejected the result because the complete
+  passes differed. Both cleaned up with taint zero and no open I2C descriptor.
+- v28 adds only fail-closed mismatch telemetry: first differing address,
+  differing-byte count, and 16-byte samples from each pass. It still creates no
+  file on mismatch. Image SHA-256 is
+  `5d150df4085a50ddb9fd541e399dafb41c9bc3ab9d96a90bfc0d2b00fdf13493`;
+  reader SHA-256 is
+  `63ac141aaa76d06dea2e6290d4292eee5d14d319a13f0771ca51efb4b2ed473a`.
+  Next: flash and run v28 once to locate the stable-range boundary before
+  changing range or timing.
 
 - Path: `out/phase3-mipi-status-v23/cleankvm-phase1.img`
 - Size: 79,692,288 bytes

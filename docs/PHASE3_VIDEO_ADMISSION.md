@@ -408,3 +408,17 @@ embedded FIT, rootfs, and FIP comparisons all passed. The next bounded gate is
 one boot, baseline containment verification, one backup run, immediate output
 hashing, and confirmation that taint and I2C file-descriptor state return to
 baseline.
+
+The v26 hardware run proved that Sipeed's published `lt6911_read_fw` debug mode
+does not yield firmware on this unit: both complete passes returned only the
+setup byte `0x51`. The zero-entropy output is retained as rejected evidence,
+not a backup. Cleanup returned taint and I2C descriptor state to baseline.
+
+v27 then generalized only the 32-byte EDID read transaction already proven on
+this unit. It reached non-uniform data, but two complete passes differed in two
+unchanged runs, so both were suppressed. v28 adds no new LT write; it reports
+the first differing offset, total differences, and short samples before the
+same fail-closed suppression. Its image SHA-256 is
+`5d150df4085a50ddb9fd541e399dafb41c9bc3ab9d96a90bfc0d2b00fdf13493`
+and its reader SHA-256 is
+`63ac141aaa76d06dea2e6290d4292eee5d14d319a13f0771ca51efb4b2ed473a`.
