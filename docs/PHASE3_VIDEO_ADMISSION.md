@@ -497,3 +497,17 @@ SHA-256 `5e3915396bcb46f6232620010c8ea6ccbc6b3929424c0b9f62a2ae2e99b68fd9`.
 Offline rootfs and embedded-artifact audits passed. The resolved removable
 32.0 GB card was flashed, its embedded boot FIT, rootfs, and FIP verified on
 readback, and safely ejected. Hardware execution remains the next gate.
+
+The first v31 boot failed closed before module loading: inert static ALSA nodes
+from an earlier incremental audio build remained in the ext4 image even though
+the kernel had no ALSA subsystem, `/proc/asound` was absent, and no sound module
+was loaded. v31 is rejected. The rootfs build now removes generated `/dev/snd`
+state for non-audio profiles before filesystem generation and audits the final
+ext4 for absence of representative control and PCM nodes. The UART lane test
+now emits an explicit baseline verdict before continuing.
+
+Corrected v32 passed the established rootfs, identity, probe-ownership, and
+embedded-artifact audits plus the new non-audio ext4 audit. Its image is
+`out/phase3-lane-discriminator-v32/cleankvm-phase1.img`, SHA-256
+`a8bc2d0394e6c0da012db8735969545b126dd02ac51d2f0607281a3601227c72`.
+It has not yet been flashed or executed.

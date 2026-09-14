@@ -243,6 +243,17 @@ programming procedure.
   The resolved 32.0 GB card was flashed, embedded artifacts verified on
   readback, and safely ejected. Next: boot and run the five-profile discriminator
   once, rejecting every profile that accumulates ECC/header/word-count errors.
+- The first v31 boot was stopped before loading a module because its baseline
+  found inert `/dev/snd/*` nodes. `/proc/asound` was absent and no audio module
+  was loaded: these were stale Buildroot target-tree nodes inherited from an
+  earlier incremental audio build. The rootfs builder now removes generated
+  audio nodes for every non-audio profile and verifies their absence inside the
+  final ext4 image. The discriminator gate also reports an explicit pass/fail.
+  Corrected v32 passed the new ext4 non-audio audit and all existing audits;
+  image SHA-256 is
+  `a8bc2d0394e6c0da012db8735969545b126dd02ac51d2f0607281a3601227c72`.
+  v31 is rejected. Next: flash v32 and repeat the clean baseline before loading
+  any module.
 
 - Path: `out/phase3-mipi-status-v23/cleankvm-phase1.img`
 - Size: 79,692,288 bytes

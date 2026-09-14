@@ -81,6 +81,13 @@ fi
         esac
         source build/cvisetup.sh
         defconfig sg2002_licheervnano_sd
+        # Incremental profile changes must not carry generated device nodes from
+        # an earlier audio image into a non-audio filesystem. These nodes are
+        # not owned by an overlay or device table and otherwise survive in the
+        # Buildroot target tree even when CONFIG_SOUND is disabled.
+        if [ "$CLEANKVM_CONFIG_PROFILE" != phase3a-audio-enumeration ]; then
+            rm -rf buildroot/output/target/dev/snd
+        fi
         if [ -n "$CLEANKVM_RAW_FRAME_PROBE" ]; then
             install -D -m 0500 "$CLEANKVM_RAW_FRAME_PROBE" \
                 cleankvm/phase1-overlay/usr/libexec/cleankvm-raw-frame-probe
@@ -180,6 +187,15 @@ fi
             printf "%s\n" "$probe_stat" | grep -q "Mode: *0500"
             printf "%s\n" "$probe_stat" | grep -q "User: *0 *Group: *0"
             printf "%s\n" "finished ext4 raw-frame probe ownership audit passed"
+        fi
+        if [ "$CLEANKVM_CONFIG_PROFILE" != phase3a-audio-enumeration ]; then
+            debugfs=/work/sdk/buildroot/output/host/sbin/debugfs
+            root_image=/work/sdk/buildroot/output/images/rootfs.ext4
+            ! $debugfs -R "stat /dev/snd/controlC0" "$root_image" 2>&1 | \
+                grep -q "Inode:"
+            ! $debugfs -R "stat /dev/snd/pcmC0D0c" "$root_image" 2>&1 | \
+                grep -q "Inode:"
+            printf "%s\n" "finished ext4 non-audio device-node audit passed"
         fi
         if [ -n "$CLEANKVM_AUDIO_CAPTURE_PROBE" ]; then
             debugfs=/work/sdk/buildroot/output/host/sbin/debugfs

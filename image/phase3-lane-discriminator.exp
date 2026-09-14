@@ -35,7 +35,8 @@ set module_dir /usr/lib/cleankvm/video-quarantine
 set modules {soph_sys soph_base soph_mipi_rx soph_snsr_i2c soph_vi soph_vpss}
 set reverse_modules {soph_vpss soph_vi soph_snsr_i2c soph_mipi_rx soph_base soph_sys}
 run_command {echo CLEANKVM_LANE_DISCRIMINATOR_V1_BEGIN}
-run_command {test -r /proc/modules && test ! -e /dev/snd/controlC0 && printf 'PROBE_SHA256=' && sha256sum /usr/libexec/cleankvm-raw-frame-probe | cut -d' ' -f1; printf 'PRE_TAINT='; cat /proc/sys/kernel/tainted}
+run_command {test -r /proc/modules && test ! -e /dev/snd/controlC0 && echo BASELINE_GATE=passed || { echo BASELINE_GATE=failed; exit 91; }}
+run_command {printf 'PROBE_SHA256='; sha256sum /usr/libexec/cleankvm-raw-frame-probe | cut -d' ' -f1; printf 'PRE_TAINT='; cat /proc/sys/kernel/tainted}
 for {set profile 0} {$profile < 5} {incr profile} {
     run_command "echo LANE_PROFILE_${profile}_BEGIN"
     foreach module $modules {
