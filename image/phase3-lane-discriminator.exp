@@ -9,26 +9,22 @@ if {![regexp -line {^password=(.*)$} $credential_text -> password]} { exit 2 }
 spawn /usr/bin/sudo /usr/bin/cu -l /dev/cu.usbserial-112440 -s 115200
 expect { -re {Connected\.} {} timeout { exit 7 } }
 send "\003\r\r"
-set logged_in 0
 expect {
-    -re {\r\n# $} { set logged_in 1 }
-    -re {login: *$} {}
+    -re {login: *} {}
     timeout { send "~."; exit 3 }
 }
-if {!$logged_in} {
-    send "root\r"
-    expect { -re {Password: *$} {} timeout { send "~."; exit 4 } }
-    log_user 0
-    send -- "$password\r"
-    expect { -re {\r\n# $} {} timeout { log_user 1; send "~."; exit 5 } }
-}
+send "root\r"
+expect { -re {Password: *} {} timeout { send "~."; exit 4 } }
+log_user 0
+send -- "$password\r"
+expect { -re {\r\n# } {} timeout { log_user 1; send "~."; exit 5 } }
 unset password
 unset credential_text
 log_user 1
 
 proc run_command {command} {
     send -- "$command\r"
-    expect { -re {# $} {} timeout { send "~."; exit 6 } }
+    expect { -re {\r\n# } {} timeout { send "~."; exit 6 } }
 }
 
 set module_dir /usr/lib/cleankvm/video-quarantine

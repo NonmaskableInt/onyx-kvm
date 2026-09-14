@@ -56,6 +56,8 @@ run_command {echo '[I2C_DEVICE_TREE_ALIASES]'}
 run_command {for n in /proc/device-tree/aliases/i2c*; do test -r "$n" && { printf '%s=' "${n##*/}"; tr -d '\000' <"$n"; echo; }; done}
 run_command {echo '[MEDIA_DEVICE_NODES]'}
 run_command {for n in /dev/video* /dev/media* /dev/v4l-subdev* /dev/cvi-* /dev/snd/*; do test -e "$n" && echo "$n"; done}
+run_command {echo '[BOOT_AND_DEV_STATE]'; printf 'CMDLINE='; cat /proc/cmdline; printf 'ROOT_MOUNT='; awk '$2 == "/" {print $1 "," $3 "," $4}' /proc/mounts; printf 'DEV_MOUNT='; awk '$2 == "/dev" {print $1 "," $3 "," $4}' /proc/mounts; uname -a}
+run_command {echo '[SOUND_NODE_DETAILS]'; for n in /dev/snd/*; do test -e "$n" && ls -ln "$n"; done}
 run_command {echo '[MEDIA_MODULES]'}
 run_command {awk '$1 ~ /^(soph_|cvi|snd|videodev|v4l2)/ { print $1 }' /proc/modules 2>/dev/null || true}
 run_command {echo '[ALSA_CARDS]'; test -r /proc/asound/cards && sed -n '1,80p' /proc/asound/cards || echo absent}

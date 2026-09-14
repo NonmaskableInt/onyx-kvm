@@ -255,6 +255,17 @@ programming procedure.
   v31 is rejected. The resolved 31.0 GB card was flashed with v32, its embedded
   boot FIT, rootfs, and FIP verified on raw readback, and safely ejected. Next:
   boot v32 and repeat the clean baseline before loading any module.
+- v32 also failed closed before module loading. Live `/dev` was devtmpfs and the
+  audio nodes were kernel-generated; artifact comparison proved its boot FIT
+  exactly matched the Phase 3a audio FIT. Packaging had reused the last kernel
+  built in the shared work volume despite validating the video configuration.
+  v32 is rejected. The assembler now supports an expected boot-FIT hash gate.
+  v33 combines the hardware-qualified video-only v30 FIT
+  (`9e1c47425122175b0327dea8079a588a02f0018aa00806d28911d4a56562e4a7`)
+  with the corrected audited v32 rootfs and unchanged FIP. Its complete image
+  SHA-256 is
+  `afdea272fec92417adbba90f8f09b7313afcbccfc595fbc9625f8b34e659b677`.
+  Next: flash v33 and require the explicit baseline gate before module loading.
 
 - Path: `out/phase3-mipi-status-v23/cleankvm-phase1.img`
 - Size: 79,692,288 bytes

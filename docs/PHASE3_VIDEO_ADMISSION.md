@@ -513,3 +513,17 @@ embedded-artifact audits plus the new non-audio ext4 audit. Its image is
 The resolved 31.0 GB removable card was flashed, and raw readback verified the
 embedded boot FIT, rootfs, and FIP before safe ejection. Hardware execution is
 the next gate.
+
+v32 failed the same live baseline before module loading, but `/dev` inspection
+showed devtmpfs and kernel-generated ALSA nodes. Its boot FIT hash exactly
+matched the Phase 3a audio image, proving the shared work volume's last-built
+audio kernel had been packaged after configuration validation without a kernel
+rebuild. v32 is rejected. The image assembler now optionally requires an exact
+expected boot-FIT SHA-256 and fails before assembly on mismatch.
+
+v33 uses the already hardware-qualified video-only v30 FIT, SHA-256
+`9e1c47425122175b0327dea8079a588a02f0018aa00806d28911d4a56562e4a7`,
+with the corrected non-audio v32 rootfs and unchanged FIP. Embedded verification
+passed. The complete image SHA-256 is
+`afdea272fec92417adbba90f8f09b7313afcbccfc595fbc9625f8b34e659b677`.
+It has not yet been flashed or executed.
