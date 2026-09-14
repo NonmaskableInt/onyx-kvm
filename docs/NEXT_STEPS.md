@@ -383,3 +383,17 @@ programming procedure.
 - Next: boot with HDMI and UART attached and capture a read-only stock
   receiver/LT state baseline before changing any register or copying any vendor
   executable.
+- That stock UART baseline completed. The stock path parsed device 0, lanes
+  `2,4,3,1,0`, zero PN swaps, and 1920x1080—the same receiver values used by
+  the clean probe. Unlike the clean result, `/proc/mipi-rx` remained stable at
+  `yuv422-8`, `CK_HS=1`, D2/D3 high-speed transfer, zero ECC/CRC/header/FIFO
+  errors, and only one word-count error across samples two seconds apart.
+- Stock booted kernel `5.10.4-tag- #46` and receiver module build `#30`. The
+  image retains a 122,408-byte `soph_mipi_rx_old.ko` but loads a distinct
+  125,992-byte replacement `soph_mipi_rx.ko`, SHA-256
+  `d40419159a4065de8b7693e0de59c477de36373f24fe164e50afb37d674ed755`.
+  The clean v7 module is 124,272 bytes with SHA-256
+  `8218302da9c43c046fad23b80c60b65889996c84aec430fd492cc8e7d4dbe9c0`.
+  This localizes the next investigation to the receiver-driver/build delta and
+  stock prerequisite load order. Do not copy or load either stock module into
+  the clean image; recover the behavior from auditable source.

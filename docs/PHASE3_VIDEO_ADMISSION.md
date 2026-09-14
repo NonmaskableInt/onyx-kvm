@@ -589,3 +589,22 @@ but the full Linux partition matched source byte-for-byte at SHA-256
 `c285650ee41892c0cef5fbc371d3b13828f886a3ebb82a400ff06bbec94585a4`.
 The card was safely ejected. The next gate is a read-only UART observation of
 the working stock LT and receiver state with HDMI present.
+
+That read-only stock observation completed. The runtime configuration is not a
+hidden lane-map difference: stock uses device 0, lanes `2,4,3,1,0`, zero PN
+swaps, YUV422 8-bit, and reports 1920x1080. Its receiver stayed at `yuv422-8`,
+`CK_HS=1`, D2/D3 high-speed transfer, zero ECC/CRC/header/FIFO errors, and a
+single word-count error in two samples two seconds apart. This contrasts with
+the clean module's immediate ECC/word-count storm under the same configuration.
+
+The stock image contains both `soph_mipi_rx_old.ko` (122,408 bytes, build #26)
+and a replacement `soph_mipi_rx.ko` (125,992 bytes, build #30), and its loader
+selects the replacement. The loaded replacement SHA-256 is
+`d40419159a4065de8b7693e0de59c477de36373f24fe164e50afb37d674ed755`;
+the independently built v7 receiver SHA-256 is
+`8218302da9c43c046fad23b80c60b65889996c84aec430fd492cc8e7d4dbe9c0`.
+Stock also inserts `soph_rtos_cmdqu` and `soph_fast_image` between base and MIPI
+receiver initialization, whereas the bounded clean test excluded them. The
+next gate is offline attribution of these two deltas to reviewable source,
+followed by the smallest independently rebuilt experiment. Stock modules remain
+evidence only and are not admitted for execution in CleanKVM.
