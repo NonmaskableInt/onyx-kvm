@@ -366,3 +366,20 @@ programming procedure.
   `a60d95083c7d8f97181d02175005be85da563ba4b70e83ef3aff0f480e8399c2`.
   After insertion and boot, run its device-free self-test first, then one
   explicitly bounded capture and a post-run PCM-FD/taint/containment audit.
+
+## Prepared stock differential reference
+
+- The retained stock v1.4.2 reference was written to the resolved removable
+  32.0 GB card. The source image is 1,627,390,464 bytes with SHA-256
+  `23648088de59e043a1289c49c5103f829dc652604f8dd76db22dd8ff7aca6539`;
+  its compressed archive passed integrity checking and expands to that exact
+  digest.
+- macOS FAT bookkeeping changed the whole written-span readback digest to
+  `50a0d7750e229333f3fdf878ed889e0b9bd6bcf365fcf4a0e1b030d0edb941e3`.
+  The complete 1,610,612,736-byte Linux partition matched source exactly at
+  SHA-256
+  `c285650ee41892c0cef5fbc371d3b13828f886a3ebb82a400ff06bbec94585a4`.
+  The card was safely ejected.
+- Next: boot with HDMI and UART attached and capture a read-only stock
+  receiver/LT state baseline before changing any register or copying any vendor
+  executable.

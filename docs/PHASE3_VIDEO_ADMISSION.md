@@ -577,3 +577,15 @@ record the LT runtime status and SoC receiver initialization/state, attribute
 each observation to source or a read-only trace, and use the delta to implement
 an independently built configuration. Vendor executables remain analysis-only
 and must not be transferred into or executed by the clean image.
+
+The known-working stock v1.4.2 image was prepared as that behavioral reference.
+Its 1,627,390,464-byte expanded source SHA-256 is
+`23648088de59e043a1289c49c5103f829dc652604f8dd76db22dd8ff7aca6539`,
+and the compressed archive independently expands to the same digest. The
+resolved removable 32.0 GB card was flashed. macOS FAT bookkeeping changed the
+whole written-span readback digest to
+`50a0d7750e229333f3fdf878ed889e0b9bd6bcf365fcf4a0e1b030d0edb941e3`,
+but the full Linux partition matched source byte-for-byte at SHA-256
+`c285650ee41892c0cef5fbc371d3b13828f886a3ebb82a400ff06bbec94585a4`.
+The card was safely ejected. The next gate is a read-only UART observation of
+the working stock LT and receiver state with HDMI present.
