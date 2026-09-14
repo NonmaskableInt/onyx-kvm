@@ -442,3 +442,20 @@ was idle across two samples two seconds apart with unchanged counters, while
 the LT continued to report stable 1920x1080 afterward. This admits neither a
 frame nor a lane-map change; the next test must correlate LT resume timing with
 receiver state over multiple bounded samples.
+
+## Timing-correlated receiver image v30
+
+The status-only receiver probe now captures `/proc/mipi-rx` immediately after
+the qualified receiver profile and again at cumulative 100, 500, 1000, 2000,
+and 5000 ms. It makes no LT register transaction, configures no VI device, and
+allocates no frame. The independently built 79,692,288-byte image is
+`out/phase3-mipi-timing-v30/cleankvm-phase1.img`, SHA-256
+`dcd316b15a2d87bf75d86c805ee5e026a177f619b5398c1f1f27ba7f8983f147`.
+
+The resolved removable `/dev/disk4` (31.0 GB) was flashed at the exact image
+length. Exact readback verified the embedded boot FIT, root filesystem, and FIP
+against their audited artifacts. macOS FAT bookkeeping changed the whole-card
+readback hash to
+`7803c04ac5db693b774038db2a3faa4e1f17584428d89e183fad9374f44265fd`;
+embedded verification is authoritative. The card was safely ejected. Hardware
+admission remains pending one boot and one bounded status run with full cleanup.

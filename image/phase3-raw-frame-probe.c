@@ -53,6 +53,31 @@ static int check(const char *name, CVI_S32 rc)
 	return -1;
 }
 
+static int snapshot_mipi(unsigned int elapsed_ms)
+{
+	char buffer[4096];
+	char label[64];
+	ssize_t count, written;
+	int fd;
+
+	written = snprintf(label, sizeof(label),
+		"[CLEANKVM_MIPI_T%u_MS]\n", elapsed_ms);
+	if (written < 0 || written >= (ssize_t)sizeof(label) ||
+	    write(STDOUT_FILENO, label, (size_t)written) != written)
+		return -1;
+	fd = open("/proc/mipi-rx", O_RDONLY | O_CLOEXEC);
+	if (fd < 0)
+		return -1;
+	while ((count = read(fd, buffer, sizeof(buffer))) > 0) {
+		if (write(STDOUT_FILENO, buffer, (size_t)count) != count) {
+			close(fd);
+			return -1;
+		}
+	}
+	close(fd);
+	return count < 0 ? -1 : 0;
+}
+
 static int install_boundary(void)
 {
 	#define DENY_SYSCALL(nr, error) \
@@ -153,7 +178,16 @@ int main(int argc, char **argv)
 		perror("MIPI configuration");
 		goto cleanup;
 	}
-	sleep(5);
+	/* Observe receiver convergence without allocating VI state or a frame.
+	 * Delays are cumulative and bounded to the established five-second gate. */
+	if (snapshot_mipi(0) || usleep(100000) || snapshot_mipi(100) ||
+	    usleep(400000) || snapshot_mipi(500) ||
+	    usleep(500000) || snapshot_mipi(1000) ||
+	    sleep(1) || snapshot_mipi(2000) ||
+	    sleep(3) || snapshot_mipi(5000)) {
+		perror("bounded MIPI timing snapshot");
+		goto cleanup;
+	}
 	return 0;
 
 	dev.enIntfMode = VI_MODE_MIPI_YUV422;

@@ -204,6 +204,18 @@ programming procedure.
   unchanged counters, while a following corrected LT snapshot still reported
   stable 1920x1080. Next: build a timing-only diagnostic that correlates LT
   stop/read/resume with multiple MIPI samples before changing lane mapping.
+- The timing-correlated v30 image is prepared and card-verified. Its probe takes
+  receiver snapshots at 0, 100, 500, 1000, 2000, and 5000 ms after applying the
+  already qualified stock receiver profile; it still exits before VI setup or
+  frame allocation. Image SHA-256 is
+  `dcd316b15a2d87bf75d86c805ee5e026a177f619b5398c1f1f27ba7f8983f147`.
+  The 31.0 GB removable card was flashed, exactly read back, and safely ejected.
+  Embedded boot FIT, rootfs, and FIP verification passed; macOS FAT bookkeeping
+  changed only the whole-card readback hash to
+  `7803c04ac5db693b774038db2a3faa4e1f17584428d89e183fad9374f44265fd`.
+  Next: boot v30, run the corrected stop/read/resume LT status snapshot, run the
+  bounded six-snapshot receiver probe once, and confirm module, node, frame,
+  file-descriptor, and taint cleanup before interpreting timing or lane state.
 
 - Path: `out/phase3-mipi-status-v23/cleankvm-phase1.img`
 - Size: 79,692,288 bytes
