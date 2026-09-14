@@ -252,8 +252,9 @@ programming procedure.
   Corrected v32 passed the new ext4 non-audio audit and all existing audits;
   image SHA-256 is
   `a8bc2d0394e6c0da012db8735969545b126dd02ac51d2f0607281a3601227c72`.
-  v31 is rejected. Next: flash v32 and repeat the clean baseline before loading
-  any module.
+  v31 is rejected. The resolved 31.0 GB card was flashed with v32, its embedded
+  boot FIT, rootfs, and FIP verified on raw readback, and safely ejected. Next:
+  boot v32 and repeat the clean baseline before loading any module.
 
 - Path: `out/phase3-mipi-status-v23/cleankvm-phase1.img`
 - Size: 79,692,288 bytes

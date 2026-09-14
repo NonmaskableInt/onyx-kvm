@@ -510,4 +510,6 @@ Corrected v32 passed the established rootfs, identity, probe-ownership, and
 embedded-artifact audits plus the new non-audio ext4 audit. Its image is
 `out/phase3-lane-discriminator-v32/cleankvm-phase1.img`, SHA-256
 `a8bc2d0394e6c0da012db8735969545b126dd02ac51d2f0607281a3601227c72`.
-It has not yet been flashed or executed.
+The resolved 31.0 GB removable card was flashed, and raw readback verified the
+embedded boot FIT, rootfs, and FIP before safe ejection. Hardware execution is
+the next gate.
