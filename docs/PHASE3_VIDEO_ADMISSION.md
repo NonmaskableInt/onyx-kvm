@@ -431,3 +431,14 @@ SHA-256
 Cleanup left taint zero, zero loaded modules, and no open I2C descriptor. This
 admits the dump only as offline evidence; it does not admit firmware execution,
 programming, video modules, frames, or MCP media access.
+
+The corrected, source-exact UXC status sequence stops the embedded MCU before
+reading and resumes it afterward. It returned stable HDMI `0x55` and CSI
+dimensions 1920x1080, invalidating the earlier live-register `0x00`/zero result.
+One subsequent bounded receiver run saw nonzero physical samples, `CK_HS=1`,
+and high-speed activity on lanes D2/D3, but decoded `raw8` with ECC, CRC, and
+word-count errors. No frame was created and every module unloaded. A repeat run
+was idle across two samples two seconds apart with unchanged counters, while
+the LT continued to report stable 1920x1080 afterward. This admits neither a
+frame nor a lane-map change; the next test must correlate LT resume timing with
+receiver state over multiple bounded samples.

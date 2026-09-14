@@ -190,6 +190,20 @@ programming procedure.
   surveyed space is erased. Next: obtain read-only runtime version/status from
   a known-working stock boot and correlate it with this preserved layout. Do
   not execute, redistribute, or program the extracted application bytes.
+- Review of Sipeed's pinned current UXC polling source exposed a diagnostic
+  error: status must be read while the embedded MCU is stopped with
+  `0x80:0xee=1`, then the MCU must be resumed with `0x80:0xee=0`. The corrected
+  hardware run reported stable HDMI `0x55`, CSI Vactive `0x0438`, and Hactive
+  `0x0780`; cleanup resumed the MCU, leaked no I2C handle, and did not change
+  taint. The resident firmware is running and recognizes a stable 1920x1080
+  input. The earlier live `0x00`/zero-dimension result is invalidated.
+- The next bounded MIPI run observed nonzero physical samples, `CK_HS=1`, and
+  high-speed activity on digital lanes D2/D3, proving a bridge-to-SoC signal.
+  It also reported `raw8` decode and accumulated ECC/CRC/word-count errors, so
+  no frame was admitted. A repeat run remained CSI-idle for two seconds with
+  unchanged counters, while a following corrected LT snapshot still reported
+  stable 1920x1080. Next: build a timing-only diagnostic that correlates LT
+  stop/read/resume with multiple MIPI samples before changing lane mapping.
 
 - Path: `out/phase3-mipi-status-v23/cleankvm-phase1.img`
 - Size: 79,692,288 bytes

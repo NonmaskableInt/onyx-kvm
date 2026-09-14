@@ -121,6 +121,16 @@ The test started and ended with kernel taint zero, loaded no modules, left no
 I2C descriptor open, and performed no flash mutation. This is now the preserved
 resident-flash evidence baseline, not yet an authenticated vendor release.
 
+Sipeed's pinned current UXC polling source establishes that status reads are
+made only after stopping the embedded MCU (`0x80:0xee=1`) and are followed by a
+resume (`0x80:0xee=0`). The earlier CleanKVM status harness omitted that state
+transition, so its `0x00` signal and zero dimensions were not valid runtime
+evidence. The corrected source-exact sequence returned signal `0x55`, Vactive
+`0x0438`, and Hactive `0x0780`, proving the resident application is running and
+recognizes stable 1920x1080 HDMI. The MCU resumed successfully, no I2C handle
+remained open, and taint was unchanged. Firmware recovery/programming is no
+longer the leading path; CSI-output timing and receiver synchronization are.
+
 Offline, non-executing structure analysis finds two byte-identical slots at
 flash offsets `0x00000` and `0x80000`. Each occupied span is `0x18120` bytes
 and hashes to

@@ -9,12 +9,19 @@ if {![regexp -line {^password=(.*)$} $credential_text -> password]} { exit 2 }
 spawn /usr/bin/sudo /usr/bin/cu -l /dev/cu.usbserial-112440 -s 115200
 expect { -re {Connected\.} {} timeout { exit 7 } }
 send "\003\r\r"
-expect { -re {login: *$} {} timeout { send "~."; exit 3 } }
-send "root\r"
-expect { -re {Password: *$} {} timeout { send "~."; exit 4 } }
-log_user 0
-send -- "$password\r"
-expect { -re {\r\n# $} {} timeout { log_user 1; send "~."; exit 5 } }
+set logged_in 0
+expect {
+    -re {\r\n# $} { set logged_in 1 }
+    -re {login: *$} {}
+    timeout { send "~."; exit 3 }
+}
+if {!$logged_in} {
+    send "root\r"
+    expect { -re {Password: *$} {} timeout { send "~."; exit 4 } }
+    log_user 0
+    send -- "$password\r"
+    expect { -re {\r\n# $} {} timeout { log_user 1; send "~."; exit 5 } }
+}
 unset password
 unset credential_text
 log_user 1
@@ -25,7 +32,7 @@ proc run_command {command} {
 }
 
 set module_dir /usr/lib/cleankvm/video-quarantine
-run_command {echo CLEANKVM_POST_EDID_STATUS_BEGIN}
+run_command {echo CLEANKVM_POST_EDID_STATUS_V2_BEGIN}
 run_command {test -c /dev/i2c-4 && test -r /proc/modules && test ! -e /dev/snd/controlC0 && echo VIDEO_PROFILE_GATE=passed || { echo VIDEO_PROFILE_GATE=failed; exit 91; }}
 run_command {printf 'PROBE_SHA256='; sha256sum /usr/libexec/cleankvm-raw-frame-probe | cut -d' ' -f1; printf 'PRE_TAINT='; cat /proc/sys/kernel/tainted}
 run_command {printf 'PRELOADED='; awk '$1 ~ /^soph_/ {printf "%s,", $1}' /proc/modules; echo}
@@ -33,12 +40,12 @@ foreach module {soph_sys soph_base soph_mipi_rx soph_snsr_i2c soph_vi soph_vpss}
     run_command "insmod $module_dir/$module.ko; echo LOAD_${module}_RC=\$?"
 }
 run_command {/usr/libexec/cleankvm-raw-frame-probe /run/cleankvm-frame.yuv422p; echo PROBE_RC=$?}
-run_command {echo '[MIPI_RX_POST_EDID]'; cat /proc/mipi-rx}
+run_command {echo '[MIPI_RX_POST_EDID_T0]'; cat /proc/mipi-rx; sleep 2; echo '[MIPI_RX_POST_EDID_T2]'; cat /proc/mipi-rx}
 run_command {test ! -e /run/cleankvm-frame.yuv422p; echo FRAME_ABSENT_RC=$?}
 foreach module {soph_vpss soph_vi soph_snsr_i2c soph_mipi_rx soph_base soph_sys} {
     run_command "rmmod $module; echo UNLOAD_${module}_RC=\$?"
 }
 run_command {printf 'FINAL_LOADED='; awk '$1 ~ /^soph_/ {printf "%s,", $1}' /proc/modules; echo; printf 'POST_TAINT='; cat /proc/sys/kernel/tainted}
-run_command {echo CLEANKVM_POST_EDID_STATUS_END}
+run_command {echo CLEANKVM_POST_EDID_STATUS_V2_END}
 send "~."
 expect eof

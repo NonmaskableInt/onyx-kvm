@@ -28,13 +28,17 @@ proc run_command {command} {
     send -- "$command\r"
     expect { -re {# $} {} timeout { send "~."; exit 6 } }
 }
-run_command {echo CLEANKVM_LT6911_SOURCE_STATUS_BEGIN}
+run_command {echo CLEANKVM_LT6911_SOURCE_STATUS_V2_BEGIN}
 run_command {test -c /dev/i2c-4 && printf 'TAINT=' && cat /proc/sys/kernel/tainted}
+# Sipeed's UXC polling path stops the embedded MCU while reading status.
+run_command {i2cset -y 4 0x2b 0xff 0x80 && i2cset -y 4 0x2b 0xee 0x01 && echo MCU_STOP=passed}
 # Sipeed NanoKVM kvm_vision.cpp UXC signal path: bank 0x86, register 0xa3.
 run_command {i2cset -y 4 0x2b 0xff 0x86 && printf 'HDMI_SIGNAL_A3=' && i2cget -y 4 0x2b 0xa3}
 # UXC CSI dimensions: bank 0x85, Vactive 0xf0..f1, Hactive 0xea..eb.
 run_command {i2cset -y 4 0x2b 0xff 0x85 && printf 'CSI_VACTIVE=' && i2ctransfer -y 4 w1@0x2b 0xf0 r2 && printf 'CSI_HACTIVE=' && i2ctransfer -y 4 w1@0x2b 0xea r2}
+# Resume even when a status value is unexpected; no value gate precedes cleanup.
+run_command {i2cset -y 4 0x2b 0xff 0x80; i2cset -y 4 0x2b 0xee 0x00; echo MCU_RESUME_RC=$?}
 run_command {printf 'FINAL_TAINT='; cat /proc/sys/kernel/tainted; printf 'I2C_FDS='; for p in /proc/[0-9]*/fd/*; do test "$(readlink "$p" 2>/dev/null)" = /dev/i2c-4 && printf '%s,' "$p"; done; echo}
-run_command {echo CLEANKVM_LT6911_SOURCE_STATUS_END}
+run_command {echo CLEANKVM_LT6911_SOURCE_STATUS_V2_END}
 send "~."
 expect eof
