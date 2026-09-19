@@ -23,10 +23,14 @@
 #include <linux/cvi_comm_video.h>
 #include <linux/cvi_common.h>
 #include <linux/cvi_type.h>
+#include <linux/vi_uapi.h>
+#include <linux/vi_isp.h>
 #include "cvi_buffer.h"
 #include "cvi_sys.h"
 #include "cvi_vb.h"
 #include "cvi_vi.h"
+
+extern CVI_S32 get_vi_fd(CVI_VOID);
 
 #define WIDTH 1920U
 #define HEIGHT 1080U
@@ -78,6 +82,30 @@ static int snapshot_mipi(unsigned int elapsed_ms)
 	return count < 0 ? -1 : 0;
 }
 
+static int snapshot_proc(const char *path, const char *tag)
+{
+	char buffer[4096];
+	char label[128];
+	ssize_t count, written;
+	int fd;
+
+	written = snprintf(label, sizeof(label), "[CLEANKVM_%s]\n", tag);
+	if (written < 0 || written >= (ssize_t)sizeof(label) ||
+	    write(STDOUT_FILENO, label, (size_t)written) != written)
+		return -1;
+	fd = open(path, O_RDONLY | O_CLOEXEC);
+	if (fd < 0)
+		return -1;
+	while ((count = read(fd, buffer, sizeof(buffer))) > 0) {
+		if (write(STDOUT_FILENO, buffer, (size_t)count) != count) {
+			close(fd);
+			return -1;
+		}
+	}
+	close(fd);
+	return count < 0 ? -1 : 0;
+}
+
 static int install_boundary(void)
 {
 	#define DENY_SYSCALL(nr, error) \
@@ -110,13 +138,57 @@ static int install_boundary(void)
 
 int main(int argc, char **argv)
 {
-	static const int16_t lane_profiles[][5] = {
-		{2, 4, 3, 1, 0},
-		{3, 0, 1, 2, 4},
-		{1, 4, 3, 2, 0},
-		{2, 0, 1, 3, 4},
-		{3, 1, 2, 4, 0},
-		{2, 0, 1, 3, 4},
+	static const struct {
+		int16_t lane_id[5];
+		uint8_t pn_swap[5];
+		CVI_U32 mipi_dev;
+	} lane_profiles[] = {
+		/* 0: Baseline 4-lane profile (clock=2, lanes 4,3,1,0) */
+		{{2, 4, 3, 1, 0}, {0, 0, 0, 0, 0}, 0},
+		/* 1..5: Previous permutation profiles */
+		{{3, 0, 1, 2, 4}, {0, 0, 0, 0, 0}, 0},
+		{{1, 4, 3, 2, 0}, {0, 0, 0, 0, 0}, 0},
+		{{2, 0, 1, 3, 4}, {0, 0, 0, 0, 0}, 0},
+		{{3, 1, 2, 4, 0}, {0, 0, 0, 0, 0}, 0},
+		{{2, 0, 1, 3, 4}, {1, 1, 1, 1, 1}, 1},
+		/* 6: 2-lane MIPI (clk=2, data0=1, data1=0) - zero PN swap */
+		{{2, 1, 0, -1, -1}, {0, 0, 0, 0, 0}, 0},
+		/* 7: 2-lane MIPI (clk=2, data0=0, data1=1) - zero PN swap */
+		{{2, 0, 1, -1, -1}, {0, 0, 0, 0, 0}, 0},
+		/* 8: 2-lane MIPI (clk=2, data0=1, data1=0) - PN swap both data lanes */
+		{{2, 1, 0, -1, -1}, {0, 1, 1, 0, 0}, 0},
+		/* 9: 2-lane MIPI (clk=2, data0=0, data1=1) - PN swap both data lanes */
+		{{2, 0, 1, -1, -1}, {0, 1, 1, 0, 0}, 0},
+		/* 10: 2-lane MIPI (clk=2, data0=1, data1=0) - PN swap data0 only */
+		{{2, 1, 0, -1, -1}, {0, 1, 0, 0, 0}, 0},
+		/* 11: 2-lane MIPI (clk=2, data0=1, data1=0) - PN swap data1 only */
+		{{2, 1, 0, -1, -1}, {0, 0, 1, 0, 0}, 0},
+		/* 12: 2-lane MIPI (clk=2, data0=0, data1=1) - PN swap data0 only */
+		{{2, 0, 1, -1, -1}, {0, 1, 0, 0, 0}, 0},
+		/* 13: 2-lane MIPI (clk=2, data0=0, data1=1) - PN swap data1 only */
+		{{2, 0, 1, -1, -1}, {0, 0, 1, 0, 0}, 0},
+		/* 14: 4-lane MIPI (clk=2, 4,3,1,0) - PN swap D3 (phys 0) */
+		{{2, 4, 3, 1, 0}, {0, 0, 0, 0, 1}, 0},
+		/* 15: 4-lane MIPI (clk=2, 4,3,1,0) - PN swap D0 (phys 4) */
+		{{2, 4, 3, 1, 0}, {0, 1, 0, 0, 0}, 0},
+		/* 16: 4-lane MIPI (clk=2, 4,3,1,0) - PN swap D1 (phys 3) */
+		{{2, 4, 3, 1, 0}, {0, 0, 1, 0, 0}, 0},
+		/* 17: 4-lane MIPI (clk=2, 4,3,1,0) - PN swap D2 (phys 1) */
+		{{2, 4, 3, 1, 0}, {0, 0, 0, 1, 0}, 0},
+		/* 18: 4-lane MIPI (clk=2, 4,3,1,0) - PN swap D0, D3 (phys 4, 0) */
+		{{2, 4, 3, 1, 0}, {0, 1, 0, 0, 1}, 0},
+		/* 19: 4-lane MIPI (clk=2, 4,3,1,0) - PN swap D1, D3 (phys 3, 0) */
+		{{2, 4, 3, 1, 0}, {0, 0, 1, 0, 1}, 0},
+		/* 20: 4-lane MIPI (clk=2, 4,3,1,0) - PN swap D0, D1, D3 (phys 4, 3, 0) */
+		{{2, 4, 3, 1, 0}, {0, 1, 1, 0, 1}, 0},
+		/* 21: 4-lane MIPI (clk=2, 4,3,1,0) - PN swap all 4 data lanes */
+		{{2, 4, 3, 1, 0}, {0, 1, 1, 1, 1}, 0},
+		/* 22: 4-lane MIPI (clk=2, 0,1,3,4) - zero PN swap */
+		{{2, 0, 1, 3, 4}, {0, 0, 0, 0, 0}, 0},
+		/* 23: 4-lane MIPI (clk=2, 0,1,3,4) - PN swap D0 (phys 0) */
+		{{2, 0, 1, 3, 4}, {0, 1, 0, 0, 0}, 0},
+		/* 24: 4-lane MIPI (clk=2, 0,1,3,4) - PN swap all data lanes */
+		{{2, 0, 1, 3, 4}, {0, 1, 1, 1, 1}, 0},
 	};
 	const char *output = "/run/cleankvm-frame.yuv422p";
 	VB_CONFIG_S vb = {0};
@@ -130,12 +202,17 @@ int main(int argc, char **argv)
 	int mipi_fd = -1, out_fd = -1, rc = 1;
 	int sys_up = 0, dev_up = 0, pipe_created = 0, pipe_up = 0, chn_up = 0;
 	unsigned int i, lane_profile = 0;
+	CVI_U32 target_height = HEIGHT;
+	uint8_t target_hs_settle = 16;
+	const char *override_pn = NULL;
+	const char *override_lanes = NULL;
 
-	if (argc > 2) {
-		fprintf(stderr, "usage: %s [lane-profile-0..5]\n", argv[0]);
+	if (argc > 6) {
+		fprintf(stderr, "usage: %s [lane-profile-0..%zu] [height] [hs_settle] [pn_swap] [lane_id]\n", argv[0],
+			sizeof(lane_profiles) / sizeof(lane_profiles[0]) - 1);
 		return 2;
 	}
-	if (argc == 2) {
+	if (argc >= 2) {
 		char *end = NULL;
 		unsigned long selected = strtoul(argv[1], &end, 10);
 
@@ -146,6 +223,32 @@ int main(int argc, char **argv)
 		}
 		lane_profile = (unsigned int)selected;
 	}
+	if (argc >= 3) {
+		char *end = NULL;
+		unsigned long selected = strtoul(argv[2], &end, 10);
+
+		if (!argv[2][0] || !end || *end || selected < 100 || selected > 2160) {
+			fprintf(stderr, "invalid height: %s\n", argv[2]);
+			return 2;
+		}
+		target_height = (CVI_U32)selected;
+	}
+	if (argc >= 4) {
+		char *end = NULL;
+		unsigned long selected = strtoul(argv[3], &end, 10);
+
+		if (!argv[3][0] || !end || *end || selected < 1 || selected > 255) {
+			fprintf(stderr, "invalid hs_settle: %s\n", argv[3]);
+			return 2;
+		}
+		target_hs_settle = (uint8_t)selected;
+	}
+	if (argc >= 5 && argv[4][0]) {
+		override_pn = argv[4];
+	}
+	if (argc >= 6 && argv[5][0]) {
+		override_lanes = argv[5];
+	}
 	if (install_boundary() < 0) {
 		perror("install syscall boundary");
 		return 1;
@@ -154,7 +257,7 @@ int main(int argc, char **argv)
 	vb.astCommPool[0].u32BlkSize = COMMON_GetPicBufferSize(
 		WIDTH, HEIGHT, PIXEL_FORMAT_YUV_PLANAR_422, DATA_BITWIDTH_8,
 		COMPRESS_MODE_NONE, DEFAULT_ALIGN);
-	vb.astCommPool[0].u32BlkCnt = 2;
+	vb.astCommPool[0].u32BlkCnt = 4;
 	vb.astCommPool[0].enRemapMode = VB_REMAP_MODE_CACHED;
 	(void)CVI_SYS_Exit();
 	(void)CVI_VB_Exit();
@@ -169,52 +272,54 @@ int main(int argc, char **argv)
 	mipi.mclk.cam = 0;
 	mipi.mclk.freq = CAMPLL_FREQ_NONE;
 	mipi.mipi_attr.raw_data_type = YUV422_8BIT;
-	if (lane_profile == 5)
-		mipi_dev = 1;
+	mipi_dev = lane_profiles[lane_profile].mipi_dev;
 	for (i = 0; i < 5; ++i) {
-		mipi.mipi_attr.lane_id[i] = lane_profiles[lane_profile][i];
-		mipi.mipi_attr.pn_swap[i] = lane_profile == 5 ? 1 : 0;
+		mipi.mipi_attr.lane_id[i] = lane_profiles[lane_profile].lane_id[i];
+		mipi.mipi_attr.pn_swap[i] = lane_profiles[lane_profile].pn_swap[i];
+	}
+	if (override_pn) {
+		unsigned int p0 = 0, p1 = 0, p2 = 0, p3 = 0, p4 = 0;
+		if (sscanf(override_pn, "%u,%u,%u,%u,%u", &p0, &p1, &p2, &p3, &p4) == 5) {
+			mipi.mipi_attr.pn_swap[0] = (uint8_t)p0;
+			mipi.mipi_attr.pn_swap[1] = (uint8_t)p1;
+			mipi.mipi_attr.pn_swap[2] = (uint8_t)p2;
+			mipi.mipi_attr.pn_swap[3] = (uint8_t)p3;
+			mipi.mipi_attr.pn_swap[4] = (uint8_t)p4;
+		} else {
+			fprintf(stderr, "invalid pn_swap override: %s\n", override_pn);
+			goto cleanup;
+		}
+	}
+	if (override_lanes) {
+		int l0 = 0, l1 = 0, l2 = 0, l3 = 0, l4 = 0;
+		if (sscanf(override_lanes, "%d,%d,%d,%d,%d", &l0, &l1, &l2, &l3, &l4) == 5) {
+			mipi.mipi_attr.lane_id[0] = (int16_t)l0;
+			mipi.mipi_attr.lane_id[1] = (int16_t)l1;
+			mipi.mipi_attr.lane_id[2] = (int16_t)l2;
+			mipi.mipi_attr.lane_id[3] = (int16_t)l3;
+			mipi.mipi_attr.lane_id[4] = (int16_t)l4;
+		} else {
+			fprintf(stderr, "invalid lane_id override: %s\n", override_lanes);
+			goto cleanup;
+		}
 	}
 	mipi.mipi_attr.wdr_mode = CVI_MIPI_WDR_MODE_NONE;
 	mipi.mipi_attr.dphy.enable = 1;
-	mipi.mipi_attr.dphy.hs_settle = 8;
+	mipi.mipi_attr.dphy.hs_settle = target_hs_settle;
 	mipi.devno = mipi_dev;
 	mipi.img_size.width = WIDTH;
-	mipi.img_size.height = HEIGHT;
-	printf("CLEANKVM_LANE_PROFILE=%u DEV=%u PN=%u,%u,%u,%u,%u LANES=%d,%d,%d,%d,%d\n",
-		lane_profile, mipi_dev,
+	mipi.img_size.height = target_height;
+	printf("CLEANKVM_LANE_PROFILE=%u DEV=%u TARGET_HEIGHT=%u HS_SETTLE=%u PN=%u,%u,%u,%u,%u LANES=%d,%d,%d,%d,%d\n",
+		lane_profile, mipi_dev, target_height, target_hs_settle,
 		mipi.mipi_attr.pn_swap[0], mipi.mipi_attr.pn_swap[1],
 		mipi.mipi_attr.pn_swap[2], mipi.mipi_attr.pn_swap[3],
-		mipi.mipi_attr.pn_swap[4], lane_profiles[lane_profile][0],
-		lane_profiles[lane_profile][1], lane_profiles[lane_profile][2],
-		lane_profiles[lane_profile][3], lane_profiles[lane_profile][4]);
+		mipi.mipi_attr.pn_swap[4],
+		mipi.mipi_attr.lane_id[0], mipi.mipi_attr.lane_id[1],
+		mipi.mipi_attr.lane_id[2], mipi.mipi_attr.lane_id[3],
+		mipi.mipi_attr.lane_id[4]);
 
-	mipi_fd = open("/dev/cvi-mipi-rx", O_RDWR | O_CLOEXEC);
-	if (mipi_fd < 0) {
-		perror("open /dev/cvi-mipi-rx");
-		goto cleanup;
-	}
-	/* Configure only the bounded MIPI receiver using the stock NanoKVM Lite
-	 * sensor_cfg.ini.LT wiring profile. Preserve the bridge's power-on/reset
-	 * state and perform no I2C transaction. Stop before the vendor VI capture
-	 * path, whose failed-frame cleanup can block indefinitely. */
-	if (ioctl(mipi_fd, CVI_MIPI_RESET_MIPI, &mipi_dev) < 0 ||
-	    ioctl(mipi_fd, CVI_MIPI_SET_DEV_ATTR, &mipi) < 0) {
-		perror("MIPI configuration");
-		goto cleanup;
-	}
-	/* Observe receiver convergence without allocating VI state or a frame.
-	 * Delays are cumulative and bounded to the established five-second gate. */
-	if (snapshot_mipi(0) || usleep(100000) || snapshot_mipi(100) ||
-	    usleep(400000) || snapshot_mipi(500) ||
-	    usleep(500000) || snapshot_mipi(1000) ||
-	    sleep(1) || snapshot_mipi(2000) ||
-	    sleep(3) || snapshot_mipi(5000)) {
-		perror("bounded MIPI timing snapshot");
-		goto cleanup;
-	}
-	return 0;
-
+	/* Step 1: Configure VI Dev 0 before MIPI RX so that clk_csi_mac0
+	 * is enabled by CVI_VI_EnableDev before high-speed CSI packets arrive. */
 	dev.enIntfMode = VI_MODE_MIPI_YUV422;
 	dev.enWorkMode = VI_WORK_MODE_1Multiplex;
 	dev.enScanMode = VI_SCAN_PROGRESSIVE;
@@ -222,9 +327,18 @@ int main(int argc, char **argv)
 		dev.as32AdChnId[i] = -1;
 	dev.enDataSeq = VI_DATA_SEQ_UYVY;
 	dev.enInputDataType = VI_DATA_TYPE_YUV;
+	dev.stSynCfg.enVsync = VI_VSYNC_PULSE;
+	dev.stSynCfg.enVsyncNeg = VI_VSYNC_NEG_LOW;
+	dev.stSynCfg.enHsync = VI_HSYNC_VALID_SINGNAL;
+	dev.stSynCfg.enHsyncNeg = VI_HSYNC_NEG_HIGH;
+	dev.stSynCfg.enVsyncValid = VI_VSYNC_VALID_SIGNAL;
+	dev.stSynCfg.enVsyncValidNeg = VI_VSYNC_VALID_NEG_HIGH;
+	dev.stSynCfg.stTimingBlank.u32HsyncAct = WIDTH;
+	dev.stSynCfg.stTimingBlank.u32VsyncVact = target_height;
 	dev.stSize.u32Width = WIDTH;
-	dev.stSize.u32Height = HEIGHT;
+	dev.stSize.u32Height = target_height;
 	dev.stWDRAttr.enWDRMode = WDR_MODE_NONE;
+	dev.stWDRAttr.u32CacheLine = target_height;
 	dev.enBayerFormat = BAYER_FORMAT_BG;
 	dev.snrFps = 60;
 	if (check("CVI_VI_SetDevAttr", CVI_VI_SetDevAttr(0, &dev)) ||
@@ -232,6 +346,59 @@ int main(int argc, char **argv)
 		goto cleanup;
 	dev_up = 1;
 
+	/* Step 1b: Configure sensor geometry on the VI kernel driver so the CSI bridge
+	 * registers (CH0_SIZE) receive width=1920, height=target_height rather than 0x0.
+	 * Without active_w/active_h configured, csibdg_width and csibdg_height
+	 * default to 0, causing the CSI bridge to never assert FRAME_DONE_FE0. */
+	{
+		struct vi_ext_control ext = {0};
+		struct cvi_isp_snr_info snr = {0};
+		int vi_fd;
+
+		snr.raw_num = 0;
+		snr.color_mode = 0;
+		snr.pixel_rate = 148500;
+		snr.snr_fmt.frm_num = 1;
+		snr.snr_fmt.img_size[0].width = WIDTH;
+		snr.snr_fmt.img_size[0].height = target_height;
+		snr.snr_fmt.img_size[0].active_w = WIDTH;
+		snr.snr_fmt.img_size[0].active_h = target_height;
+		snr.snr_fmt.img_size[0].max_width = WIDTH;
+		snr.snr_fmt.img_size[0].max_height = target_height;
+		snr.snr_fmt.img_size[0].start_x = 0;
+		snr.snr_fmt.img_size[0].start_y = 0;
+
+		ext.id = VI_IOCTL_SET_SNR_INFO;
+		ext.ptr = &snr;
+
+		vi_fd = get_vi_fd();
+		if (vi_fd < 0)
+			vi_fd = open("/dev/cvi-vi", O_RDWR | O_CLOEXEC);
+		if (vi_fd < 0) {
+			perror("get_vi_fd / open /dev/cvi-vi");
+			goto cleanup;
+		}
+		if (ioctl(vi_fd, VI_IOC_S_CTRL, &ext) < 0) {
+			perror("ioctl VI_IOCTL_SET_SNR_INFO");
+			goto cleanup;
+		}
+	}
+
+	mipi_fd = open("/dev/cvi-mipi-rx", O_RDWR | O_CLOEXEC);
+	if (mipi_fd < 0) {
+		perror("open /dev/cvi-mipi-rx");
+		goto cleanup;
+	}
+	/* Step 2: Reset only the SoC MIPI receiver and configure device attributes.
+	 * Do NOT pulse sensor reset or sensor clock: the LT6911 bridge is already
+	 * running, clocked by its onboard crystal, and locked to HDMI input. */
+	if (ioctl(mipi_fd, CVI_MIPI_RESET_MIPI, &mipi_dev) < 0 ||
+	    ioctl(mipi_fd, CVI_MIPI_SET_DEV_ATTR, &mipi) < 0) {
+		perror("MIPI configuration");
+		goto cleanup;
+	}
+
+	/* Step 3: Bind and start the single-frame VI pipe. */
 	bind.u32Num = 1;
 	bind.PipeId[0] = 0;
 	if (check("CVI_VI_SetDevBindPipe", CVI_VI_SetDevBindPipe(0, &bind)))
@@ -257,7 +424,7 @@ int main(int argc, char **argv)
 	pipe_up = 1;
 
 	chn.stSize.u32Width = WIDTH;
-	chn.stSize.u32Height = HEIGHT;
+	chn.stSize.u32Height = target_height;
 	chn.enPixelFormat = PIXEL_FORMAT_YUV_PLANAR_422;
 	chn.enDynamicRange = DYNAMIC_RANGE_SDR8;
 	chn.enVideoFormat = VIDEO_FORMAT_LINEAR;
@@ -271,14 +438,26 @@ int main(int argc, char **argv)
 		goto cleanup;
 	chn_up = 1;
 
-	if (check("CVI_VI_GetChnFrame", CVI_VI_GetChnFrame(0, 0, &frame, 3000)))
+	/* Observe receiver counters with active VI clocking and pipeline. */
+	(void)snapshot_mipi(0);
+	usleep(100000);
+	(void)snapshot_mipi(100);
+	(void)snapshot_proc("/proc/cvitek/vi", "VI_DEV");
+	(void)snapshot_proc("/proc/cvitek/vi_dbg", "VI_DBG_PRE");
+
+	if (check("CVI_VI_GetChnFrame", CVI_VI_GetChnFrame(0, 0, &frame, 5000))) {
+		(void)snapshot_proc("/proc/cvitek/vi_dbg", "VI_DBG_POST_ERR");
+		(void)snapshot_mipi(5000);
 		goto cleanup;
-	if (frame.stVFrame.u32Width != WIDTH || frame.stVFrame.u32Height != HEIGHT ||
+	}
+	(void)snapshot_proc("/proc/cvitek/vi_dbg", "VI_DBG_POST_OK");
+	(void)snapshot_mipi(500);
+	if (frame.stVFrame.u32Width != WIDTH || frame.stVFrame.u32Height != target_height ||
 	    frame.stVFrame.enCompressMode != COMPRESS_MODE_NONE) {
 		fprintf(stderr, "unexpected frame geometry or compression\n");
 		goto release;
 	}
-	out_fd = open(output, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0600);
+	out_fd = open(output, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0600);
 	if (out_fd < 0) {
 		perror("open output");
 		goto release;

@@ -8,16 +8,23 @@ if {![regexp -line {^password=(.*)$} $credential_text -> password]} { exit 2 }
 
 spawn /usr/bin/sudo /usr/bin/cu -l /dev/cu.usbserial-112440 -s 115200
 expect { -re {Connected\.} {} timeout { exit 7 } }
-send "\003\r\r"
+send "\r"
 set shell_ready 0
 expect {
-    -re {login: *} {}
     -re {\r\n# } { set shell_ready 1 }
+    -re {login: *} {}
     timeout { send "~."; exit 3 }
 }
 if {!$shell_ready} {
     send "root\r"
-    expect { -re {Password: *} {} timeout { send "~."; exit 4 } }
+    expect {
+        -re {Password: *} {}
+        -re {login: *} {
+            send "root\r"
+            expect { -re {Password: *} {} timeout { send "~."; exit 4 } }
+        }
+        timeout { send "~."; exit 4 }
+    }
     log_user 0
     send -- "$password\r"
     expect { -re {\r\n# } {} timeout { log_user 1; send "~."; exit 5 } }
@@ -37,7 +44,7 @@ set reverse_modules {soph_vpss soph_vi soph_snsr_i2c soph_mipi_rx soph_base soph
 run_command {echo CLEANKVM_LANE_DISCRIMINATOR_V1_BEGIN}
 run_command {test -r /proc/modules && test ! -e /dev/snd/controlC0 && echo BASELINE_GATE=passed || { echo BASELINE_GATE=failed; exit 91; }}
 run_command {printf 'PROBE_SHA256='; sha256sum /usr/libexec/cleankvm-raw-frame-probe | cut -d' ' -f1; printf 'PRE_TAINT='; cat /proc/sys/kernel/tainted}
-for {set profile 5} {$profile < 6} {incr profile} {
+for {set profile 0} {$profile < 1} {incr profile} {
     run_command "echo LANE_PROFILE_${profile}_BEGIN"
     foreach module $modules {
         run_command "insmod $module_dir/$module.ko; echo LOAD_${profile}_${module}_RC=\$?"

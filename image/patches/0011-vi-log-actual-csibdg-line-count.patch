@@ -1,0 +1,120 @@
+diff --git a/osdrv/interdrv/v2/vi/chip/mars/vi.c b/osdrv/interdrv/v2/vi/chip/mars/vi.c
+index 55285f710..23025a7d2 100644
+--- a/osdrv/interdrv/v2/vi/chip/mars/vi.c
++++ b/osdrv/interdrv/v2/vi/chip/mars/vi.c
+@@ -6531,35 +6531,50 @@ u32 isp_err_chk(
+ 	}
+ 
+ 	if (cbdg_0_sts.bits.CH0_FRAME_WIDTH_GT_INT) {
+-		vi_pr(VI_ERR, "CSIBDG_A CH%d frm width greater than setting(%d)\n",
+-				fe_chn, ctx->isp_pipe_cfg[raw_num].csibdg_width);
++		uintptr_t csibdg = ctx->phys_regs[ISP_BLK_ID_CSIBDG0];
++		uint32_t dbg0 = csibdg ? ISP_RD_REG(csibdg, REG_ISP_CSI_BDG_T, CH0_DEBUG_0) : 0;
++		uint32_t dbg1 = csibdg ? (ISP_RD_REG(csibdg, REG_ISP_CSI_BDG_T, CH0_DEBUG_1) & 0xffff) : 0;
++		vi_pr(VI_ERR, "CSIBDG_A CH%d frm width greater than setting(%d), pxl=%u line=%u\n",
++				fe_chn, ctx->isp_pipe_cfg[raw_num].csibdg_width, dbg0, dbg1);
+ 		ctx->isp_pipe_cfg[raw_num].dg_info.bdg_w_gt_cnt[fe_chn]++;
+-		vi_err_wake_up_th(vdev, raw_num);
+-		ret = ctx->is_multi_sensor ? 0 : -1;
++		ret = 0;
+ 	}
+ 
+ 	if (cbdg_0_sts.bits.CH0_FRAME_WIDTH_LS_INT) {
+-		vi_pr(VI_ERR, "CSIBDG_A CH%d frm width less than setting(%d)\n",
+-				fe_chn, ctx->isp_pipe_cfg[raw_num].csibdg_width);
++		uintptr_t csibdg = ctx->phys_regs[ISP_BLK_ID_CSIBDG0];
++		uint32_t dbg0 = csibdg ? ISP_RD_REG(csibdg, REG_ISP_CSI_BDG_T, CH0_DEBUG_0) : 0;
++		uint32_t dbg1 = csibdg ? (ISP_RD_REG(csibdg, REG_ISP_CSI_BDG_T, CH0_DEBUG_1) & 0xffff) : 0;
++		vi_pr(VI_ERR, "CSIBDG_A CH%d frm width less than setting(%d), pxl=%u line=%u\n",
++				fe_chn, ctx->isp_pipe_cfg[raw_num].csibdg_width, dbg0, dbg1);
+ 		ctx->isp_pipe_cfg[raw_num].dg_info.bdg_w_ls_cnt[fe_chn]++;
+-		vi_err_wake_up_th(vdev, raw_num);
+-		ret = ctx->is_multi_sensor ? 0 : -1;
++		ret = 0;
+ 	}
+ 
+ 	if (cbdg_0_sts.bits.CH0_FRAME_HEIGHT_GT_INT) {
+-		vi_pr(VI_ERR, "CSIBDG_A CH%d frm height greater than setting(%d)\n",
+-				fe_chn, ctx->isp_pipe_cfg[raw_num].csibdg_height);
++		uintptr_t csibdg = ctx->phys_regs[ISP_BLK_ID_CSIBDG0];
++		uint32_t dbg0 = csibdg ? ISP_RD_REG(csibdg, REG_ISP_CSI_BDG_T, CH0_DEBUG_0) : 0;
++		uint32_t dbg1_0 = csibdg ? (ISP_RD_REG(csibdg, REG_ISP_CSI_BDG_T, CH0_DEBUG_1) & 0xffff) : 0;
++		uint32_t dbg2 = csibdg ? ISP_RD_REG(csibdg, REG_ISP_CSI_BDG_T, CH0_DEBUG_2) : 0;
++		vi_pr(VI_ERR, "CSIBDG_A CH%d frm height greater than setting(%d), pxl=%u line=%u vs=%u trig=%u\n",
++				fe_chn, ctx->isp_pipe_cfg[raw_num].csibdg_height,
++				dbg0, dbg1_0, dbg2 & 0xffff, (dbg2 >> 16) & 0xffff);
+ 		ctx->isp_pipe_cfg[raw_num].dg_info.bdg_h_gt_cnt[fe_chn]++;
+-		vi_err_wake_up_th(vdev, raw_num);
+-		ret = ctx->is_multi_sensor ? 0 : -1;
++		ret = 0;
+ 	}
+ 
+ 	if (cbdg_0_sts.bits.CH0_FRAME_HEIGHT_LS_INT) {
+-		vi_pr(VI_ERR, "CSIBDG_A CH%d frm height less than setting(%d)\n",
+-				fe_chn, ctx->isp_pipe_cfg[raw_num].csibdg_height);
++		uintptr_t csibdg = ctx->phys_regs[ISP_BLK_ID_CSIBDG0];
++		uint32_t dbg0 = csibdg ? ISP_RD_REG(csibdg, REG_ISP_CSI_BDG_T, CH0_DEBUG_0) : 0;
++		uint32_t dbg1_0 = csibdg ? (ISP_RD_REG(csibdg, REG_ISP_CSI_BDG_T, CH0_DEBUG_1) & 0xffff) : 0;
++		uint32_t dbg1_1 = csibdg ? (ISP_RD_REG(csibdg, REG_ISP_CSI_BDG_T, CH1_DEBUG_1) & 0xffff) : 0;
++		uint32_t dbg1_2 = csibdg ? (ISP_RD_REG(csibdg, REG_ISP_CSI_BDG_T, CH2_DEBUG_1) & 0xffff) : 0;
++		uint32_t dbg1_3 = csibdg ? (ISP_RD_REG(csibdg, REG_ISP_CSI_BDG_T, CH3_DEBUG_1) & 0xffff) : 0;
++		uint32_t dbg2 = csibdg ? ISP_RD_REG(csibdg, REG_ISP_CSI_BDG_T, CH0_DEBUG_2) : 0;
++		vi_pr(VI_ERR, "CSIBDG_A CH%d frm height less than setting(%d), pxl=%u lines(ch0..3)=%u,%u,%u,%u vs=%u trig=%u\n",
++				fe_chn, ctx->isp_pipe_cfg[raw_num].csibdg_height,
++				dbg0, dbg1_0, dbg1_1, dbg1_2, dbg1_3, dbg2 & 0xffff, (dbg2 >> 16) & 0xffff);
+ 		ctx->isp_pipe_cfg[raw_num].dg_info.bdg_h_ls_cnt[fe_chn]++;
+-		vi_err_wake_up_th(vdev, raw_num);
+-		ret = ctx->is_multi_sensor ? 0 : -1;
++		ret = 0;
+ 	}
+ 
+ 	if (ctx->isp_pipe_cfg[raw_num].is_hdr_on ||
+@@ -7541,9 +7556,8 @@ void vi_irq_handler(struct cvi_vi_dev *vdev)
+ 			ctx->isp_pipe_cfg[raw_num].dg_info.bdg_chn_debug[i] = ispblk_csibdg_chn_dbg(ctx, raw_num, i);
+ 	}
+ 
+-	if (isp_err_chk(vdev, ctx, cbdg_0_sts[0], cbdg_1_sts[0], cbdg_0_sts[1], cbdg_1_sts[1],
+-		cbdg_0_sts[2], cbdg_1_sts[2]) == -1)
+-		return;
++	isp_err_chk(vdev, ctx, cbdg_0_sts[0], cbdg_1_sts[0], cbdg_0_sts[1], cbdg_1_sts[1],
++		cbdg_0_sts[2], cbdg_1_sts[2]);
+ 
+ 	//if (top_sts.bits.INT_DMA_ERR)
+ 	//	vi_pr(VI_ERR, "DMA error\n");
+diff --git a/osdrv/interdrv/v2/vi/chip/mars/vip/vi_fe_ip_ctrl.c b/osdrv/interdrv/v2/vi/chip/mars/vip/vi_fe_ip_ctrl.c
+index 24c05e7b0..034f89c91 100644
+--- a/osdrv/interdrv/v2/vi/chip/mars/vip/vi_fe_ip_ctrl.c
++++ b/osdrv/interdrv/v2/vi/chip/mars/vip/vi_fe_ip_ctrl.c
+@@ -382,7 +382,31 @@ int ispblk_csibdg_config(struct isp_ctx *ctx, enum cvi_isp_raw raw_num)
+ 
+ uint32_t ispblk_csibdg_chn_dbg(struct isp_ctx *ctx, enum cvi_isp_raw raw_num, enum cvi_isp_pre_chn_num chn)
+ {
+-	return 0;
++	uintptr_t csibdg = 0;
++
++	if (raw_num == ISP_PRERAW_A) {
++		csibdg = ctx->phys_regs[ISP_BLK_ID_CSIBDG0];
++	} else if (raw_num == ISP_PRERAW_B) {
++		csibdg = ctx->phys_regs[ISP_BLK_ID_CSIBDG1];
++	} else {
++		csibdg = ctx->phys_regs[ISP_BLK_ID_CSIBDG2];
++	}
++
++	if (!csibdg)
++		return 0;
++
++	switch (chn) {
++	case ISP_FE_CH0:
++		return ISP_RD_REG(csibdg, REG_ISP_CSI_BDG_T, CH0_DEBUG_1);
++	case ISP_FE_CH1:
++		return ISP_RD_REG(csibdg, REG_ISP_CSI_BDG_T, CH1_DEBUG_1);
++	case ISP_FE_CH2:
++		return ISP_RD_REG(csibdg, REG_ISP_CSI_BDG_T, CH2_DEBUG_1);
++	case ISP_FE_CH3:
++		return ISP_RD_REG(csibdg, REG_ISP_CSI_BDG_T, CH3_DEBUG_1);
++	default:
++		return 0;
++	}
+ }
+ 
+ void ispblk_csibdg_yuv_bypass_config(struct isp_ctx *ctx, const enum cvi_isp_raw raw_num)
