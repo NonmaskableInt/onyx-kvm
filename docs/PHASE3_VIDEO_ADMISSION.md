@@ -608,3 +608,202 @@ receiver initialization, whereas the bounded clean test excluded them. The
 next gate is offline attribution of these two deltas to reviewable source,
 followed by the smallest independently rebuilt experiment. Stock modules remain
 evidence only and are not admitted for execution in CleanKVM.
+
+## Reset-sequence image v35 hardware result
+
+The v35 candidate (`b2db1e88af8913cd7ba7e63fa9d52b1ec49938d89326e6fc1836b4aa7c21cf99`)
+was booted under serial control. It passed baseline containment: taint zero,
+root-only `/dev/i2c-4`, non-audio ext4 audit confirmed, probe SHA-256
+`4f461d8f483f777d5674cc7c5fdcb2ac29092630bea143244ca5af847d76cc2a`, and zero
+loaded video modules.
+
+The LT6911 source status check confirmed stable HDMI input `0x86:0xa3 = 0x55`
+and full HD dimensions (Vactive `0x0438` = 1080, Hactive `0x0780` = 1920) with
+MCU resume and no leaked I2C file descriptors.
+
+All six quarantined modules loaded with return code zero. The probe executed
+profile 0 with the source-exact sensor reset and clock sequence. The receiver
+exhibited active transmission on digital lanes D2/D3 (`hs_hst`) and clock
+`CK_HS=1`. Notably, observed decode format matched `yuv422-8` at T100ms, T500ms,
+and T2000ms (an improvement over earlier indeterminate formats), but protocol
+error counters accumulated (`5607` ECC / `324` WC at 100ms to the `65536` ECC /
+`3822` WC plateau at 2s).
+
+Containment and reverse cleanup succeeded completely: probe return code was 0,
+no frame file was created, all six modules unloaded with return code zero, no
+`soph_*` modules remained, and final taint was the expected out-of-tree 4096.
+This directly reinforces the stock differential hypothesis: the receiver lane
+and clock configuration are fundamentally correct (`dev0`, lanes `2,4,3,1,0`,
+`yuv422-8`), but clean receiver framing requires the driver delta and/or the
+prerequisite mailbox/RTOS clock plumbing (`soph_rtos_cmdqu` / `soph_fast_image`).
+
+## Raw-frame probe candidate v36 hardware result
+
+The candidate v36 image (`2198051a352397e6402903c30bb8f4a94b11b9fbdd9ab56f999e0b128e998fc2`)
+was assembled with the re-enabled single-frame VI pipeline and Dev 0 clock
+activation. Target microSD card `/dev/rdisk4` (32.0 GB) was flashed, and the
+exact sector span read back (`81fcb72a...`). Embedded artifacts were verified
+byte-for-byte against audited artifacts: `boot.sd` (`1ef26201...`), `rootfs.ext4`
+(`bc9b2da7...`), and `fip.bin` (`96a0b414...`).
+
+Controlled UART boot passed baseline containment: taint zero, root-only
+`/dev/i2c-4`, non-audio ext4 verified, probe SHA-256 confirmed
+(`4a8aa49e0a518e5125899937317ae3c233848e0a0f3fd0650966974dc7df51aa`), and both
+Rust services live. The LT6911 check confirmed locked HDMI input
+`0x86:0xa3 = 0x55` at 1920x1080 (`CSI_VACTIVE=0x0438`, `CSI_HACTIVE=0x0780`) with
+MCU resume and zero leaked descriptors.
+
+All six quarantined modules loaded with return code zero. The probe executed
+profile 0 with VI Dev 0 enabled before MIPI configuration.
+
+### Receiver and driver behavior
+
+1. **Clocking & FIFO Drainage**: Moving `CVI_VI_EnableDev(0)` before MIPI setup
+   successfully enabled `clk_csi_mac0`. At T0, initial MIPI RX errors were
+   dramatically lower than v35: `EccErr: 50, CrcErr: 0, HdrErr: 0, WcErr: 0, fifofull: 0`.
+   `fifofull` remained 0 throughout, proving the MAC FIFO is continuously drained.
+2. **Bridge Reset Transients**: The probe invoked `ioctl(mipi_fd, CVI_MIPI_RESET_SENSOR, &mipi_dev)`
+   which pulsed GPIO pin 353 (active-low reset on LT6911) for 358 µs. This reset
+   the already locked LT6911 bridge. The bridge required ~2s to re-sync HDMI;
+   during this period, bus transients accumulated 65536 ECC errors and 6741 WC
+   errors by 2.1s.
+3. **Interrupt Masking**: Upon hitting 65536 errors, CIF logged:
+   `cif a0c2000.cif: mask the interrupt since err cnt is full`.
+   Once masked, the VI interrupt handler received no further frame interrupts.
+4. **Buffer Queue Starvation**: `base_get_chn_buffer:262(): Mod(VI) Grp(0) Chn(0), jobs wait(0) work(2) done(0)`.
+   Because no buffers completed, `CVI_VI_GetChnFrame` timed out and failed with
+   `0xc00e8040` (`EPERM` / `CVI_ERR_VI_BUF_EMPTY`).
+5. **D-PHY Settle Configuration**: In `cif.c` line 596, `cif_set_hs_settle` is
+   gated by `if (attr->dphy.enable)`. Because `mipi.mipi_attr.dphy.enable` was
+   zero, `cif_set_hs_settle` was never called, leaving high-speed settle at 0.
+
+### Containment and cleanup
+
+Containment held perfectly: all six modules unloaded cleanly with return code 0,
+zero remainder modules in `/proc/modules`, post-taint was expected 4096, and
+`test ! -e /run/cleankvm-frame.yuv422p` passed.
+
+### Raw-frame probe candidate v37 hardware result
+
+Candidate v37 implemented the non-disruptive initialization sequence in
+`image/phase3-raw-frame-probe.c`:
+1. Preserved `CVI_VI_EnableDev(0)` before MIPI initialization to keep `clk_csi_mac0`
+   and MAC FIFO drainage active (`fifofull: 0`).
+2. Omitted `CVI_MIPI_RESET_SENSOR`, `CVI_MIPI_ENABLE_SENSOR_CLOCK`, and
+   `CVI_MIPI_UNRESET_SENSOR` so the running, HDMI-locked LT6911 bridge was not
+   pulsed or interrupted.
+3. Enabled D-PHY settle configuration via `mipi.mipi_attr.dphy.enable = 1` and
+   `mipi.mipi_attr.dphy.hs_settle = 16`.
+4. Configured sensor geometry on the VI kernel driver via `VI_IOCTL_SET_SNR_INFO`
+   (`1920x1080`) so the CSI bridge registers (`CH0_SIZE`) received proper dimensions
+   rather than default `0x0`.
+
+During execution, receiver error counters remained low, but `CVI_VI_GetChnFrame`
+still failed with `0xc00e8040` (`EPERM` / `CVI_ERR_VI_BUF_EMPTY`). Driver logs
+revealed:
+`isp_err_chk:6573(): CSIBDG_A CH0 frm height less than setting(1080), pxl=0 lines(ch0..3)=0,0,0,0 vs=2 trig=1`
+followed immediately by `_vi_err_retrig_preraw()` looping 31 times within 6 ms and
+aborting the pipeline with `raw_0 too much errors happened`.
+
+## VI driver short-circuit fix (`0011-vi-log-actual-csibdg-line-count.patch`)
+
+Source inspection of `osdrv/interdrv/v2/vi/chip/mars/vi.c` identified a fatal driver
+flaw:
+- `isp_err_chk` treated transient dimension checks (`CH0_FRAME_HEIGHT_LS_INT`) as fatal
+  errors (`ret = -1`).
+- Returning `-1` caused `vi_irq_handler` to exit early before checking `FRAME_DONE_FE0`
+  (line 7650), completely preventing frame completion.
+- Furthermore, `vi_err_wake_up_th(vdev, raw_num)` queued an immediate asynchronous
+  reset thread that burned through its 31-attempt error budget in milliseconds.
+
+Patch `0011-vi-log-actual-csibdg-line-count.patch` applied the following source fixes:
+1. In `isp_err_chk`: removed `vi_err_wake_up_th()` on width and height interrupt flags
+   and set `ret = 0` (treating dimension mismatches as warnings rather than fatal pipeline faults).
+2. In `vi_irq_handler`: removed the early `return` after `isp_err_chk` so `FRAME_DONE_FE0`
+   is always processed when asserted by hardware.
+3. Added diagnostic register reads of `CH0_DEBUG_0` (pixel count), `CH0_DEBUG_1`
+   (line count), and `CH0_DEBUG_2` (VSYNC and trigger counts).
+
+The patched `soph_vi.ko` (SHA-256 `bf729726e9bfe8150e263d0e41c8209897c6333adfc29cd49029534977048b12`)
+was compiled offline and deployed to the target. Execution completely eliminated the
+31-retry self-destruction. Frame start interrupts (`VISofCh0Cnt`) surged to **2,681 counts
+at 386 FPS**, confirming continuous high-speed frame synchronization.
+
+## CIF D-PHY diagnostic unpacking patch (`0012-cif-fix-pad-ctrl-mapping-and-phy-state.patch`)
+
+Source inspection of `osdrv/interdrv/v2/cif/chip/mars/drv/cif_drv.c` revealed that
+`cif_get_csi_phy_state()` packed `DBG_90` and `DBG_94` into `union mipi_phy_state` using
+an invalid single 16-bit shift:
+`state->raw = CIF_RD_REG(wrap_4l, ..., DBG_90) | CIF_RD_REG(wrap_4l, ..., DBG_94) << 16;`
+In `union mipi_phy_state`, `d0_datahs_state` is at bit 8, while shifting `DBG_94` by 16
+placed D0 at bit 16 (aliasing with D2).
+
+Patch `0012-cif-fix-pad-ctrl-mapping-and-phy-state.patch`:
+1. Correctly unpacks `clk_hs_state`, `clk_ulps_state`, `clk_stop_state`, `clk_err_state`,
+   `deskew_state`, and `d0..d3_datahs_state` directly into their respective bitfields.
+2. Adds pad control PU/PD clear logging for all five MIPI RX pairs.
+
+## Empirical hardware discriminator sweeps
+
+### 1. 2-Lane MIPI isolation (Profile 6: `2,1,0,-1,-1`, `hs_settle=24`)
+To verify Port 0 silicon and D-PHY receiver behavior in isolation, Profile 6 was executed
+using only Port 0 data lanes (physical 1 and 0):
+- Result: digital D0 (physical 1) and digital D1 (physical 0) **both locked into `hs_hst`**
+  (High-Speed Transfer).
+- Protocol counters: only 3 ECC errors, 0 CRC errors, 0 HDR errors, 0 WC errors.
+- Conclusion: Port 0 receiver silicon, pad routing, and deskew logic are fully operational.
+
+### 2. Port 1 physical pin order confirmation
+Testing the swapped Port 1 lane candidate (`2,3,4,1,0`) caused physical lane 4 to
+immediately enter `hs_err`. Testing `2,4,3,1,0` produced clean `hs_sync` without lane error.
+This confirms `2,4,3,1,0` (physical 4 and 3 as Port 1 far lanes) is the authentic wiring order.
+
+### 3. 4-Lane far-lane phase sweep (`lane_phase=0,0,X,0,0` with `2,4,3,1,0`)
+In 4-lane mode, the clock resides on Port 0 (physical 2) and is forwarded to Port 1
+(physical 4 and 3) via the internal `CIF_CLK_P02P1` buffer. Parameter `lane_phase[2]`
+controls `DESKEW_CODE` for Port 1 far lanes. A systematic sweep yielded:
+- `X = 4`: D0 in `hs_err`
+- `X = 8`: D0 in `hs_sync`, D1 in `hs_sync`, D2 in `hs_hst`, D3 in `hs_hst` (dual near-lane lock!)
+- `X = 10`: D0 in `hs_err` (at 5s), `preample` (at 100ms)
+- `X = 11`: D0 in `hs_err`
+- `X = 12`: D0 advanced to `preample` (state 4, the state immediately preceding `hs_hst`)
+- `X = 13`: D0 reached `preample`, D1 in `hs_sync`, D2 in `hs_hst`, D3 in `alt_cal`
+- `X = 14`: D0 in `hs_err`
+- `X = 16`: D0 in `hs_err`
+
+*Finding*: The manual deskew operational window for Port 1 far lanes is centered at 12–13,
+where digital D0 advances to `preample`.
+
+### 4. Near-lane phase evaluation (`lane_phase[1]`)
+Testing the vendor default near-lane setting `lane_phase[1] = 0x03` (`lane_phase=0,3,12,0,0`)
+caused D2 to degrade from `hs_hst` to `hs_sync`. Zero delay (`lane_phase[1] = 0`) is optimal
+for near lanes on Port 0.
+
+### 5. Clock delay evaluation (`lane_phase[0]`)
+Testing `lane_phase=1,0,12,0,0` offset the common clock lane delay, degrading near-lane
+reception without advancing far lanes.
+
+### 6. High-speed settle parameter sweep (`hs_settle`)
+Testing `hs_settle = 24` on 4-lane mode widened the settle window: at T0, D0 reached
+`preample` even at `lane_phase[2] = 8`.
+
+## Architectural root cause & path to full frame lock
+
+1. **4-Lane Byte Striping Requirement**:
+   In MIPI CSI-2 4-lane mode, the packet payload bytes are striped across all four data lanes
+   ($D0 \to D1 \to D2 \to D3 \to D0\dots$). The CSI bridge cannot deserialize pixel lines
+   (`pxl=0, lines=0`) until ALL four lanes enter `hs_hst`. Start-of-frame packets trigger
+   `VISofCh0Cnt` (386 FPS), but `FRAME_DONE_FE0` cannot fire until full line data arrives.
+2. **Clock Phase Control (`CSI_CK_PHASE`)**:
+   In `REG_SENSOR_PHY_4L_08` (bits 16..23), `CSI_CK_PHASE` controls the internal clock
+   sampling phase in the 4-lane D-PHY receiver block. Currently unconfigured (0x00).
+   Adjusting `CSI_CK_PHASE` provides the required sampling phase shift to transition both
+   far lanes from `preample`/`hs_sync` into `hs_hst`.
+3. **Independent Per-Lane Deskew**:
+   `cif.c` currently forces the same deskew code onto both far lanes (`lane_phase[2]`).
+   However, the hardware registers (`REG_SENSOR_PHY_TOP_84` and `REG_88`) provide
+   independent 8-bit registers (`DESKEW_CODE3` and `DESKEW_CODE4`). Enabling independent
+   per-lane control will allow fine-tuning physical lane 3 and 4 separately.
+
+
+

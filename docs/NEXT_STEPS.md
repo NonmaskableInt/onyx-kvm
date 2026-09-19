@@ -1,6 +1,6 @@
 # Next steps
 
-Updated: 2026-09-13
+Updated: 2026-09-19
 
 ## Current state
 
@@ -397,3 +397,176 @@ programming procedure.
   This localizes the next investigation to the receiver-driver/build delta and
   stock prerequisite load order. Do not copy or load either stock module into
   the clean image; recover the behavior from auditable source.
+
+## Prepared reset-sequence image v35
+
+- Path: `out/phase3-reset-sequence-v35/cleankvm-phase1.img`
+- Size: 79,692,288 bytes
+- SHA-256:
+  `b2db1e88af8913cd7ba7e63fa9d52b1ec49938d89326e6fc1836b4aa7c21cf99`
+- Embedded root-only probe SHA-256:
+  `4f461d8f483f777d5674cc7c5fdcb2ac29092630bea143244ca5af847d76cc2a`.
+- v35 implements the source-exact `SAMPLE_COMM_VI_StartMIPI` reset and clock
+  sequence (`CVI_MIPI_RESET_SENSOR`, `CVI_MIPI_RESET_MIPI`,
+  `CVI_MIPI_SET_DEV_ATTR`, `CVI_MIPI_ENABLE_SENSOR_CLOCK`, `usleep(20)`,
+  `CVI_MIPI_UNRESET_SENSOR`) on profile 0 (device 0, lanes `2,4,3,1,0`, zero PN
+  swaps).
+- The resolved 31.0 GB removable card (`/dev/disk4`) was flashed with v35.
+  Immediate raw readback verified the embedded boot FIT (`1ef26201...`), rootfs
+  (`d8647fe7...`), and FIP (`96a0b414...`) against their audited artifacts.
+  macOS FAT bookkeeping changed the whole-card readback hash to
+  `84c7164ac8180691fc50b880e4ba5e51baf53d307a4ba10d27f8dee11589e875`;
+  embedded-artifact verification passed. The card was safely ejected.
+- Controlled hardware boot of v35 passed baseline containment: taint zero,
+  root-only `/dev/i2c-4`, non-audio ext4 verified, probe SHA-256 confirmed, and
+  both Rust services live. The corrected LT6911 snapshot reported stable HDMI
+  `0x55` and 1920x1080 input with MCU resume and no leaked I2C descriptors.
+- All six modules loaded normally. The probe executed profile 0 with the sensor
+  reset/clock sequence. Digital data lanes D2/D3 entered active high-speed
+  transfer (`hs_hst`) with clock `CK_HS=1`. Decoded format correctly recognized
+  `yuv422-8` at T100ms, T500ms, and T2000ms. Error counters rose from `31` ECC /
+  `1` WC at T0 to `5607/324` at 100ms, `27973/1634` at 500ms, and hit the
+  `65536/3822` plateau at 2s. No frame was admitted; all six modules unloaded
+  with return code zero; final module list was empty; final taint was 4096.
+- Conclusion: Sensor reset and clock sequencing correctly aligns wire framing
+  to `yuv422-8`, but protocol errors persist. Next: perform offline attribution
+  of the stock replacement `soph_mipi_rx.ko` (build #30 vs clean v7) and
+  evaluate prerequisite `soph_rtos_cmdqu` / `soph_fast_image` initialization to
+  recover clean framing from source.
+
+## Raw-frame probe candidate v36 hardware result
+
+- Path: `out/phase3-raw-frame-v36/cleankvm-phase1.img`
+- Size: 79,692,288 bytes
+- SHA-256: `2198051a352397e6402903c30bb8f4a94b11b9fbdd9ab56f999e0b128e998fc2`
+- Probe SHA-256: `4a8aa49e0a518e5125899937317ae3c233848e0a0f3fd0650966974dc7df51aa`
+- Target SD card `/dev/rdisk4` (32.0 GB) flashed and verified: raw sector readback
+  (`81fcb72a...`) passed byte-for-byte verification for embedded `boot.sd`
+  (`1ef26201...`), `rootfs.ext4` (`bc9b2da7...`), and `fip.bin` (`96a0b414...`).
+- Hardware boot under serial control passed baseline containment: taint zero,
+  non-audio ext4 verified, probe SHA-256 confirmed, and LT6911 confirmed locked
+  to HDMI input `0x86:0xa3 = 0x55` at 1920x1080 with MCU resume.
+- All six quarantined modules loaded with return code 0 (`soph_sys`, `soph_base`,
+  `soph_mipi_rx`, `soph_snsr_i2c`, `soph_vi`, `soph_vpss`).
+- Probe execution results:
+  - Moving `CVI_VI_SetDevAttr(0)` and `CVI_VI_EnableDev(0)` before MIPI setup
+    successfully activated `clk_csi_mac0` and MAC FIFO drainage (`fifofull: 0`).
+  - At T0, initial MIPI RX errors were dramatically lower than v35: `EccErr: 50`,
+    `WcErr: 0`, `fifofull: 0`.
+  - At T100ms, errors rose to `2961` ECC / `314` WC.
+  - At ~2.1s, CIF logged: `mask the interrupt since err cnt is full: ecc = 65536, crc = 5, wc = 6741, fifo_full = 0`.
+  - `base_get_chn_buffer` reported `Mod(VI) Grp(0) Chn(0), jobs wait(0) work(2) done(0)`.
+  - `CVI_VI_GetChnFrame` timed out and failed with `0xc00e8040` (`EPERM` / `CVI_ERR_VI_BUF_EMPTY`).
+- Reverse unload succeeded completely: all 6 modules unloaded with return code 0,
+  zero remainder modules, post-taint was expected 4096, and no frame leaked.
+- Critical Root Cause Discoveries:
+  1. **Bridge Reset Disruption**: `ioctl(mipi_fd, CVI_MIPI_RESET_SENSOR, &mipi_dev)`
+     pulsed GPIO pin 353 (active-low reset on LT6911) for ~358 µs. This forced the
+     already-locked LT6911 bridge to reboot and renegotiate HDMI (~2s). The bus
+     transients during bridge renegotiation flooded the CIF receiver with 65536
+     errors, triggering automatic interrupt masking (`mask the interrupt since err cnt is full`).
+     Stock `S15kvmhwd` explicitly leaves GPIO451 high without a reset pulse.
+  2. **Unset `dphy.enable`**: `mipi.mipi_attr.dphy.hs_settle = 8` was set, but
+     `mipi.mipi_attr.dphy.enable` was left 0. In `cif.c` line 596, `cif_set_hs_settle`
+     is only called `if (attr->dphy.enable)`. The D-PHY receiver therefore never
+     configured its high-speed settle timing register.
+  3. **VI Error 0xc00e8040**: Decodes to `CVI_ID_VI` (0x0e) + `CVI_ERR_VI_BUF_EMPTY` (0x8040).
+     Because CIF masked interrupts after error saturation, no completed buffers
+     reached the `done` queue (`done(0)`), causing `GetChnFrame` to time out.
+
+## Raw-frame probe candidate v37 hardware result
+
+- Candidate v37 implemented the non-disruptive initialization in `image/phase3-raw-frame-probe.c`:
+  - `clk_csi_mac0` activated by enabling VI Dev 0 before MIPI initialization (`fifofull: 0`).
+  - Omitted `CVI_MIPI_RESET_SENSOR` to preserve the HDMI-locked LT6911 bridge state.
+  - Enabled D-PHY settle configuration via `dphy.enable = 1` and `hs_settle = 16`.
+  - Configured sensor geometry via `VI_IOCTL_SET_SNR_INFO` (`1920x1080`).
+- Result: Receiver errors remained low, but `CVI_VI_GetChnFrame` failed with `0xc00e8040`.
+  Kernel logs revealed `isp_err_chk:6573(): CSIBDG_A CH0 frm height less than setting(1080), pxl=0 lines=0`,
+  followed by `_vi_err_retrig_preraw()` looping 31 times within 6 ms and terminating the pipe.
+
+## VI driver short-circuit fix (`0011-vi-log-actual-csibdg-line-count.patch`)
+
+- **Root Cause**: `isp_err_chk` in `vi.c` treated transient dimension checks (`CH0_FRAME_HEIGHT_LS_INT`)
+  as fatal (`ret = -1`), causing `vi_irq_handler` to exit early before checking `FRAME_DONE_FE0`.
+  In addition, `vi_err_wake_up_th` exhausted its 31 retry budget in milliseconds.
+- **Fix Applied**:
+  - Removed `vi_err_wake_up_th()` on dimension interrupts; set `ret = 0` (warning only).
+  - Removed early return in `vi_irq_handler` so `FRAME_DONE_FE0` is processed when asserted.
+  - Added telemetry for `CH0_DEBUG_0` (pxl), `CH0_DEBUG_1` (lines), `CH0_DEBUG_2` (VSYNC/trig).
+- **Target Verification**:
+  - Rebuilt offline; deployed `soph_vi.ko` (`bf729726...`).
+  - The 31-retry loop was completely eliminated.
+  - Frame start interrupts (`VISofCh0Cnt`) surged to **2,681 counts at 386 FPS**, confirming
+    continuous high-speed frame synchronization.
+
+## CIF D-PHY diagnostic unpacking patch (`0012-cif-fix-pad-ctrl-mapping-and-phy-state.patch`)
+
+- **Root Cause**: `cif_get_csi_phy_state()` shifted `DBG_94` by 16, misaligning D0..D3 data lane
+  states into `union mipi_phy_state` (aliasing D0 to D2).
+- **Fix**: Correctly unpacked individual bitfields into `union mipi_phy_state`. Added pad PU/PD
+  clear logging.
+
+## Empirical hardware discriminator findings
+
+1. **2-Lane MIPI Isolation (Profile 6: `2,1,0,-1,-1`, `hs_settle=24`)**:
+   - Both Port 0 data lanes (physical 1 and 0) **locked solidly into `hs_hst`** with only 3 ECC errors.
+   - Proves Port 0 receiver silicon, pad routing, and deskew are completely functional.
+2. **Port 1 Physical Pin Order**:
+   - Swapped Port 1 candidate `2,3,4,1,0` immediately entered `hs_err` on physical 4.
+   - Confirms `2,4,3,1,0` (physical 4 and 3 as Port 1 far lanes) is the authentic wiring order.
+3. **4-Lane Far-Lane Phase Sweep (`lane_phase=0,0,X,0,0` with `2,4,3,1,0`)**:
+   - Swept Port 1 deskew (`lane_phase[2]`):
+     - `X = 4`: D0 in `hs_err`
+     - `X = 8`: D0 `hs_sync`, D1 `hs_sync`, D2 `hs_hst`, D3 `hs_hst` (clean near-lane lock!)
+     - `X = 10`: D0 `hs_err` (5s), `preample` (100ms)
+     - `X = 11`: D0 `hs_err`
+     - `X = 12`: D0 advanced to `preample` (state 4, immediately preceding `hs_hst`)
+     - `X = 13`: D0 in `preample`, D1 `hs_sync`, D2 `hs_hst`, D3 `alt_cal`
+     - `X = 14`: D0 `hs_err`
+     - `X = 16`: D0 `hs_err`
+   - *Timing window*: The manual deskew window for Port 1 far lanes is centered at 12–13.
+4. **Near-Lane Phase Evaluation (`lane_phase[1]`)**:
+   - Vendor default `lane_phase[1] = 0x03` caused D2 to degrade to `hs_sync`. Zero delay
+     (`lane_phase[1] = 0`) is optimal for Port 0 near lanes.
+5. **Clock Delay Evaluation (`lane_phase[0]`)**:
+   - Tested `lane_phase=1,0,12,0,0`: offset common clock delay, degrading near-lane reception.
+6. **High-Speed Settle Evaluation (`hs_settle`)**:
+   - Tested `hs_settle = 24` on 4-lane mode: at T0, D0 reached `preample` even at `lane_phase[2] = 8`.
+
+## Architectural root cause
+
+- **4-Lane Byte Striping**: MIPI CSI-2 4-lane protocol distributes byte payloads across all four
+  lanes. Because far lanes D0/D1 remain in `preample`/`hs_sync` rather than `hs_hst`, payload
+  bytes cannot be deserialized, yielding `pxl=0, lines=0`. `FRAME_DONE_FE0` cannot fire until
+  all 4 lanes lock into `hs_hst`.
+- **Clock Phase Control (`CSI_CK_PHASE`)**:
+  In `REG_SENSOR_PHY_4L_08` (bits 16..23), `CSI_CK_PHASE` controls the internal clock
+  sampling phase in the 4-lane D-PHY receiver block (currently default 0x00). Adjusting
+  `CSI_CK_PHASE` provides the required sampling phase shift to transition both far lanes
+  from `preample`/`hs_sync` into `hs_hst`.
+- **Independent Per-Lane Deskew**:
+  `cif.c` currently forces the same deskew code onto both far lanes (`lane_phase[2]`).
+  Enabling independent 8-bit deskew (`DESKEW_CODE3` and `DESKEW_CODE4`) allows fine-tuning
+  physical lane 3 and 4 individually.
+
+## Ordered next work
+
+1. **Implement `CSI_CK_PHASE` and Per-Lane Deskew in CIF**:
+   - Add module parameters / controls in `cif.c` for `CSI_CK_PHASE` (`REG_08` bits 16..23).
+   - Map `lane_phase[0..4]` to individual physical lanes (clk, phys 4, phys 3, phys 1, phys 0)
+     to allow independent deskew tuning of physical lanes 3 and 4.
+2. **Compile and Deploy Updated `soph_mipi_rx.ko`**:
+   - Build offline via container; export and hash module.
+   - Run a targeted 2D sweep of `CSI_CK_PHASE` (1..15) with far-lane phase (12..13).
+3. **Capture Single 1080p Frame**:
+   - When all four lanes lock into `hs_hst`, verify `CSIBDG_A` receives 1080 lines and
+     `FRAME_DONE_FE0` asserts.
+   - `CVI_VI_GetChnFrame` will acquire `/run/cleankvm-frame.yuv422p` (4,147,200 bytes).
+   - Validate file size and SHA-256 hash.
+4. **Clean Reverse Unload Verification**:
+   - Confirm all six modules unload in reverse order with RC=0.
+   - Confirm `/proc/modules` is empty and kernel taint is 4096.
+
+
+
