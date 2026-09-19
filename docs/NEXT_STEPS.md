@@ -552,21 +552,50 @@ programming procedure.
 
 ## Ordered next work
 
-1. **Implement `CSI_CK_PHASE` and Per-Lane Deskew in CIF**:
-   - Add module parameters / controls in `cif.c` for `CSI_CK_PHASE` (`REG_08` bits 16..23).
-   - Map `lane_phase[0..4]` to individual physical lanes (clk, phys 4, phys 3, phys 1, phys 0)
-     to allow independent deskew tuning of physical lanes 3 and 4.
-2. **Compile and Deploy Updated `soph_mipi_rx.ko`**:
-   - Build offline via container; export and hash module.
-   - Run a targeted 2D sweep of `CSI_CK_PHASE` (1..15) with far-lane phase (12..13).
-3. **Capture Single 1080p Frame**:
+1. **Isolate the clock-phase hypothesis first**: tracked patch
+   `0013-cif-bounded-clock-phase-diagnostic.patch` adds a load-time-only
+   `csi_ck_phase` control for four-lane RX. Zero preserves the SDK setting;
+   1..15 are allowed; other values reject configuration. The patch passes
+   `git apply --check` against the pinned SDK and has now been built offline
+   in an isolated copy of `cleankvm-work-v35`. It has **not** been loaded or
+   run on hardware.
+   The field's register name is source evidence for a clock-phase control,
+   not proof that it will fix the far lanes. Hold per-lane deskew constant.
+2. **Confirm the target baseline**, then perform one
+   bounded, fresh load/unload per selected phase. Start with phase 0 baseline
+   and a few values, inspecting counters, all four lane states, VI line count,
+   and cleanup. Expand the range only if those samples show a useful trend.
+   Do not run a blind two-dimensional hardware sweep.
+3. **Only if phase isolation warrants it**, add independently controlled
+   far-lane deskew in a separate patch and test one variable at a time.
+4. **Capture a single 1080p frame only after a clean receiver gate**:
    - When all four lanes lock into `hs_hst`, verify `CSIBDG_A` receives 1080 lines and
      `FRAME_DONE_FE0` asserts.
    - `CVI_VI_GetChnFrame` will acquire `/run/cleankvm-frame.yuv422p` (4,147,200 bytes).
    - Validate file size and SHA-256 hash.
-4. **Clean Reverse Unload Verification**:
+5. **Clean Reverse Unload Verification**:
    - Confirm all six modules unload in reverse order with RC=0.
-   - Confirm `/proc/modules` is empty and kernel taint is 4096.
+   - Confirm the six test modules are absent from `/proc/modules`, no frame
+     file remains, and taint matches baseline plus the expected out-of-tree bit.
 
+The 386 FPS `VISofCh0Cnt` observation is an interrupt rate, not yet validated
+as a frame rate. Likewise, the absence of `FRAME_DONE_FE0` with zero CSI bridge
+line count supports, but does not uniquely prove, an all-four-lane lock cause.
 
+### Prepared clock-phase-only diagnostic module
+
+- Output: `out/phase3-clock-phase-module-v1/soph_mipi_rx.ko` (ignored local
+  artifact), SHA-256
+  `2e6cdcb8e8ec0e0fafe580dd54f86eace67dfe1cf8c90b80d969673a70ca863f`.
+- Built in `cleankvm-work-clock-phase-v1` with networking disabled, using the
+  qualified v35 kernel build and a copy of the source that already carried the
+  `0012` PHY-state diagnostic. The original source volume was not modified.
+- ELF64 RISC-V relocatable; vermagic is
+  `5.10.4-tag- preempt mod_unload riscv`. Its undefined-symbol set matches the
+  preceding diagnostic receiver module (SHA-256 `382dd2dc...`). The v39
+  retained image uses the same FIT hash as v35 (`1ef26201...`).
+- This is a quarantined diagnostic module, not a new image or admitted video
+  component. Before any target load, confirm the device's running kernel and
+  module baseline, and use a bounded harness that verifies every load/unload
+  return code and leaves no frame file.
 

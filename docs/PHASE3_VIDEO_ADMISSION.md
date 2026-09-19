@@ -805,5 +805,20 @@ Testing `hs_settle = 24` on 4-lane mode widened the settle window: at T0, D0 rea
    independent 8-bit registers (`DESKEW_CODE3` and `DESKEW_CODE4`). Enabling independent
    per-lane control will allow fine-tuning physical lane 3 and 4 separately.
 
+### Admission interpretation (2026-09-19)
 
+The phase and deskew observations are diagnostic correlations, not a proven
+architectural root cause. In particular, `CSI_CK_PHASE` is a named register
+field, but its effect on these far lanes has not been measured. The 386/s
+`VISofCh0Cnt` rate is an interrupt rate, not an established frame rate; the
+CSI bridge still reported zero pixels/lines and no completed frame. Patch
+`0013-cif-bounded-clock-phase-diagnostic.patch` therefore exposes only a
+load-time 0..15 clock-phase control, with zero preserving the SDK value. It
+passed patch applicability against the pinned source and compiled offline in
+an isolated SDK copy. The output receiver module SHA-256 is
+`2e6cdcb8e8ec0e0fafe580dd54f86eace67dfe1cf8c90b80d969673a70ca863f`;
+its RISC-V vermagic and undefined-symbol set match the qualified diagnostic
+baseline. Target validation remains pending. Per-lane deskew is deliberately deferred so the
+next test changes one receiver variable at a time. No video admission follows
+from these findings alone.
 

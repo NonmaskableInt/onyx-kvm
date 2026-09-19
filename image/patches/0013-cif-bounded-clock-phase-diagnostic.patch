@@ -1,0 +1,56 @@
+diff --git a/osdrv/interdrv/v2/cif/chip/mars/cif.c b/osdrv/interdrv/v2/cif/chip/mars/cif.c
+--- a/osdrv/interdrv/v2/cif/chip/mars/cif.c
++++ b/osdrv/interdrv/v2/cif/chip/mars/cif.c
+@@ -76,6 +76,11 @@ static int lane_phase[LANE_SKEW_NUM] = {0x00, 0x03, 0x08, 0x00, 0x03};
+ static int count;
+ module_param_array(lane_phase, int, &count, 0664);
+ 
++/* Diagnostic only: zero preserves the SDK register value. */
++static int csi_ck_phase;
++module_param(csi_ck_phase, int, 0444);
++MODULE_PARM_DESC(csi_ck_phase, "4-lane CSI clock phase diagnostic (0..15)");
++
+ static int bypass_mac_clk;
+ module_param(bypass_mac_clk, int, 0644);
+ MODULE_PARM_DESC(bypass_mac_clk, "byass mac clk");
+@@ -540,8 +545,14 @@ static int _cif_set_attr_mipi(struct cvi_cif_dev *dev,
+ 	 */
+ 	if (csi->lane_num == 4) {
++		if (csi_ck_phase < 0 || csi_ck_phase > 15)
++			return -EINVAL;
+ 		if (LANE_IS_PORT1(attr->lane_id[0]))
+ 			cif_set_clk_dir(ctx, CIF_CLK_P12P0);
+ 		else
+ 			cif_set_clk_dir(ctx, CIF_CLK_P02P1);
++		if (csi_ck_phase) {
++			cif_set_4lane_clk_phase(ctx, (uint8_t)csi_ck_phase);
++			pr_info("cif: diagnostic CSI_CK_PHASE=%d\n", csi_ck_phase);
++		}
+ 
+ 		for (i = 0; (i < csi->lane_num + 1); i++) {
+diff --git a/osdrv/interdrv/v2/cif/chip/mars/drv/cif_drv.c b/osdrv/interdrv/v2/cif/chip/mars/drv/cif_drv.c
+--- a/osdrv/interdrv/v2/cif/chip/mars/drv/cif_drv.c
++++ b/osdrv/interdrv/v2/cif/chip/mars/drv/cif_drv.c
+@@ -1350,5 +1350,13 @@ void cif_set_clk_dir(struct cif_ctx *ctx, enum cif_clk_dir_e dir)
+ 	}
+ }
+ 
++void cif_set_4lane_clk_phase(struct cif_ctx *ctx, uint8_t phase)
++{
++	uintptr_t wrap_4l = ctx->wrap_phys_regs[CIF_WRAP_BLK_ID_4L];
++
++	CIF_WR_BITS(wrap_4l, REG_SENSOR_PHY_4L_T,
++		      REG_08, CSI_CK_PHASE, phase);
++}
++
+ void cif_set_hs_settle(struct cif_ctx *ctx, uint8_t hs_settle)
+ {
+diff --git a/osdrv/interdrv/v2/cif/chip/mars/drv/cif_drv.h b/osdrv/interdrv/v2/cif/chip/mars/drv/cif_drv.h
+--- a/osdrv/interdrv/v2/cif/chip/mars/drv/cif_drv.h
++++ b/osdrv/interdrv/v2/cif/chip/mars/drv/cif_drv.h
+@@ -533,4 +533,5 @@
+ int cif_get_csi_phy_state(struct cif_ctx *ctx, union mipi_phy_state *state);
+ void cif_set_hs_settle(struct cif_ctx *ctx, uint8_t hs_settle);
+ void cif_set_bt_fmt_out(struct cif_ctx *ctx, enum ttl_bt_fmt_out fmt_out);
++void cif_set_4lane_clk_phase(struct cif_ctx *ctx, uint8_t phase);
+ void cif_set_clk_dir(struct cif_ctx *ctx, enum cif_clk_dir_e dir);
