@@ -1,7 +1,14 @@
 # Phase 3 video admission
 
-Status: source-closure review; no video module or vendor middleware is admitted
-to a CleanKVM image yet.
+Status: diagnostic modules are present only in a non-autoload quarantine;
+video capture, streaming, and MCP exposure are not admitted.
+
+Current checkpoint (2026-09-19): v40 is built, flashed, read-back verified,
+and safely ejected, but has not been booted. Its clock-phase receiver module
+is a bounded source-built diagnostic (SHA-256 `2e6cdcb8e8ec0e0fafe580dd54f86eace67dfe1cf8c90b80d969673a70ca863f`),
+not a proven fix. The next gate is a zero-taint/non-audio target baseline,
+exact binary identity checks, then a phase-0 load/probe/reverse-unload cycle
+with fixed deskew. No video module starts automatically.
 
 ## Hardware target
 
@@ -787,23 +794,23 @@ reception without advancing far lanes.
 Testing `hs_settle = 24` on 4-lane mode widened the settle window: at T0, D0 reached
 `preample` even at `lane_phase[2] = 8`.
 
-## Architectural root cause & path to full frame lock
+## Working receiver hypotheses (not established root cause)
 
 1. **4-Lane Byte Striping Requirement**:
-   In MIPI CSI-2 4-lane mode, the packet payload bytes are striped across all four data lanes
-   ($D0 \to D1 \to D2 \to D3 \to D0\dots$). The CSI bridge cannot deserialize pixel lines
-   (`pxl=0, lines=0`) until ALL four lanes enter `hs_hst`. Start-of-frame packets trigger
-   `VISofCh0Cnt` (386 FPS), but `FRAME_DONE_FE0` cannot fire until full line data arrives.
+   MIPI CSI-2 stripes packet bytes across configured data lanes. Far-lane states
+   short of stable `hs_hst` correlate with zero CSI-bridge pixel/line counts and
+   no completed frame; they do not uniquely prove the cause. The observed
+   386/s `VISofCh0Cnt` is an interrupt rate, not a validated frame rate.
 2. **Clock Phase Control (`CSI_CK_PHASE`)**:
-   In `REG_SENSOR_PHY_4L_08` (bits 16..23), `CSI_CK_PHASE` controls the internal clock
-   sampling phase in the 4-lane D-PHY receiver block. Currently unconfigured (0x00).
-   Adjusting `CSI_CK_PHASE` provides the required sampling phase shift to transition both
-   far lanes from `preample`/`hs_sync` into `hs_hst`.
+   `REG_SENSOR_PHY_4L_08` defines `CSI_CK_PHASE` at bits 16..23. Its effect
+   on the far lanes is unmeasured; v40 isolates that question while preserving
+   the SDK value when the diagnostic parameter is zero.
 3. **Independent Per-Lane Deskew**:
    `cif.c` currently forces the same deskew code onto both far lanes (`lane_phase[2]`).
    However, the hardware registers (`REG_SENSOR_PHY_TOP_84` and `REG_88`) provide
    independent 8-bit registers (`DESKEW_CODE3` and `DESKEW_CODE4`). Enabling independent
-   per-lane control will allow fine-tuning physical lane 3 and 4 separately.
+   per-lane control could permit a later, independently bounded test of
+   physical lanes 3 and 4 if clock-phase isolation warrants it.
 
 ### Admission interpretation (2026-09-19)
 
@@ -818,7 +825,8 @@ passed patch applicability against the pinned source and compiled offline in
 an isolated SDK copy. The output receiver module SHA-256 is
 `2e6cdcb8e8ec0e0fafe580dd54f86eace67dfe1cf8c90b80d969673a70ca863f`;
 its RISC-V vermagic and undefined-symbol set match the qualified diagnostic
-baseline. Target validation remains pending. Per-lane deskew is deliberately deferred so the
-next test changes one receiver variable at a time. No video admission follows
+baseline. The v40 image containing this module was verified from SD-card raw
+read-back and ejected; target boot and validation remain pending. Per-lane
+deskew is deliberately deferred so the next test changes one receiver
+variable at a time. No video admission follows
 from these findings alone.
-

@@ -2,7 +2,23 @@
 
 Updated: 2026-09-19
 
-## Current state
+## Current checkpoint
+
+- The source-auditable v40 clock-phase diagnostic image is built, flashed to
+  the uniquely resolved 31 GB removable card, verified by raw embedded FIT,
+  rootfs, and FIP read-back, and safely ejected. It has **not** been booted or
+  tested on target. See the complete image and module hashes below.
+- The diagnostic receiver adds a default-off, load-time-only `csi_ck_phase`
+  control. It is a hypothesis test, not a video fix. The prior v37/sweep work
+  showed stable HDMI input and near-lane reception but zero completed frames.
+- Video capture and Phase 3a audio remain unadmitted. Do not auto-load the six
+  video modules or expose either capability through MCP.
+- Next physical action: insert v40 into the device and power it. Confirm the
+  kernel, zero-taint/non-audio baseline, and installed module/probe hashes
+  before loading anything. Then run phase 0 with fixed deskew and verified
+  reverse cleanup; expand phase tests only if observations justify it.
+
+## Historical state and investigation timeline
 
 - Independent boot, UART, Ethernet DHCP, Rust services, authenticated MCP, and
   fail-closed HID have passed their current development gates.
@@ -47,7 +63,7 @@ Updated: 2026-09-19
   It is root-only, never starts automatically, reads before writing, requires
   `--program-e21`, verifies all 256 bytes, and resumes the MCU on exit.
 
-## Ordered next work
+## Historical next-work plan (superseded by the current checkpoint)
 
 1. Boot v26 and run its bounded LT flash backup once. Preserve and hash the
    resulting 800,000-byte dump before any further bridge mutation, then map its
@@ -534,17 +550,17 @@ programming procedure.
 6. **High-Speed Settle Evaluation (`hs_settle`)**:
    - Tested `hs_settle = 24` on 4-lane mode: at T0, D0 reached `preample` even at `lane_phase[2] = 8`.
 
-## Architectural root cause
+## Working receiver hypothesis (not an admission finding)
 
-- **4-Lane Byte Striping**: MIPI CSI-2 4-lane protocol distributes byte payloads across all four
-  lanes. Because far lanes D0/D1 remain in `preample`/`hs_sync` rather than `hs_hst`, payload
-  bytes cannot be deserialized, yielding `pxl=0, lines=0`. `FRAME_DONE_FE0` cannot fire until
-  all 4 lanes lock into `hs_hst`.
+- **4-Lane Byte Striping**: MIPI CSI-2 distributes packet bytes across the
+  configured data lanes. The far lanes have not shown stable `hs_hst`, while
+  the CSI bridge reports `pxl=0, lines=0` and no completed frame. This is
+  consistent with incomplete lane reception, but does not uniquely establish
+  why `FRAME_DONE_FE0` is absent.
 - **Clock Phase Control (`CSI_CK_PHASE`)**:
-  In `REG_SENSOR_PHY_4L_08` (bits 16..23), `CSI_CK_PHASE` controls the internal clock
-  sampling phase in the 4-lane D-PHY receiver block (currently default 0x00). Adjusting
-  `CSI_CK_PHASE` provides the required sampling phase shift to transition both far lanes
-  from `preample`/`hs_sync` into `hs_hst`.
+  `REG_SENSOR_PHY_4L_08` defines this eight-bit field at bits 16..23.
+  Whether changing it improves far-lane lock is unmeasured. v40 tests only
+  that bounded hypothesis, starting from the SDK-preserving zero setting.
 - **Independent Per-Lane Deskew**:
   `cif.c` currently forces the same deskew code onto both far lanes (`lane_phase[2]`).
   Enabling independent 8-bit deskew (`DESKEW_CODE3` and `DESKEW_CODE4`) allows fine-tuning
