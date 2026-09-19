@@ -599,3 +599,24 @@ line count supports, but does not uniquely prove, an all-four-lane lock cause.
   module baseline, and use a bounded harness that verifies every load/unload
   return code and leaves no frame file.
 
+### Prepared SD image v40 (not yet booted)
+
+- Path: `out/phase3-clock-phase-v40/cleankvm-phase1.img`, 79,692,288 bytes,
+  SHA-256 `bcb1b845152ea5d5974a4bb0eec54a5f10e63e4a231fbabbd0afe8fbc057e1b4`.
+- Network-disabled incremental rootfs build passed its config, identity,
+  probe-ownership, non-audio-node, and complete six-module audits. The
+  packaged receiver is `2e6cdcb8...`, patched VI is `bf729726...`, and
+  root-only probe is `15128765...`; each was independently checked inside
+  the final ext4. The FIT is the previously qualified video-only
+  `1ef26201339516fdd40816bdade7ba4578a0c84c41c93e358a4ba2edd709a79b`.
+- The SD resolver identified exactly one external removable target:
+  `/dev/disk4`, USB, 30,992,760,832 bytes, existing `CLEANKVM` layout.
+  After unmount, exactly 79,692,288 bytes were written. Raw read-back of the
+  same span had SHA-256
+  `5341ca5a0d3bfbdf2b06ac723012dd90f1e661b2e867a3329891d1429e329714`;
+  macOS FAT bookkeeping changed the whole span, but embedded FIT, rootfs,
+  and FIP each matched the audited artifacts. The card was safely ejected.
+- Next: insert the card and power the device. Before loading any quarantined
+  module, confirm zero-taint/non-audio baseline, running kernel, and exact
+  probe/module hashes. Test phase 0 first, with fixed deskew and verified
+  reverse cleanup; no video admission is implied by this flash.
