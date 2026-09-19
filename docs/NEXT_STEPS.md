@@ -691,15 +691,40 @@ no residual processes or frame files).
 
 #### Key Takeaways
 
-1. **D1 Inversion Discovery**: Physical lane 3 (`ML_TX1P`/`N`) is inverted on the
-   NanoKVM Lite hardware layout. Inverting D1 (`pn_swap=0,0,1,0,0`) unlocked
-   active video streaming of 98 lines and 187,663 pixels.
+1. **D1 Receiver Polarity Setting**: `pn_swap=0,0,1,0,0` is an empirically effective
+   receiver-side setting that unlocks active video streaming (98 lines, 187,663 pixels,
+   `yuv422-8` decode). This is a promising receiver configuration, though not yet
+   proof of a PCB differential pair inversion since stock declared zero PN swaps (`0,0,0,0,0`).
 2. **D0 and D3 Polarities Verified Non-Inverted**: Inverting D0 completely kills
    SOF and mutes the link across all 8 permutations. Inverting D3 breaks packet
    header decoding across all permutations. Both must remain `pn_swap=0`.
 3. **Line-98 Truncation Cause**: Error saturation reached 65536 ECC / 5805 WC
-   errors after ~2.1 seconds, triggering CIF interrupt masking.
-4. **Immediate Target**: Fine-tune Port 1 deskew and clock/data sampling phase
-   around `0,0,1,0,0` to stop error growth, allowing streaming to reach line 1080
-   and trigger `FRAME_DONE_FE0`.
+   errors after ~2.1 seconds, triggering CIF interrupt masking (`cif.c:2763-2777`).
+
+### Sequential Single-Variable Isolation Results (2026-09-19)
+
+A strictly sequential investigation was performed around `pn_swap=0,0,1,0,0`:
+1. **Baseline Confirmation (`lane_phase[2]=12`, `hs_settle=16`, `csi_ck_phase=0`)**:
+   - Confirmed `yuv422-8` decode. Early telemetry: T0 EccErr=35; T100 EccErr=3576
+     (35.4k errors/sec). At T100, D3 showed `hs_err`. Interrupt masking triggered at
+     T=1.9s at 65,536 ECC / 5,951 WC errors after buffering 3 lines (5,760 px).
+2. **Deskew Alone (10, 11, 13 near 12 at settle 16, ck_phase 0)**:
+   - Deskew 10: T100 CRC dropped to 395, WC to 305; D3 stayed in `hs_idle` without `hs_err`;
+     delivered 4 lines (6,578 px).
+   - Deskew 11: Delivered **11 lines (20,530 px)** (`pxl=20530 line=11`).
+   - Deskew 13: Higher WC errors (321 at T100); 0 lines.
+   - Result: Deskew window is strictly peaked at 11–12.
+3. **Settle Alone (20, 24 at deskew 12, ck_phase 0)**:
+   - Settle 20: Slashed CRC errors by **>80%** (T100 CRC dropped from 469 to 84; final
+     CRC dropped from 8,461 to 1,621). Delivered 2 lines (3,352 px).
+   - Settle 24: Decode remained `unknown`, SOF=0. Settle 24 exceeds physical window (ruled out).
+4. **Clock Phase Evaluation (`csi_ck_phase=8` at deskew 12, settle 16)**:
+   - Kernel confirmed `CSI_CK_PHASE=8` write.
+   - Delivered **76 lines and 145,920 pixels** into `CSIBDG_A` before interrupt masking!
+5. **Driver Interrupt Masking Mechanism Identified**:
+   - Upstream `cif.c:2763-2777` unconditionally executes `cif_mask_csi_int_sts(ctx, 0x1F)`
+     when `errcnt_ecc > 0xFFFF`. Because 1-bit Hamming ECC errors increment on every packet
+     header (~34,000/sec at 1080p30), the 16-bit software counter saturates in ~1.9 seconds,
+     artificially halting frame delivery even while packets stream cleanly.
+
 

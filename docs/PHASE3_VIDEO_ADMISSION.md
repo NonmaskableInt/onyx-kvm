@@ -928,8 +928,10 @@ and `hs_settle=16`. Every single run verified:
    - **187,663 pixels and 98 active video lines** successfully streamed into `CSIBDG_A`.
    - The pixel-per-line ratio `187,663 / 98 = 1,914.9 px/line` directly matches the
      1920 horizontal active video width of 1080p.
-   - This provides empirical proof that physical lane 3 (`ML_TX1P`/`N`) is
-     differentially inverted on the NanoKVM Lite hardware layout.
+   - This demonstrates that `pn_swap=0,0,1,0,0` is a promising, empirically effective
+     receiver-side setting for decoding video on this board; however, it is not yet
+     proof of a PCB differential pair inversion, as stock configuration declared
+     zero PN swaps (`0,0,0,0,0`).
 
 4. **Line-98 Truncation Root Cause**:
    In Test 2, frame streaming progressed to line 98 before halting. The kernel
@@ -947,4 +949,46 @@ and `hs_settle=16`. Every single run verified:
      `isp_err_chk: CSIBDG_A CH0 frm width greater than setting(1920), pxl=1921 line=0`.
    - Exactly one extra pixel (1921 instead of 1920) is sampled at line start,
      indicating byte de-striping alignment offset on Port 1.
+
+### Sequential Parameter Isolation Evaluation (2026-09-19)
+
+Following the baseline polarity evaluation, a strictly sequential single-variable
+investigation was conducted around `pn_swap=0,0,1,0,0`:
+1. Baseline confirmation at original settings (`lane_phase[2]=12`, `hs_settle=16`, `csi_ck_phase=0`).
+2. Deskew variation alone near 12 (`lane_phase[2]` = 10, 11, 13).
+3. Settle variation alone (`hs_settle` = 20, 24) at selected deskew.
+4. Clock phase evaluation (`csi_ck_phase` = 8) last.
+
+Every attempt used a fresh module load/unload cycle, verified clean reverse unloading (`RC=0`),
+empty `/proc/modules`, and final kernel taint `4096`.
+
+#### Sequential Test Results Summary
+
+| Step | Parameter Varied | Other Settings | T0 Errors (Ecc/Crc/Wc) | T100ms Errors (Ecc/Crc/Wc) | T100ms Lanes | Received Data | Final Status |
+|---|---|---|---|---|---|---|---|
+| 1. Baseline Confirm | `lane_phase[2]=12` | settle=16, ck_phase=0 | 35 / 2 / 0 | 3576 / 469 / 319 | D0=hst, D1=idle, D2=hst, D3=err | 3 lines (5,760 px) | Confirmed `yuv422-8`, 35.4k EccErr/s; masked at 1.9s (65536 ECC / 5951 WC) |
+| 2a. Deskew 10 | `lane_phase[2]=10` | settle=16, ck_phase=0 | 35 / 3 / 0 | 3493 / 395 / 305 | D0=hst, D1=idle, D2=hst, D3=idle | **4 lines (6,578 px)** | D3 stayed clean (no `hs_err`); CRC & WC errors dropped |
+| 2b. Deskew 11 | `lane_phase[2]=11` | settle=16, ck_phase=0 | 79 / 15 / 0 | 3566 / 481 / 304 | D0=hst, D1=idle, D2=hst, D3=idle | **11 lines (20,530 px)** | Stable streaming across 11 lines; masked at 1.9s |
+| 2c. Deskew 13 | `lane_phase[2]=13` | settle=16, ck_phase=0 | 64 / 6 / 0 | 3440 / 471 / 321 | D0=idle, D1=idle, D2=idle, D3=idle | 0 lines | Higher WC errors; line reception collapsed to 0 |
+| 3a. Settle 20 | `hs_settle=20` | deskew=12, ck_phase=0 | 57 / 1 / 0 | 3311 / **84** / 372 | D0=hst, D1=idle, D2=hst, D3=idle | 2 lines (3,352 px) | **82% drop in T100 CRC errors** (84 vs 469); final CRC dropped from 8,461 to 1,621 |
+| 3b. Settle 24 | `hs_settle=24` | deskew=12, ck_phase=0 | 1 / 0 / 0 | 1 / 0 / 0 | D0=hst, D1=idle, D2=hst, D3=idle | 0 lines | Decode `unknown`, SOF=0; settle window too long (ruled out) |
+| 4. Clock Phase 8 | `csi_ck_phase=8` | deskew=12, settle=16 | 77 / 14 / 15 | 3474 / 442 / 324 | D0=hst, D1=idle, D2=hst, D3=idle | **76 lines (145,920 px)** | **145,920 pixels (76 full lines)** received before 65536 ECC mask at 1.9s |
+
+#### Key Insights From Sequential Isolation
+
+1. **Deskew Window Centered at 11–12**:
+   - Deskew 13 degraded reception to 0 lines.
+   - Deskew 10 achieved 4 lines (6,578 px) and prevented D3 `hs_err`.
+   - Deskew 11 achieved 11 lines (20,530 px).
+   - Deskew 12 achieved up to 98 lines (187,663 px).
+2. **Settle Window Dynamics**:
+   - Settle 24 completely fails to latch high-speed packet sync (`unknown` decode).
+   - Settle 20 slashed CRC transmission errors by >80% (from 8,461 down to 1,621), demonstrating that high-speed preamble settling is critical for CRC integrity.
+3. **Clock Phase 8 Unlocked 76 Lines (145,920 Pixels)**:
+   - Setting `csi_ck_phase=8` allowed 145,920 pixels (76 active video lines) to flow into `CSIBDG_A`.
+4. **Driver Error-Masking Mechanism Localized (`cif.c:2763-2777`)**:
+   - Inspection of `cif.c` reveals that `link->sts_csi.errcnt_ecc > 0xFFFF` triggers `cif_mask_csi_int_sts(ctx, 0x1F)`.
+   - At ~34,000 ECC errors/sec (approx. 1 correctable 1-bit Hamming error per line at 1080p30), the 16-bit software counter saturates at 65,536 after ~1.9 seconds.
+   - The driver's automatic interrupt masking halts subsequent line interrupts and `FRAME_DONE_FE0` delivery, artificially terminating frame acquisition even while video packets are actively streaming.
+
 
