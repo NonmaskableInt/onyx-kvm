@@ -4,11 +4,12 @@ Status: diagnostic modules are present only in a non-autoload quarantine;
 video capture, streaming, and MCP exposure are not admitted.
 
 Current checkpoint (2026-09-19): v40 is built, flashed, read-back verified,
-and safely ejected, but has not been booted. Its clock-phase receiver module
+and booted. Its clock-phase receiver module
 is a bounded source-built diagnostic (SHA-256 `2e6cdcb8e8ec0e0fafe580dd54f86eace67dfe1cf8c90b80d969673a70ca863f`),
-not a proven fix. The next gate is a zero-taint/non-audio target baseline,
-exact binary identity checks, then a phase-0 load/probe/reverse-unload cycle
-with fixed deskew. No video module starts automatically.
+not a proven fix. The zero-taint/non-audio target baseline and exact binary
+identity checks passed. Separate phase-0 and phase-8 cycles at fixed deskew
+both failed to produce a frame; both passed reverse cleanup. No video module
+starts automatically. The clock-phase sweep is paused pending D3 lane analysis.
 
 ## Hardware target
 
@@ -816,7 +817,8 @@ Testing `hs_settle = 24` on 4-lane mode widened the settle window: at T0, D0 rea
 
 The phase and deskew observations are diagnostic correlations, not a proven
 architectural root cause. In particular, `CSI_CK_PHASE` is a named register
-field, but its effect on these far lanes has not been measured. The 386/s
+field; the subsequent phase-0/phase-8 comparison below found no improvement.
+The 386/s
 `VISofCh0Cnt` rate is an interrupt rate, not an established frame rate; the
 CSI bridge still reported zero pixels/lines and no completed frame. Patch
 `0013-cif-bounded-clock-phase-diagnostic.patch` therefore exposes only a
@@ -826,7 +828,39 @@ an isolated SDK copy. The output receiver module SHA-256 is
 `2e6cdcb8e8ec0e0fafe580dd54f86eace67dfe1cf8c90b80d969673a70ca863f`;
 its RISC-V vermagic and undefined-symbol set match the qualified diagnostic
 baseline. The v40 image containing this module was verified from SD-card raw
-read-back and ejected; target boot and validation remain pending. Per-lane
-deskew is deliberately deferred so the next test changes one receiver
+read-back and ejected. Its subsequent target boot and first two phase tests
+are recorded below. Per-lane deskew is deliberately deferred so each test changes one receiver
 variable at a time. No video admission follows
 from these findings alone.
+
+### v40 phase-isolation result (2026-09-19)
+
+The verified v40 card booted the expected `5.10.4-tag-` kernel into recovery.
+Before module loading, taint was zero, no `soph_*` module or audio node was
+present, receiver/VI/probe hashes matched the audited ext4, and both Rust
+services were running. The LT bridge returned HDMI lock `0x55`, 1080 active
+lines and 1920 active pixels using the source-backed stop/read/resume sequence;
+the MCU resumed and no I2C descriptor leaked.
+
+Each of two fresh six-module cycles used the stock lane map `2,4,3,1,0`, zero
+PN swaps, `lane_phase=0,0,12,0,0`, and D-PHY settle 24. With
+`csi_ck_phase=0`, and again with `csi_ck_phase=8`, receiver ECC/CRC/header/
+word-count/FIFO errors stayed at zero. Digital D0/D1/D2 were in `hs_hst`,
+while D3 alternated `hs_sync`/`hs_idle`; decode remained unknown and VI
+reported zero starts and completions. The bounded frame request returned
+`0xc00e8040` and created no frame. The phase-8 parameter read back 8 and
+kernel log confirmed `CSI_CK_PHASE=8`, so the no-change result is not due to
+an unapplied parameter. Every module load and reverse unload returned zero;
+the final test-module set was empty, final taint 4096, and frame file absent.
+
+This challenges the earlier far-lane-only explanation. A wider clock-phase
+sweep is not justified by these samples. The next bounded inquiry is the
+digital D3 to physical lane-0 mapping, including polarity and stock-vs-clean
+receiver state, before another configuration change. Video remains closed.
+
+Pinned source confirms the mapping under the selected product profile:
+`cif_set_lane_id()` assigns its fifth lane selection to `CSI_LANE_D3_SEL`,
+and `DBG_94` defines D3 data-HS state at bits 12..14. The corrected
+diagnostic unpacker reads those bits. Thus digital D3 corresponds to physical
+lane 0 in `2,4,3,1,0`, and the observed idle/sync is not explained by the old
+bit-shift reporting bug. Polarity and stock-state differences remain open.

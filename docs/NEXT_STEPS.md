@@ -4,19 +4,28 @@ Updated: 2026-09-19
 
 ## Current checkpoint
 
-- The source-auditable v40 clock-phase diagnostic image is built, flashed to
+- The source-auditable v40 clock-phase diagnostic image was built, flashed to
   the uniquely resolved 31 GB removable card, verified by raw embedded FIT,
-  rootfs, and FIP read-back, and safely ejected. It has **not** been booted or
-  tested on target. See the complete image and module hashes below.
+  rootfs, and FIP read-back, then booted on target. Its baseline passed with
+  kernel `5.10.4-tag-`, taint 0, no `soph_*` modules or audio node, the exact
+  installed receiver/VI/probe hashes, and both Rust services running.
 - The diagnostic receiver adds a default-off, load-time-only `csi_ck_phase`
   control. It is a hypothesis test, not a video fix. The prior v37/sweep work
   showed stable HDMI input and near-lane reception but zero completed frames.
 - Video capture and Phase 3a audio remain unadmitted. Do not auto-load the six
   video modules or expose either capability through MCP.
-- Next physical action: insert v40 into the device and power it. Confirm the
-  kernel, zero-taint/non-audio baseline, and installed module/probe hashes
-  before loading anything. Then run phase 0 with fixed deskew and verified
-  reverse cleanup; expand phase tests only if observations justify it.
+- v40 phase 0 and phase 8 were tested separately at fixed
+  `lane_phase=0,0,12,0,0` and `hs_settle=24`. Both had zero ECC/CRC/header/WC
+  errors but digital D3 never achieved stable `hs_hst`; decode stayed unknown,
+  VI saw zero starts/completions, and no frame was captured. The phase-8
+  register write was confirmed in `dmesg`. The LT status remained `0x55`,
+  1920×1080. Both cycles passed six-module reverse cleanup with final taint
+  4096 and no frame file.
+- Next: stop the clock-phase sweep because phase 8 showed no improving trend.
+  Reconcile the corrected D3 state with the physical lane-0 wiring, PN polarity,
+  and stock receiver configuration using source and bounded diagnostics before
+  changing another variable. Do not infer that far-lane clock phase is the
+  established root cause.
 
 ## Historical state and investigation timeline
 
@@ -568,28 +577,21 @@ programming procedure.
 
 ## Ordered next work
 
-1. **Isolate the clock-phase hypothesis first**: tracked patch
-   `0013-cif-bounded-clock-phase-diagnostic.patch` adds a load-time-only
-   `csi_ck_phase` control for four-lane RX. Zero preserves the SDK setting;
-   1..15 are allowed; other values reject configuration. The patch passes
-   `git apply --check` against the pinned SDK and has now been built offline
-   in an isolated copy of `cleankvm-work-v35`. It has **not** been loaded or
-   run on hardware.
-   The field's register name is source evidence for a clock-phase control,
-   not proof that it will fix the far lanes. Hold per-lane deskew constant.
-2. **Confirm the target baseline**, then perform one
-   bounded, fresh load/unload per selected phase. Start with phase 0 baseline
-   and a few values, inspecting counters, all four lane states, VI line count,
-   and cleanup. Expand the range only if those samples show a useful trend.
-   Do not run a blind two-dimensional hardware sweep.
-3. **Only if phase isolation warrants it**, add independently controlled
-   far-lane deskew in a separate patch and test one variable at a time.
-4. **Capture a single 1080p frame only after a clean receiver gate**:
+1. **Reconcile D3 before another mutation.** The bounded `csi_ck_phase=0`
+   and `8` tests both left digital D3 in sync/idle despite three transfer
+   lanes and a locked 1920×1080 LT input. Review the corrected bitfield
+   unpacking, lane-selection registers, physical lane-0 pad and PN mapping,
+   and read-only stock receiver state. Do not continue a blind phase sweep.
+2. **Choose one source-backed discriminator** from that review. Keep every
+   other receiver setting fixed, use a fresh module load/unload cycle, and
+   record all four lane states, errors, decode, VI line count, and cleanup.
+   Per-lane deskew is deferred until it has a bounded hardware rationale.
+3. **Capture a single 1080p frame only after a clean receiver gate**:
    - When all four lanes lock into `hs_hst`, verify `CSIBDG_A` receives 1080 lines and
      `FRAME_DONE_FE0` asserts.
    - `CVI_VI_GetChnFrame` will acquire `/run/cleankvm-frame.yuv422p` (4,147,200 bytes).
    - Validate file size and SHA-256 hash.
-5. **Clean Reverse Unload Verification**:
+4. **Clean Reverse Unload Verification**:
    - Confirm all six modules unload in reverse order with RC=0.
    - Confirm the six test modules are absent from `/proc/modules`, no frame
      file remains, and taint matches baseline plus the expected out-of-tree bit.
@@ -610,12 +612,11 @@ line count supports, but does not uniquely prove, an all-four-lane lock cause.
   `5.10.4-tag- preempt mod_unload riscv`. Its undefined-symbol set matches the
   preceding diagnostic receiver module (SHA-256 `382dd2dc...`). The v39
   retained image uses the same FIT hash as v35 (`1ef26201...`).
-- This is a quarantined diagnostic module, not a new image or admitted video
-  component. Before any target load, confirm the device's running kernel and
-  module baseline, and use a bounded harness that verifies every load/unload
-  return code and leaves no frame file.
+- This remains a quarantined diagnostic module, not an admitted video
+  component. The target kernel, module baseline, load/unload return codes,
+  and frame-file cleanup were verified for the two tests recorded below.
 
-### Prepared SD image v40 (not yet booted)
+### SD image v40 and initial hardware result
 
 - Path: `out/phase3-clock-phase-v40/cleankvm-phase1.img`, 79,692,288 bytes,
   SHA-256 `bcb1b845152ea5d5974a4bb0eec54a5f10e63e4a231fbabbd0afe8fbc057e1b4`.
@@ -632,7 +633,31 @@ line count supports, but does not uniquely prove, an all-four-lane lock cause.
   `5341ca5a0d3bfbdf2b06ac723012dd90f1e661b2e867a3329891d1429e329714`;
   macOS FAT bookkeeping changed the whole span, but embedded FIT, rootfs,
   and FIP each matched the audited artifacts. The card was safely ejected.
-- Next: insert the card and power the device. Before loading any quarantined
-  module, confirm zero-taint/non-audio baseline, running kernel, and exact
-  probe/module hashes. Test phase 0 first, with fixed deskew and verified
-  reverse cleanup; no video admission is implied by this flash.
+- v40 booted into the authenticated recovery login. Baseline: kernel
+  `5.10.4-tag-`, taint 0, no `soph_*` modules, no `/dev/snd/controlC0`,
+  receiver `2e6cdcb8...`, VI `bf729726...`, probe `15128765...`, and both
+  Rust services running. All six quarantined modules loaded with RC=0 in
+  each bounded test.
+- Phase 0 (`csi_ck_phase=0`, `lane_phase=0,0,12,0,0`, settle 24): ECC/CRC/
+  header/WC/FIFO counters all zero at T0, T100ms, and T5000ms; digital
+  D0/D1/D2 `hs_hst`, D3 `hs_sync` or `hs_idle`, clock HS=1, decode unknown,
+  VI start/completion counts zero. `CVI_VI_GetChnFrame` failed with
+  `0xc00e8040`; no frame existed. All six unloads returned zero, no test
+  module remained, final taint 4096, frame absent.
+- Source-backed LT stop/read/resume between tests reported HDMI signal `0x55`,
+  Vactive 1080, Hactive 1920, MCU resume RC=0, and no leaked I2C descriptor.
+- Phase 8, with every other parameter fixed, also had zero protocol errors,
+  D0/D1/D2 `hs_hst`, D3 `hs_sync` or `hs_idle`, unknown decode, zero VI
+  starts/completions, and no frame. The module parameter read back 8 and
+  `dmesg` logged `cif: diagnostic CSI_CK_PHASE=8`, confirming the write path.
+  Reverse unload and frame-file cleanup passed identically.
+- The current evidence does not support continuing a broad clock-phase
+  sweep. Investigate digital D3/physical lane 0 mapping and polarity from
+  auditable source and stock-state evidence before another hardware change.
+- Immediate source cross-check: `cif_set_lane_id()` programs
+  `CSI_LANE_D3_SEL` from the fifth `lane_id` entry, so the product map
+  `2,4,3,1,0` selects physical lane 0 for digital D3. The 4-lane `DBG_94`
+  register defines D3 state at bits 12..14, matching the corrected diagnostic
+  unpacker. The D3 observation is therefore not merely the old bit-shift
+  reporting bug. PN polarity and the clean-vs-stock D3 register state still
+  need evidence; no polarity write or new lane map has been admitted.
