@@ -991,4 +991,49 @@ empty `/proc/modules`, and final kernel taint `4096`.
    - At ~34,000 ECC errors/sec (approx. 1 correctable 1-bit Hamming error per line at 1080p30), the 16-bit software counter saturates at 65,536 after ~1.9 seconds.
    - The driver's automatic interrupt masking halts subsequent line interrupts and `FRAME_DONE_FE0` delivery, artificially terminating frame acquisition even while video packets are actively streaming.
 
+### Alternating Baseline vs Clock-Phase-8 Verification and Phase-8 Tuning (2026-09-19)
+
+To systematically verify the clock-phase-8 behavior and establish statistical repeatability,
+an alternating sequence of baseline (`csi_ck_phase=0`) and clock-phase-8 (`csi_ck_phase=8`) runs
+was executed, holding HDMI input and all other settings fixed (`pn_swap=0,0,1,0,0`, `lane_phase[2]=12`,
+`hs_settle=16`), recording early error counters (T0, T100ms) before 65,536 saturation, and
+monitoring line counts into `CSIBDG_A`. Following the alternating runs, a single-variable tuning
+test around Phase 8 was performed with `hs_settle=20`.
+
+Every run completed with a fresh module cycle, verified clean reverse unloads (`UNLOAD_*_RC=0`),
+empty `/proc/modules`, absent output frame, and final kernel taint `4096`.
+
+#### Alternating Test Results Summary
+
+| Run | Configuration | T0 Errors (Ecc/Crc/Wc) | T100ms Errors (Ecc/Crc/Wc) | T100ms Lanes | Received Data | SOF Cnt (T100 / T5000) | Final Outcome |
+|---|---|---|---|---|---|---|---|
+| **A1 (Baseline)** | ck_phase=0, settle=16, deskew=12 | 42 / 3 / 0 | 3665 / 433 / 263 | D0=hst, D1=idle, D2=hst, D3=idle | 15 lines (28,288 px) | 98 / 464 | Masked at 1.8s (65536 ECC / 8145 CRC / 4277 WC) |
+| **B1 (Phase 8)** | ck_phase=8, settle=16, deskew=12 | 36 / 7 / 0 | 3701 / 432 / 199 | D0=hst, D1=idle, D2=hst, D3=idle | 11 lines (21,120 px) | 94 / 382 | Masked at 1.8s (65536 ECC / 7817 CRC / 3697 WC) |
+| **A2 (Baseline)** | ck_phase=0, settle=16, deskew=12 | 92 / 2 / 34 | 3722 / 403 / 242 | D0=hst, D1=idle, D2=hst, D3=**err** | 7 lines (12,928 px) | 97 / 629 | Masked at 1.8s (65536 ECC / 7747 CRC / 3691 WC) |
+| **B2 (Phase 8)** | ck_phase=8, settle=16, deskew=12 | 38 / 4 / 0 | 3625 / 432 / 269 | D0=hst, D1=idle, D2=hst, D3=idle | 6 lines (10,904 px) | 34 / 198 | Masked at 1.8s (65536 ECC / 8211 CRC / 4887 WC) |
+| **B3 (Phase 8 + Settle 20)** | ck_phase=8, settle=20, deskew=12 | 104 / 0 / 40 | 3517 / **83** / 371 | D0=sync, D1=idle, D2=sync, D3=sync | 1 line (12 px) | 46 / 430 | Masked at 1.9s (65536 ECC / **1485** CRC / 6171 WC); >80% CRC drop |
+
+#### Detailed Analysis and Findings
+
+1. **Early Error Rate Comparison (T0 & T100ms)**:
+   - At T0 (initial packet sync), `csi_ck_phase=8` delivered lower ECC error counts (36–38 vs 42–92 in baseline) and zero Word Count (WC) errors (0 vs 0–34 in baseline).
+   - At T100ms, the error accumulation rate was nearly identical between baseline and phase 8: ~3,600–3,700 ECC errors/100ms (~36,000 ECC errors/sec, or ~1 correctable Hamming error per line header), and ~400–430 CRC errors/100ms.
+   - Lane health: in both Phase 8 runs (B1 and B2), D3 stayed in `hs_idle` without triggering digital `hs_err` at T100ms, whereas in Baseline Run A2, D3 showed `hs_err`.
+
+2. **Line Count Reproducibility**:
+   - The exceptional 76-line burst observed during initial Phase 8 discovery (`task-9329`) did not reproduce under repeated testing; runs B1 and B2 captured 11 lines and 6 lines respectively, while baseline runs A1 and A2 captured 15 lines and 7 lines.
+   - Across both configurations, line reception truncates due to packet-level errors triggering `CSIBDG_A CH0 frm width less than setting(1920)`.
+
+3. **High-Speed Settle Confirmation (`hs_settle=20`)**:
+   - Combining `csi_ck_phase=8` with `hs_settle=20` confirmed the dramatic CRC reduction observed in earlier tests: final CRC errors fell by >81% (from ~8,000 down to 1,485; T100ms CRC errors dropped from 432 to 83).
+   - However, line reception under settle 20 halted at 1 line (12 pixels), indicating that while D-PHY header sync benefited from the 20-cycle settle period, packet payload streaming was cut short.
+
+4. **CIF Software Interrupt Masking Blocker (`cif.c:2763-2777`)**:
+   - In all 5 runs, the CIF kernel driver automatically masked receiver interrupts (`cif: mask the interrupt since err cnt is full`) at ~1.8–1.9s when the 16-bit software ECC counter overflowed `0xFFFF` (65,536).
+   - Because 1-bit ECC errors in MIPI CSI-2 packet headers are corrected by hardware Hamming decoding, treating counter overflow as fatal interrupts artificially terminates capture and prevents downstream reception of the remaining lines up to 1080 and `FRAME_DONE_FE0`.
+
+5. **Admission Gate Status**:
+   - Video admission remains strictly **FAIL-CLOSED**: 1080 valid lines, `FRAME_DONE_FE0`, and a hashed 4,147,200-byte capture frame were not achieved. All video modules unloaded cleanly (`RC=0`), `/proc/modules` is clean, and kernel taint remains at baseline 4096.
+
+
 

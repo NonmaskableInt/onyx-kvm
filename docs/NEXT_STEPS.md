@@ -13,16 +13,28 @@ Updated: 2026-09-19
   (SOF=0, D0 in `hs_idle`). D0 must remain `pn_swap=0`.
 - Setting D3=1 across all combinations prevented header/sync decode (`unknown`).
   D3 must remain `pn_swap=0`.
-- Reception in `0,0,1,0,0` was truncated at line 98 when error accumulation
-  (ECC=65536, WC=5805 after ~2.1s) saturated the CIF error counters, causing
-  the kernel driver to mask interrupts (`cif: mask the interrupt since err cnt is full`).
-- Setting `0,0,1,1,0` (both D1 and D2 swapped) generated 46,811 SOF interrupts
-  and decoded `yuv422-8`, but line 0 tripped an immediate 1-pixel width overflow
-  (`pxl=1921 > 1920`).
-- Next: focus timing and deskew parameters around `pn_swap=0,0,1,0,0` (fine-tuning
-  Port 1 delay `lane_phase[2]`, `hs_settle`, and `csi_ck_phase`) to eliminate
-  packet error accumulation, enabling all 1080 lines to stream cleanly without
-  interrupt masking so `FRAME_DONE_FE0` fires and captures the authentic frame.
+- Sequential single-variable isolation and alternating baseline (`csi_ck_phase=0`)
+  vs clock-phase-8 (`csi_ck_phase=8`) testing confirmed:
+  - Deskew window is strictly centered at 11–12 (deskew 13 collapses line reception to 0).
+  - High-speed settle 20 reproducibly cuts CRC transmission errors by >80% (from ~8,000 down
+    to 1,485; T100ms CRC dropped from 432 to 83).
+  - Clock Phase 8 improves initial T0 ECC errors (36–38 vs 42–92 in baseline), eliminates
+    initial WC errors (0 vs 0–34), and prevents digital D3 from reporting `hs_err` at T100ms.
+  - Across repeated alternating runs, line reception fluctuates between 6 and 15 lines under
+    both baseline and phase 8 (an isolated burst reached 76 lines / 145,920 px in task-9329).
+  - In all runs, the CIF kernel driver automatically masks receiver interrupts at ~1.8–1.9s
+    when the 16-bit software ECC counter saturates at 65,536 (`cif.c:2763-2777`).
+- Next bounded steps:
+  1. Evaluate driver interrupt-masking behavior in `cif.c`: 1-bit ECC errors in MIPI CSI-2
+     headers are correctable in hardware by Hamming decoding. Prepare a bounded diagnostic
+     patch to prevent CIF from masking interrupts on 1-bit ECC counter overflow, allowing
+     uninterrupted frame processing up to line 1080 and `FRAME_DONE_FE0`.
+  2. Alternatively, fine-tune individual lane phase delays on Port 0 (`lane_phase[1]`) and
+     Port 1 (`lane_phase[3]`) to reduce the PHY-layer header error rate below the saturation
+     threshold.
+  3. Keep video admission strictly closed until 1080 lines, `FRAME_DONE_FE0`, and a hashed
+     4,147,200-byte planar-YUV422 frame are verified on target hardware, followed by clean
+     reverse unload (`RC=0`, empty `/proc/modules`, taint 4096).
 
 ## Historical state and investigation timeline
 
