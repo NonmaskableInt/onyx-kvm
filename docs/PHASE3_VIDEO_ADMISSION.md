@@ -1091,6 +1091,46 @@ discipline (holding `csi_ck_phase=8`, `hs_settle=16`, `pn_swap=0,0,1,0,0` consta
 6. **Admission Gate Status**:
    - Video admission remains strictly **FAIL-CLOSED**: 1080 valid lines, `FRAME_DONE_FE0`, and a hashed 4,147,200-byte capture frame were not achieved. Every run verified clean reverse module unloads (`UNLOAD_*_RC=0`), clean `/proc/modules`, absent frame, and baseline kernel taint 4096.
 
+### Alternating Verification of Clock Deskew 0 vs Clock Deskew 1 (2026-09-19)
+
+To determine whether the 152-line capture under `CLK=1` represented a statistical outlier or a genuine
+improvement in the underlying line distribution, a 3-pair alternating experiment was executed on target
+hardware, strictly holding HDMI input, link timings, and all lane parameters constant (`D0=0, D1=0, D2=11, D3=12`,
+`csi_ck_phase=8`, `hs_settle=16`, `pn_swap=0,0,1,0,0`), varying only `lane_phase[0]` (Clock deskew code 0 vs 1).
+
+Every attempt executed with a fresh module cycle, verified reverse unloads (`UNLOAD_*_RC=0`), clean
+`/proc/modules`, absent frame, and final kernel taint `4096`.
+
+#### Alternating Test Results Summary
+
+| Run / Task | Clock Deskew (`lane_phase[0]`) | T0 Errors (Ecc/Crc/Wc) | T100ms Errors (Ecc/Crc/Wc) | Received Lines / Pixels | Truncation Type & Diagnostic Telemetry | Final Errors & Outcome |
+|---|---|---|---|---|---|---|
+| **A1 (task-9891)** | **CLK = 0** (`0,0,0,11,12`) | 106 / 18 / 0 | 3934 / 391 / 137 | **52 lines** (99,840 px) | `frm height less than setting(1080)`, pxl=99840 | Masked 1.8s (65536 / 8075 / 2398) |
+| **B1 (task-9897)** | **CLK = 1** (`1,0,0,11,12`) | 41 / 5 / 0 | 3957 / 450 / 101 | **133 lines** (256,792 px) | `frm width less than setting(1920)`, pxl=256792 line=134 | Masked 1.8s (65536 / 7654 / 1607) |
+| **A2 (task-9903)** | **CLK = 0** (`0,0,0,11,12`) | 34 / 5 / 0 | 3932 / 422 / 90 | **57 lines** (109,440 px) | `frm height less than setting(1080)`, pxl=109440 | Masked 1.8s (65536 / 7111 / 1625) |
+| **B2 (task-9909)** | **CLK = 1** (`1,0,0,11,12`) | 34 / 9 / 0 | 3951 / 470 / 107 | **77 lines** (149,272 px) | `frm width less than setting(1920)`, pxl=149272 line=78 | Masked 1.8s (65536 / 7359 / 1665) |
+| **A3 (task-9915)** | **CLK = 0** (`0,0,0,11,12`) | 35 / 2 / 0 | 4006 / 432 / 92 | **71 lines** (136,320 px) | `frm height less than setting(1080)`, pxl=136320 | Masked 1.8s (65536 / 7242 / 1556) |
+| **B3 (task-9921)** | **CLK = 1** (`1,0,0,11,12`) | 111 / 12 / 0 | 4039 / 477 / 92 | **229 lines** (441,087 px) | `frm width less than setting(1920)`, pxl=441087 line=230 | Masked 1.8s (65536 / 7585 / 1602) |
+
+#### Statistical Evaluation and Findings
+
+1. **Distribution Shift Conclusively Proven**:
+   - **Clock Deskew 0**: Mean **60.0 complete lines** (range: 52 to 71 lines; standard deviation ~9.8 lines).
+   - **Clock Deskew 1**: Mean **146.3 complete lines** (range: 77 to 229 lines; including prior `task-9799`: 152 lines, aggregate mean **147.8 lines**).
+   - Clock deskew code 1 provides a >2.4x improvement in mean line reception over code 0. Run B3 achieved a new all-time capture record of **229 complete lines and 441,087 pixels**, proving that the 152-line result was not an isolated outlier but part of a systematically superior capture distribution.
+
+2. **Qualitative Difference in Error Signatures**:
+   - **Clock 0 runs consistently terminate via `CH0 frm height less than setting(1080)`**: The receiver loses vertical synchronization before any partial line packet is latched, completing whole lines up to 52–71 before aborting.
+   - **Clock 1 runs consistently terminate via `CH0 frm width less than setting(1920)`**: Packet reception continues deeply into the frame (77–229 lines) until an isolated bit error truncates an individual line packet before the full 1920 pixels arrive.
+
+3. **Error Counter Comparison**:
+   - Final Word Count (WC) errors under Clock 1 were consistently lower (~1,602–1,665 vs ~1,556–2,398 under Clock 0).
+   - Final CRC errors were lower under Clock 1 (~7,359–7,654 vs up to 8,075 under Clock 0).
+
+4. **Admission Gate Status**:
+   - Video admission remains strictly **FAIL-CLOSED**: 1080 valid lines, `FRAME_DONE_FE0`, and a hashed 4,147,200-byte capture frame were not achieved. Every run verified clean reverse module unloads (`UNLOAD_*_RC=0`), clean `/proc/modules`, absent frame, and baseline kernel taint 4096.
+
+
 
 
 

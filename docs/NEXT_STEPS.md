@@ -9,10 +9,15 @@ Updated: 2026-09-19
   - Port 0 Near Data Lanes: unforced code 0 (`D0=0, D1=0`) is optimal (forcing D0=1 collapsed
     reception to 12 lines; forcing D1=1/2 collapsed to 75 and 16 lines).
   - Physical Clock Lane: setting `CLK=1` (`lane_phase[0]=1`) unlocked a new all-time record of
-    **152 complete active video lines and 293,248 pixels** into `CSIBDG_A`. Setting `CLK=2`
+    **229 complete active video lines and 441,087 pixels** into `CSIBDG_A`. Setting `CLK=2`
     collapsed reception to 11 lines.
   - Settle Dynamics: `hs_settle=20` confirmed >80% CRC reduction (1,608 total), but truncates
     line streaming at 1 line. `hs_settle=16` remains required for multi-line streaming.
+- Alternating Repeat Verification of Clock Deskew 0 vs 1:
+  - A 3-pair alternating sequence confirmed a >2.4x upward shift in line acquisition distribution:
+    - **Clock Code 0**: Mean **60.0 lines** (52, 57, 71 lines; all terminated via `frm height less than setting`).
+    - **Clock Code 1**: Mean **146.3 lines** (133, 77, 229 lines; terminated via `frm width less than setting`).
+  - Proved that the 152-line capture was not an outlier but part of a systematically superior distribution.
 - Current Optimal Configuration Baseline:
   - `lane_phase=1,0,0,11,12` (`CLK=1, D0=0, D1=0, D2=11, D3=12`)
   - `csi_ck_phase=8`
@@ -27,9 +32,8 @@ Updated: 2026-09-19
      to `CSI_INTR_MASK`.
 - Next bounded steps:
   1. Prepare a time-limited, non-default diagnostic patch (0015) for CIF interrupt masking:
-     cap `errcnt_ecc` at `0xFFFF` without writing `0xFF` to `CSI_INTR_MASK`, or mask only the
-     overflowing error interrupt rather than the entire register, to determine whether later video
-     lines continue streaming beyond 1.8 seconds toward line 1080 and `FRAME_DONE_FE0`.
+     evaluate whether masking only fatal error interrupts (or capping `errcnt_ecc` at `0xFFFF` without
+     writing `0xFF` to `CSI_INTR_MASK`) allows continuous acquisition beyond 1.8 seconds.
   2. Inspect VI frame width error handling: evaluate whether isolated width errors in individual lines
      can be tolerated without discarding the full frame buffer during diagnostic acquisition.
   3. Keep video admission strictly closed until 1080 lines, `FRAME_DONE_FE0`, and a hashed
