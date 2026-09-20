@@ -1,6 +1,21 @@
 # Next steps
 
-Updated: 2026-09-19
+Updated: 2026-09-20
+
+## Stock comparison card prepared (2026-09-20)
+
+The sole attached removable USB card was resolved as `/dev/disk4` (32.0 GB,
+pre-write CLEANKVM 16.8 MB FAT / 62.9 MB Linux layout). The retained stock
+v1.4.2 archive passed `xz -t`, and decompression SHA-256 matched the previously
+qualified image `23648088de59e043a1289c49c5103f829dc652604f8dd76db22dd8ff7aca6539`.
+After unmount, exactly 1,627,390,464 source bytes were written. The card then
+showed stock 16.8 MB FAT / 1.6 GB Linux layout. Its complete Linux partition
+read back at SHA-256
+`c285650ee41892c0cef5fbc371d3b13828f886a3ebb82a400ff06bbec94585a4`,
+matching the retained stock source partition. The card was safely ejected.
+Next physical step: insert this card into the NanoKVM and power-cycle with HDMI
+and UART attached. Capture only read-only stock receiver/clock state after HDMI
+lock. Do not copy or load stock executables/modules into CleanKVM.
 
 ## Stock LT settle comparison (2026-09-19)
 
@@ -814,4 +829,3 @@ A strictly sequential investigation was performed around `pn_swap=0,0,1,0,0`:
    - Do not admit video, enable MCP media endpoints, or auto-load video modules until 1080 valid lines, `FRAME_DONE_FE0`,
      and a hashed 4,147,200-byte planar-YUV422 frame are verified on clean target hardware.
    - All diagnostic runs must verify clean reverse module unloads (`RC=0`), clean `/proc/modules`, and taint `4096`.
-
