@@ -1198,6 +1198,34 @@ deskew to `lane_phase=0,8,8,3,3`. Our previous claim and test using
 was transferred to the CleanKVM image. The next controlled clean boot should
 read the same words and test the corrected stock-equivalent setting.
 
+### Corrected stock-equivalent CleanKVM run (2026-09-20)
+
+After switching back to the clean SD card, the initial kernel taint was 0,
+there were no loaded `soph_*` modules or sound nodes, and the embedded probe
+SHA-256 was `151287655f54f42f34b5c70ea73d27c58a48e2c54bc1f94374d5eee40846be45`.
+Patch 0014 module SHA-256
+`9dd7410b4ae9651d098a3d0a82f0d9aba90878e8c50c628f92740ec84ae38ef6`
+was independently verified after transfer to volatile `/tmp`.
+
+The single bounded run used `lane_phase=0,8,8,3,3`, clock phase 0,
+`hs_settle=8`, PN `0,0,0,0,0`, device 0, lanes `2,4,3,1,0`. Kernel logs
+confirmed each per-lane code was programmed. T0 ECC/CRC/WC was `35/0/28`,
+decode unknown; T100ms was `2763/65/1741`, decode `raw8` with D3 idle.
+VI reported height-underflow at zero lines, SOF without FE0, and no frame.
+At five seconds the normal mask occurred at ECC 65536, CRC 1400, WC 38521,
+and decode `raw10`. `CVI_VI_GetChnFrame` failed with `0xc00e8040`.
+All six loads and reverse unloads returned zero, final `/proc/modules` had
+no `soph_*`, frame file was absent, and final taint was 4096.
+
+A subsequent source-backed LT status check returned stable HDMI `0x55`,
+Vactive 1080, Hactive 1920; its MCU resume returned zero with no open I2C
+descriptor. The corrected stock-equivalent software configuration therefore
+does not reproduce the observed stock low-error receiver state. Live clean
+register readback was not available in this run; configuration-write logs and
+module identity are evidence of the intended control values, not a full
+register-level equivalence proof. Investigate prerequisite clock/reset and
+initialization differences before further timing sweeps. Video remains closed.
+
 ### Time-Limited Interrupt Mask Diagnostic (Patch 0015) (2026-09-19)
 
 #### Hypothesis and Objective
@@ -1259,5 +1287,4 @@ All tests executed holding HDMI input, link timings, and lane parameters fixed a
    - In all runs, all six quarantined modules unloaded cleanly with RC=0 (`soph_vpss`, `soph_vi`, `soph_snsr_i2c`,
      `soph_mipi_rx`, `soph_base`, `soph_sys`), leaving `/proc/modules` empty, no frame file created, and kernel taint
      maintained at 4096.
-
 

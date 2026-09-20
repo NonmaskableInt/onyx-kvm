@@ -2,6 +2,32 @@
 
 Updated: 2026-09-20
 
+## Corrected stock-equivalent clean test (2026-09-20)
+
+After the SD-card switch, CleanKVM booted with kernel `5.10.4-tag-`, initial
+taint 0, no `soph_*` modules or audio node, and probe SHA-256
+`151287655f54f42f34b5c70ea73d27c58a48e2c54bc1f94374d5eee40846be45`.
+The offline-built per-lane module was transferred to volatile `/tmp` and
+verified at SHA-256
+`9dd7410b4ae9651d098a3d0a82f0d9aba90878e8c50c628f92740ec84ae38ef6`.
+
+One bounded run used the corrected stock-equivalent control settings:
+`lane_phase=0,8,8,3,3`, `csi_ck_phase=0`, `hs_settle=8`,
+`pn_swap=0,0,0,0,0`, device 0, lanes `2,4,3,1,0`. At T0 ECC/CRC/WC was
+`35/0/28` with unknown decode; at T100ms it was `2763/65/1741`, decoded
+`raw8`, and D3 was idle. VI saw a height-underflow at zero lines and no FE0
+or frame. At 5 seconds ECC masked at 65536, CRC 1400, WC 38521, decode
+`raw10`. The probe failed to acquire a frame (`0xc00e8040`). All six modules
+loaded/unloaded RC 0; no `soph_*` modules or frame remained, final taint 4096.
+The source-backed LT status check afterward reported HDMI stable `0x55`,
+1920×1080, MCU resume RC 0 and no open I2C FD.
+
+Thus the previously missed deskew translation is corrected, but the clean
+link still does not match stock's near-zero counters. Do not sweep settle or
+bypass errors on this evidence. Next discriminate stock prerequisite clock/
+reset and initialization order from the clean runtime, using source-backed
+read-only telemetry. Video remains fail-closed.
+
 ## Stock comparison card prepared (2026-09-20)
 
 The sole attached removable USB card was resolved as `/dev/disk4` (32.0 GB,
