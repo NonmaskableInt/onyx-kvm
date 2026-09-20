@@ -1,0 +1,136 @@
+diff --git a/osdrv/interdrv/v2/cif/chip/mars/cif.c b/osdrv/interdrv/v2/cif/chip/mars/cif.c
+index 945848917..0cd1152b5 100644
+--- a/osdrv/interdrv/v2/cif/chip/mars/cif.c
++++ b/osdrv/interdrv/v2/cif/chip/mars/cif.c
+@@ -81,6 +81,15 @@ static int csi_ck_phase;
+ module_param(csi_ck_phase, int, 0444);
+ MODULE_PARM_DESC(csi_ck_phase, "4-lane CSI clock phase diagnostic (0..15)");
+ 
++/* Diagnostic only: 0=stock default (mask 0xFF on any error > 0xFFFF); 1=bounded diagnostic */
++static int cif_diagnostic_mask;
++module_param(cif_diagnostic_mask, int, 0444);
++MODULE_PARM_DESC(cif_diagnostic_mask, "CSI interrupt mask diagnostic (0=default stock, 1=bounded diagnostic)");
++
++static unsigned int cif_diag_irq_count;
++static bool cif_diag_ecc_masked;
++static bool cif_diag_first_err_logged;
++
+ static int bypass_mac_clk;
+ module_param(bypass_mac_clk, int, 0644);
+ MODULE_PARM_DESC(bypass_mac_clk, "byass mac clk");
+@@ -550,6 +559,10 @@ static int _cif_set_attr_mipi(struct cvi_cif_dev *dev,
+ 	 * 5. When clock and data is between 3~5 and 1c2d and mac1 is used, direction bit is freerun.
+ 	 * 6. When clock is between 3~5 but data is not, direction is P1->P0.
+ 	 */
++	cif_diag_irq_count = 0;
++	cif_diag_ecc_masked = false;
++	cif_diag_first_err_logged = false;
++
+ 	if (csi->lane_num == 4) {
+ 		if (csi_ck_phase < 0 || csi_ck_phase > 15)
+ 			return -EINVAL;
+@@ -2761,20 +2774,56 @@ static irqreturn_t cif_isr(int irq, void *_link)
+ 	if (cif_check_csi_int_sts(ctx, CIF_INT_STS_FIFO_FULL_MASK))
+ 		link->sts_csi.fifo_full++;
+ 
+-	if (link->sts_csi.errcnt_ecc > 0xFFFF ||
+-		link->sts_csi.errcnt_crc > 0xFFFF ||
+-		link->sts_csi.errcnt_hdr > 0xFFFF ||
+-		link->sts_csi.fifo_full > 0xFFFF ||
+-		link->sts_csi.errcnt_wc > 0xFFFF) {
+-
+-		cif_mask_csi_int_sts(ctx, 0x1F);
+-		dev_err(link->dev, "mask the interrupt since err cnt is full\n");
+-		dev_err(link->dev, "ecc = %u, crc = %u, wc = %u, hdr = %u, fifo_full = %u\n",
+-				link->sts_csi.errcnt_ecc,
+-				link->sts_csi.errcnt_crc,
+-				link->sts_csi.errcnt_wc,
+-				link->sts_csi.errcnt_hdr,
+-				link->sts_csi.fifo_full);
++	if (!cif_diagnostic_mask) {
++		if (link->sts_csi.errcnt_ecc > 0xFFFF ||
++			link->sts_csi.errcnt_crc > 0xFFFF ||
++			link->sts_csi.errcnt_hdr > 0xFFFF ||
++			link->sts_csi.fifo_full > 0xFFFF ||
++			link->sts_csi.errcnt_wc > 0xFFFF) {
++
++			cif_mask_csi_int_sts(ctx, 0x1F);
++			dev_err(link->dev, "mask the interrupt since err cnt is full\n");
++			dev_err(link->dev, "ecc = %u, crc = %u, wc = %u, hdr = %u, fifo_full = %u\n",
++					link->sts_csi.errcnt_ecc,
++					link->sts_csi.errcnt_crc,
++					link->sts_csi.errcnt_wc,
++					link->sts_csi.errcnt_hdr,
++					link->sts_csi.fifo_full);
++		}
++	} else {
++		if (!cif_diag_first_err_logged &&
++		    (link->sts_csi.errcnt_ecc || link->sts_csi.errcnt_crc ||
++		     link->sts_csi.errcnt_wc || link->sts_csi.errcnt_hdr)) {
++			cif_diag_first_err_logged = true;
++			pr_info("cif diagnostic: first link error detected (ecc=%u, crc=%u, wc=%u, hdr=%u)\n",
++				link->sts_csi.errcnt_ecc, link->sts_csi.errcnt_crc,
++				link->sts_csi.errcnt_wc, link->sts_csi.errcnt_hdr);
++		}
++
++		if (link->sts_csi.errcnt_hdr > 0 ||
++			link->sts_csi.fifo_full > 0 ||
++			link->sts_csi.errcnt_crc > 0xFFFF ||
++			link->sts_csi.errcnt_wc > 0xFFFF) {
++
++			cif_mask_csi_int_sts(ctx, 0x1F);
++			dev_err(link->dev, "cif diagnostic fatal error: hdr=%u, fifo_full=%u, crc=%u, wc=%u; receiver masked\n",
++					link->sts_csi.errcnt_hdr,
++					link->sts_csi.fifo_full,
++					link->sts_csi.errcnt_crc,
++					link->sts_csi.errcnt_wc);
++		} else if (link->sts_csi.errcnt_ecc > 0xFFFF) {
++			if (!cif_diag_ecc_masked) {
++				cif_mask_csi_int_bits(ctx, CIF_INT_STS_ECC_ERR_MASK);
++				cif_diag_ecc_masked = true;
++				pr_info("cif diagnostic: errcnt_ecc reached 65536; masked ECC interrupt (0x01), packet reception remains active\n");
++			}
++		}
++
++		if (++cif_diag_irq_count > 150000) {
++			cif_mask_csi_int_sts(ctx, 0x1F);
++			dev_err(link->dev, "cif diagnostic: interrupt bound reached (%u irqs); receiver masked\n",
++					cif_diag_irq_count);
++		}
+ 	}
+ 
+ 	cif_clear_csi_int_sts(ctx);
+diff --git a/osdrv/interdrv/v2/cif/chip/mars/drv/cif_drv.c b/osdrv/interdrv/v2/cif/chip/mars/drv/cif_drv.c
+index f41e4c390..4b381e8b8 100644
+--- a/osdrv/interdrv/v2/cif/chip/mars/drv/cif_drv.c
++++ b/osdrv/interdrv/v2/cif/chip/mars/drv/cif_drv.c
+@@ -1552,6 +1552,17 @@ void cif_mask_csi_int_sts(struct cif_ctx *ctx, uint32_t mask)
+ 			     0xFF);
+ }
+ 
++void cif_mask_csi_int_bits(struct cif_ctx *ctx, uint32_t mask)
++{
++	uintptr_t mac_csi = ctx->mac_phys_regs[CIF_MAC_BLK_ID_CSI];
++	uint32_t curr = CIF_RD_BITS(mac_csi, REG_CSI_CTRL_TOP_T,
++				    REG_04, CSI_INTR_MASK);
++
++	CIF_WR_BITS(mac_csi, REG_CSI_CTRL_TOP_T,
++		    REG_04, CSI_INTR_MASK,
++		    (curr | mask) & 0xFF);
++}
++
+ void cif_unmask_csi_int_sts(struct cif_ctx *ctx, uint32_t mask)
+ {
+ 	uintptr_t mac_csi = ctx->mac_phys_regs[CIF_MAC_BLK_ID_CSI];
+diff --git a/osdrv/interdrv/v2/cif/chip/mars/drv/cif_drv.h b/osdrv/interdrv/v2/cif/chip/mars/drv/cif_drv.h
+index c312d86dd..3f8ed6baa 100644
+--- a/osdrv/interdrv/v2/cif/chip/mars/drv/cif_drv.h
++++ b/osdrv/interdrv/v2/cif/chip/mars/drv/cif_drv.h
+@@ -525,6 +525,7 @@ uint8_t cif_get_lane_data(struct cif_ctx *ctx, enum phy_lane_id_e lane);
+ void cif_set_lvds_vsync_gen(struct cif_ctx *ctx, uint32_t fp);
+ int cif_check_csi_int_sts(struct cif_ctx *ctx, uint32_t mask);
+ void cif_mask_csi_int_sts(struct cif_ctx *ctx, uint32_t mask);
++void cif_mask_csi_int_bits(struct cif_ctx *ctx, uint32_t mask);
+ void cif_unmask_csi_int_sts(struct cif_ctx *ctx, uint32_t mask);
+ void cif_clear_csi_int_sts(struct cif_ctx *ctx);
+ int cif_check_csi_fifo_full(struct cif_ctx *ctx);

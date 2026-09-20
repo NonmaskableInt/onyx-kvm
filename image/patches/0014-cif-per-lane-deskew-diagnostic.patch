@@ -1,7 +1,7 @@
 diff --git a/osdrv/interdrv/v2/cif/chip/mars/cif.c b/osdrv/interdrv/v2/cif/chip/mars/cif.c
 --- a/osdrv/interdrv/v2/cif/chip/mars/cif.c
 +++ b/osdrv/interdrv/v2/cif/chip/mars/cif.c
-@@ -565,11 +565,8 @@ static int _cif_set_attr_mipi(struct cvi_cif_dev *dev,
+@@ -565,12 +565,8 @@ static int _cif_set_attr_mipi(struct cvi_cif_dev *dev,
  		for (i = 0; (i < csi->lane_num + 1); i++) {
 -			if (!i)
 -				cif_set_lane_deskew(ctx, attr->lane_id[i],

@@ -224,6 +224,12 @@ def main() -> int:
         "--push-probe", type=str, help="Upload local probe binary to target /tmp/cleankvm-raw-frame-probe"
     )
     parser.add_argument(
+        "--push-file", type=str, help="Upload local file to target"
+    )
+    parser.add_argument(
+        "--push-dest", type=str, default="/tmp/soph_mipi_rx.ko", help="Remote destination for --push-file"
+    )
+    parser.add_argument(
         "--probe-path", type=str, default="/usr/libexec/cleankvm-raw-frame-probe", help="Path to probe executable on target"
     )
     parser.add_argument(
@@ -260,6 +266,12 @@ def main() -> int:
             if os.path.exists(args.credentials):
                 login(fd, args.credentials)
             ok = push_file(fd, args.push_probe, "/tmp/cleankvm-raw-frame-probe")
+            return 0 if ok else 1
+
+        if args.push_file:
+            if os.path.exists(args.credentials):
+                login(fd, args.credentials)
+            ok = push_file(fd, args.push_file, args.push_dest)
             return 0 if ok else 1
 
         if args.run_discriminator:

@@ -1130,6 +1130,68 @@ Every attempt executed with a fresh module cycle, verified reverse unloads (`UNL
 4. **Admission Gate Status**:
    - Video admission remains strictly **FAIL-CLOSED**: 1080 valid lines, `FRAME_DONE_FE0`, and a hashed 4,147,200-byte capture frame were not achieved. Every run verified clean reverse module unloads (`UNLOAD_*_RC=0`), clean `/proc/modules`, absent frame, and baseline kernel taint 4096.
 
+### Time-Limited Interrupt Mask Diagnostic (Patch 0015) (2026-09-19)
+
+#### Hypothesis and Objective
+Upstream `cif.c:2763-2777` unconditionally executes `cif_mask_csi_int_sts(ctx, 0x1F)` when any error counter
+exceeds `0xFFFF`. Because 1-bit Hamming ECC errors increment on packet headers at ~35,000/sec, the software
+counter overflows at ~1.8 seconds, shutting down all interrupts across the CSI receiver (`REG_04 = 0xFF`).
+However, width and height failures occur within the first few lines of each frame, well before 1.8 seconds,
+and CRC and word-count errors are also substantial.
+
+To determine whether packet reception can continue past 1.8 seconds and whether any subsequent frame can
+reach `FRAME_DONE_FE0` with 1080 valid lines, a non-default, time-limited diagnostic patch (**Patch 0015**)
+was implemented:
+1. **Selective Masking**: Implemented `cif_mask_csi_int_bits(ctx, mask)` in `cif_drv.c`/`cif_drv.h` to read
+   `REG_04 (CSI_INTR_MASK)` and mask specific status bits. When `cif_diagnostic_mask=1`, `errcnt_ecc > 0xFFFF`
+   masks only bit 0 (`CIF_INT_STS_ECC_ERR_MASK`, `0x01`), keeping data packet reception and other status unmasked.
+2. **Fatal Error Retention**: Uncorrectable 2-bit header errors (`errcnt_hdr > 0`), FIFO overflow
+   (`fifo_full > 0`), and severe CRC/WC overflow (`> 0xFFFF`) immediately mask `0xFF` to shut down the receiver.
+3. **Interrupt Rate Limiting**: Capped total interrupts at 150,000 to protect the kernel from interrupt storms.
+4. **First Link Error Logging**: Logs the precise error counters (`ecc`, `crc`, `wc`, `hdr`) at the moment
+   the very first link error occurs.
+5. **Default Stock Safety**: Controlled by module parameter `cif_diagnostic_mask` (default `0`), ensuring
+   stock upstream behavior is completely unchanged unless explicitly requested.
+
+- Patch file: `image/patches/0015-cif-time-limited-interrupt-mask-diagnostic.patch`
+- Built module: `out/phase3-interrupt-mask-diagnostic-v1/soph_mipi_rx.ko` (SHA-256 `048366c3869f3639a61aa47b9bcdd55e135a38aa04a6dd0fe785be76893f3ca0`, vermagic `5.10.4-tag- preempt mod_unload riscv`).
+
+#### Empirical Hardware Results
+
+All tests executed holding HDMI input, link timings, and lane parameters fixed at the optimal baseline
+(`lane_phase=1,0,0,11,12`, `csi_ck_phase=8`, `hs_settle=16`, `pn_swap=0,0,1,0,0`, `devno 0, lanes 2,4,3,1,0`).
+
+| Run / Task | Mode (`cif_diagnostic_mask`) | First Error Logged | First Line Truncation | Behavior at 1.8s | Final Counters (T5000ms) | VI Frame Telemetry | Result |
+|---|---|---|---|---|---|---|---|
+| **Control (task-10232)** | `0` (stock default) | N/A (unpatched log) | `pxl=9088 line=5` (+18ms) | Full mask (`0xFF`) at 1.76s: `ecc=65536, crc=7788, wc=2422` | Frozen: `65536 / 7788 / 2422` | `SOF=378, FE0=0, FPS=0, WidthLS=1` | Stock mask confirmed |
+| **Diag 1 (task-10236)** | `1` (diagnostic) | `ecc=1, crc=1, wc=0, hdr=0` at **+173 µs** | `pxl=5248 line=3` (+12ms) | ECC masked (`0x01`) at 1.78s; **streaming continued** | Active: **`84108 / 32255 / 9785`** | `SOF=196, FE0=0, FPS=0, WidthLS=1` | No 1080p frame |
+| **Diag 2 (task-10240)** | `1` (diagnostic) | `ecc=1, crc=1, wc=0, hdr=0` at **+119 µs** | `pxl=34048 line=18` (+14ms) | ECC masked (`0x01`) at 1.76s; **streaming continued** | Active: **`84474 / 31296 / 9782`** | `SOF=393, FE0=0, FPS=0, WidthLS=1` | No 1080p frame |
+
+#### Empirical Deductions
+
+1. **Reception Continues Past Mask Point**:
+   - With `cif_diagnostic_mask=1`, masking only bit 0 (`0x01`) successfully kept the CIF receiver active across
+     the entire 5.0-second test duration.
+   - Error counters continuously grew beyond 65,535 without kernel stalls or interrupt storms: `EccErr` grew
+     to ~84,400, `CrcErr` to ~31,500, and `WcErr` to ~9,780.
+   - Start of Frame (SOF) generation remained active across the entire 5 seconds (`VISofCh0Cnt` reached 196–393).
+
+2. **Resolution of Blocker Hypothesis: Interrupt Mask is NOT the Remaining Blocker**:
+   - In both diagnostic runs, `FRAME_DONE_FE0` was **never asserted** (`VIPreFECh0Cnt=0`, `VIPostCnt=0`, `VIFPS=0`).
+   - The root blocker is conclusively demonstrated to be **early-frame packet corruption**:
+     - The very first link error occurs within **120–173 microseconds** of receiver activation (`ecc=1, crc=1`).
+     - Line truncation occurs on every single frame within the first 3 to 18 lines (`CSIBDG_A CH0 frm width less than setting(1920)`).
+     - Because CRC and word-count errors remain substantial (~31.5k CRC and ~9.7k WC errors per 5 seconds), CIF/CSIBDG
+       drops damaged packets, preventing any complete 1920-pixel line from reaching the end of the 1080-line frame.
+   - Therefore, suppressing or altering the software interrupt mask alone cannot produce a valid frame until the
+     physical-layer signal integrity and packet error rate are resolved.
+
+3. **Admission Gate Status**:
+   - Video admission remains strictly **FAIL-CLOSED**: No valid 1080-line frame or `FRAME_DONE_FE0` was produced.
+   - In all runs, all six quarantined modules unloaded cleanly with RC=0 (`soph_vpss`, `soph_vi`, `soph_snsr_i2c`,
+     `soph_mipi_rx`, `soph_base`, `soph_sys`), leaving `/proc/modules` empty, no frame file created, and kernel taint
+     maintained at 4096.
+
 
 
 

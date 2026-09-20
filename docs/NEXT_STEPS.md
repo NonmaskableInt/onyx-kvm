@@ -743,4 +743,44 @@ A strictly sequential investigation was performed around `pn_swap=0,0,1,0,0`:
      header (~34,000/sec at 1080p30), the 16-bit software counter saturates in ~1.9 seconds,
      artificially halting frame delivery even while packets stream cleanly.
 
+### Per-Lane Deskew & Clock Deskew Tuning (2026-09-19)
+
+- Isolated independent physical lane deskew registers via Patch 0014 (`lane_phase[0..4]` maps to CLK, D0, D1, D2, D3).
+- Setting physical clock lane deskew to code 1 (`lane_phase[0]=1`) reached **152 complete lines (293,248 px)**.
+- Alternating repeat verification (3 pairs, 6 runs) proved that Clock Deskew 1 shifted mean line reception
+  from 60.0 lines (Code 0) to 146.3 lines (Code 1), reaching an all-time record of **229 lines (441,087 px)**.
+- Clock 0 failed consistently on vertical framing (`frm height less than setting`), whereas Clock 1 completed
+  lines up to 229 before an isolated packet error caused `frm width less than setting(1920)`.
+
+### Time-Limited Interrupt Mask Diagnostic (Patch 0015) (2026-09-19)
+
+- Implemented non-default, bounded diagnostic patch (`image/patches/0015-cif-time-limited-interrupt-mask-diagnostic.patch`).
+- Selective masking via `cif_mask_csi_int_bits` in `cif_drv.c`: When `cif_diagnostic_mask=1`, `errcnt_ecc > 65535`
+  masks only bit 0 (`CIF_INT_STS_ECC_ERR_MASK`, `0x01`), keeping data packet reception active.
+- Rate-limited to 150,000 IRQs, retained fatal error handling (`hdr > 0`, `fifo_full > 0`, `crc/wc > 65535`), and logged
+  first link error.
+- Compiled module `out/phase3-interrupt-mask-diagnostic-v1/soph_mipi_rx.ko` (SHA-256 `048366c3869f3639a61aa47b9bcdd55e135a38aa04a6dd0fe785be76893f3ca0`).
+- **Control Run (`cif_diagnostic_mask=0`)**:
+  - Stock behavior reproduced identically: receiver masked `0xFF` at 1.76s (`ecc=65536, crc=7788, wc=2422`).
+- **Diagnostic Runs (`cif_diagnostic_mask=1`)**:
+  - Reception **successfully continued past the 1.8-second mask point** for the full 5.0 seconds (`VISofCh0Cnt` reached 196–393).
+  - Total counters grew past 65,535: `EccErr ~84,400`, `CrcErr ~31,500`, `WcErr ~9,780`.
+  - However, **no run reached `FRAME_DONE_FE0` with 1080 valid lines**.
+  - Telemetry revealed why: the first link error (`ecc=1, crc=1`) occurs within **120–173 µs** of receiver activation, and
+    line truncation (`CSIBDG_A CH0 frm width less than setting(1920)`) occurs on every single frame within the first 3 to 18 lines.
+  - **Conclusion**: The software interrupt mask is **not the root blocker**. Even with the receiver unmasked and streaming for
+    5 seconds, physical-layer / MAC packet corruption on every frame prevents any frame from completing 1080 lines.
+
+## Next Steps
+
+1. **Investigate Physical-Layer Timing & CRC/WC Error Source**:
+   - Because CRC and word-count errors occur right from the first packet (+120 µs) and on every frame (line 3–18),
+     the physical link is suffering from bit errors or misaligned framing at the PHY/MAC boundary.
+   - Investigate LT6911UXC MIPI output drive strength, pre-emphasis, or clock-lane timing parameters via I2C.
+   - Investigate SG2002 CIF MIPI PHY termination, settle calibration, or clock/data relationship (e.g. fine settle or clock delay).
+2. **Maintain Strict Fail-Closed Security**:
+   - Do not admit video, enable MCP media endpoints, or auto-load video modules until 1080 valid lines, `FRAME_DONE_FE0`,
+     and a hashed 4,147,200-byte planar-YUV422 frame are verified on clean target hardware.
+   - All diagnostic runs must verify clean reverse module unloads (`RC=0`), clean `/proc/modules`, and taint `4096`.
+
 
