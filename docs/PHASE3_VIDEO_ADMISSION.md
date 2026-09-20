@@ -1130,6 +1130,45 @@ Every attempt executed with a fresh module cycle, verified reverse unloads (`UNL
 4. **Admission Gate Status**:
    - Video admission remains strictly **FAIL-CLOSED**: 1080 valid lines, `FRAME_DONE_FE0`, and a hashed 4,147,200-byte capture frame were not achieved. Every run verified clean reverse module unloads (`UNLOAD_*_RC=0`), clean `/proc/modules`, absent frame, and baseline kernel taint 4096.
 
+### LT6911 SDK settle-8 comparison on CleanKVM (2026-09-19)
+
+The SDK's `cv182x/lontium_lt6911/lt6911_cmos_param.h` specifies D-PHY enabled
+with `hs_settle=8`. The same static header says `devno=1`, while the read-only
+stock runtime observation selected device 0; the header is not a complete
+runtime-state record. The earlier stock observation reported stable `yuv422-8`,
+zero ECC/CRC/header/FIFO errors, and one WC error across two samples separated
+by two seconds. It did not record a stock full-frame hash or the same T100ms
+timing used below.
+
+Patch 0014's module SHA-256 was verified on target as
+`9dd7410b4ae9651d098a3d0a82f0d9aba90878e8c50c628f92740ec84ae38ef6`.
+The installed raw-frame probe SHA-256 was
+`151287655f54f42f34b5c70ea73d27c58a48e2c54bc1f94374d5eee40846be45`.
+Both runs retained the standard CIF 65536-error masking behavior; patch 0015
+was not used.
+
+| Run | Clean settings | T0 ECC/CRC/WC | T100ms ECC/CRC/WC | Decode at T100ms | Outcome |
+|---|---|---:|---:|---|---|
+| LT8-tuned | `lane_phase=1,0,0,11,12`, `csi_ck_phase=8`, `pn_swap=0,0,1,0,0`, `hs_settle=8` | `102/0/0` | `3689/0/166` | `raw8` | Initial height error at zero lines; no frame; final `65536/0/3038` and `yuv422-10` decode after masking |
+| LT8-stock-profile | `lane_phase=0,3,3,8,8`, `csi_ck_phase=0`, `pn_swap=0,0,0,0,0`, `hs_settle=8` | `41/0/0` | `4064/0/168` | `raw12` | Initial height error at zero lines; no frame; final `65536/8/2711` |
+
+The old grouped `lane_phase={0,3,8,0,3}` cannot be passed unchanged to patch
+0014: its five entries now map directly to physical clock and D0–D3. For the
+observed lane order `2,4,3,1,0`, equivalent clock/near/far codes are
+`0,3,3,8,8`. These values reflect the old driver defaults, not independently
+measured stock live deskew registers.
+
+Both diagnostic probes returned without a frame (`CVI_VI_GetChnFrame` error
+`0xc00e8040`). All six load and reverse unload commands returned zero, final
+`/proc/modules` contained no `soph_*` modules, the frame file was absent, and
+taint remained 4096. The zero CRC count in the first run is not link parity:
+ECC and WC still rose rapidly and decode did not remain `yuv422-8`. No
+settle-6/10/12 sweep was performed because settle 8 did not approach the stock
+error signature. Video admission remains closed. Next, compare read-only
+runtime PHY/CSI and clock/reset register state on stock and clean under the
+same HDMI signal, before attributing the difference to module prerequisites or
+changing the driver again.
+
 ### Time-Limited Interrupt Mask Diagnostic (Patch 0015) (2026-09-19)
 
 #### Hypothesis and Objective
@@ -1191,8 +1230,6 @@ All tests executed holding HDMI input, link timings, and lane parameters fixed a
    - In all runs, all six quarantined modules unloaded cleanly with RC=0 (`soph_vpss`, `soph_vi`, `soph_snsr_i2c`,
      `soph_mipi_rx`, `soph_base`, `soph_sys`), leaving `/proc/modules` empty, no frame file created, and kernel taint
      maintained at 4096.
-
-
 
 
 

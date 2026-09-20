@@ -2,6 +2,38 @@
 
 Updated: 2026-09-19
 
+## Stock LT settle comparison (2026-09-19)
+
+The SDK LT6911 profile specifies D-PHY `enable=1`, `hs_settle=8`, but that
+setting alone did not reproduce the stock receiver's near-zero link errors.
+With independently built patch-0014 MIPI module (SHA-256
+`9dd7410b4ae9651d098a3d0a82f0d9aba90878e8c50c628f92740ec84ae38ef6`):
+
+- Tuned lane/polarity/clock settings and settle 8: T0 ECC/CRC/WC `102/0/0`;
+  T100ms `3689/0/166`, decode `raw8`; no line or frame completed. ECC masked
+  at 65536, with WC 3038 and CRC 0.
+- Stock-profile polarity, clock phase, and correctly translated per-lane deskew
+  `0,3,3,8,8`, settle 8: T0 `41/0/0`; T100ms `4064/0/168`, decode `raw12`;
+  no line or frame completed. ECC masked at 65536, WC 2711, CRC 8.
+- Both runs used the unchanged standard interrupt mask; all six video modules
+  loaded/unloaded RC 0, no `soph_*` remained, no frame file existed, and final
+  kernel taint was 4096. Video remains fail-closed.
+
+Patch 0014 interprets `lane_phase[0..4]` as individual clock/D0/D1/D2/D3
+codes. The old grouped default `{0,3,8,0,3}` therefore translates to
+`0,3,3,8,8`; passing the old array unchanged would not compare stock deskew.
+The stock LT header also declares `devno=1`, whereas the observed stock runtime
+selected device 0, so the header is evidence for settle 8, not a complete
+description of runtime state. Do not infer that settle 8 is the whole stock
+configuration or sweep it further without a new discriminating hypothesis.
+
+Next: obtain a read-only, same-register stock/clean comparison after HDMI lock
+(D-PHY settle readback, lane deskew/force codes, polarity, clock phase, CSI
+interrupt mask/status and relevant clock/reset state). Attribute the exact
+runtime receiver differences before another driver mutation. Preserve the
+stock artifacts as offline evidence only; do not load vendor binaries into
+CleanKVM.
+
 - Per-lane PHY deskew decoupling and single-variable sweeps on target hardware
   confirmed independent physical lane behavior (`image/patches/0014-cif-per-lane-deskew-diagnostic.patch`):
   - Port 1 Far Data Lanes: `D2=11` and `D3=12` (`lane_phase[3]=11`, `lane_phase[4]=12`)
@@ -782,5 +814,4 @@ A strictly sequential investigation was performed around `pn_swap=0,0,1,0,0`:
    - Do not admit video, enable MCP media endpoints, or auto-load video modules until 1080 valid lines, `FRAME_DONE_FE0`,
      and a hashed 4,147,200-byte planar-YUV422 frame are verified on clean target hardware.
    - All diagnostic runs must verify clean reverse module unloads (`RC=0`), clean `/proc/modules`, and taint `4096`.
-
 
