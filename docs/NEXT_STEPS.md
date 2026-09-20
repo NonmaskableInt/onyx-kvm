@@ -2,6 +2,35 @@
 
 Updated: 2026-09-20
 
+## Prerequisite source audit and next discriminator (2026-09-20)
+
+The two stock-only modules are not passive aliases for CIF configuration.
+Pinned `rtos_cmdqu.c` registers the mailbox IRQ and initializes its hardware
+spinlock; pinned `fast_image.c` sends `SYS_CMD_INFO_LINUX_INIT_DONE` and waits
+for `SYS_CMD_INFO_RTOS_INIT_DONE`, then maps/allocates MCU shared buffers.
+No direct CIF settle, lane-deskew or CSI clock-phase write was found in these
+sources. This makes an RTOS-mediated prerequisite plausible, not established;
+do not load the modules into CleanKVM merely because stock loads them.
+
+CleanKVM has no readable `/sys/kernel/debug/clk/clk_summary` or
+`/proc/clk/clk_summary`, and no video modules remained after the last test
+(taint 4096). The next bounded diagnostic is an independently built,
+default-off CIF readback that uses the driver's already mapped MMIO regions
+to report the same six control words measured on stock immediately after
+MIPI attribute setup and streaming enable: PHY4L `REG_08/REG_10`, PHY-TOP
+`REG_80/REG_84/REG_88`, and CSI-MAC `REG_04`. It must make no extra register
+write, expose no broad physical-memory interface, and retain normal load,
+timeout, reverse-unload, taint and frame-absence gates. Only if the live
+control words match stock should the inquiry move to clock/reset state and
+the RTOS handshake.
+
+Build preparation is currently blocked by the local Podman image store:
+`podman image ls` reports `readlink /var/lib/containers/storage/overlay:
+invalid argument`, and the pinned builder digest is not known to that store.
+Existing isolated source volumes remain listed. Do not repair the store by
+pruning or deleting unrelated images/volumes. Restore the pinned offline
+builder non-destructively before compiling a new receiver module.
+
 ## Corrected stock-equivalent clean test (2026-09-20)
 
 After the SD-card switch, CleanKVM booted with kernel `5.10.4-tag-`, initial

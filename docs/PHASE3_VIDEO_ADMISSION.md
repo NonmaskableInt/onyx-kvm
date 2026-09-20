@@ -1226,6 +1226,30 @@ module identity are evidence of the intended control values, not a full
 register-level equivalence proof. Investigate prerequisite clock/reset and
 initialization differences before further timing sweeps. Video remains closed.
 
+### Stock-only prerequisite source audit (2026-09-20)
+
+The stock load order includes `soph_rtos_cmdqu` and `soph_fast_image`, which
+the clean six-module quarantine test excludes. In pinned source,
+`rtos_cmdqu.c:cvi_rtos_cmdqu_probe` maps the mailbox resource, initializes
+the hardware spinlock and registers the mailbox IRQ. In
+`fast_image.c:cvi_fast_image_probe`, the module sends
+`SYS_CMD_INFO_LINUX_INIT_DONE`, waits for `SYS_CMD_INFO_RTOS_INIT_DONE`, and
+allocates/maps MCU shared memory. These are real side effects, but source
+inspection did not identify a direct CIF lane, settle or clock-phase write in
+either module. Their absence may affect an RTOS-mediated prerequisite; it is
+not evidence that loading them would correct the CSI link. No stock module
+was loaded into CleanKVM.
+
+There is no readable clock-summary interface on the current clean kernel.
+The next discriminating experiment is therefore a source-built, non-default
+CIF diagnostic that reads back exactly the six already mapped control words
+captured on stock after MIPI setup, without `/dev/mem`, new mapping, or any
+register mutation. Compare actual values before investigating RTOS behavior.
+The local Podman image store currently cannot list/inspect the pinned builder
+(`readlink .../overlay: invalid argument`); no new module was built or loaded
+in this audit. The existing source volumes must be preserved while restoring
+the offline builder non-destructively.
+
 ### Time-Limited Interrupt Mask Diagnostic (Patch 0015) (2026-09-19)
 
 #### Hypothesis and Objective
@@ -1287,4 +1311,3 @@ All tests executed holding HDMI input, link timings, and lane parameters fixed a
    - In all runs, all six quarantined modules unloaded cleanly with RC=0 (`soph_vpss`, `soph_vi`, `soph_snsr_i2c`,
      `soph_mipi_rx`, `soph_base`, `soph_sys`), leaving `/proc/modules` empty, no frame file created, and kernel taint
      maintained at 4096.
-
