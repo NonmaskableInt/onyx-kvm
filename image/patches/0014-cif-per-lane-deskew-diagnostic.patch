@@ -1,0 +1,21 @@
+diff --git a/osdrv/interdrv/v2/cif/chip/mars/cif.c b/osdrv/interdrv/v2/cif/chip/mars/cif.c
+--- a/osdrv/interdrv/v2/cif/chip/mars/cif.c
++++ b/osdrv/interdrv/v2/cif/chip/mars/cif.c
+@@ -565,11 +565,8 @@ static int _cif_set_attr_mipi(struct cvi_cif_dev *dev,
+ 		for (i = 0; (i < csi->lane_num + 1); i++) {
+-			if (!i)
+-				cif_set_lane_deskew(ctx, attr->lane_id[i],
+-						lane_phase[LANE_SKEW_CROSS_CLK]);
+-			else if (IS_SAME_PORT(attr->lane_id[0], attr->lane_id[i]))
+-				cif_set_lane_deskew(ctx, attr->lane_id[i],
+-						lane_phase[LANE_SKEW_CROSS_DATA_NEAR]);
+-			else
+-				cif_set_lane_deskew(ctx, attr->lane_id[i],
+-						lane_phase[LANE_SKEW_CROSS_DATA_FAR]);
++			if (i < LANE_SKEW_NUM) {
++				cif_set_lane_deskew(ctx, attr->lane_id[i], (uint8_t)lane_phase[i]);
++				pr_info("cif: per-lane deskew lane_id[%d]=%d phase=%d\n",
++					i, attr->lane_id[i], lane_phase[i]);
++			}
+ 		}
+ 	} else if (csi->lane_num > 0) {

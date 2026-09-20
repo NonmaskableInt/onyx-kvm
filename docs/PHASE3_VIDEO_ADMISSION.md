@@ -1035,5 +1035,62 @@ empty `/proc/modules`, absent output frame, and final kernel taint `4096`.
 5. **Admission Gate Status**:
    - Video admission remains strictly **FAIL-CLOSED**: 1080 valid lines, `FRAME_DONE_FE0`, and a hashed 4,147,200-byte capture frame were not achieved. All video modules unloaded cleanly (`RC=0`), `/proc/modules` is clean, and kernel taint remains at baseline 4096.
 
+### Per-Lane PHY Deskew Optimization and Clock Delay Tuning (2026-09-19)
+
+Following source analysis of `cif_drv.c:1431-1488` (`cif_set_lane_deskew`), the SoC hardware
+registers provide independent physical-lane deskew delay registers (`REG_84` / `REG_88` for
+`DESKEW_CODE0..5`, and `REG_80` for `FORCE_DESKEW_CODE0..5`). The vendor driver in `cif.c:549-559`
+had artificially grouped 4 data lanes into shared near/far values (`LANE_SKEW_CROSS_DATA_NEAR`
+and `LANE_SKEW_CROSS_DATA_FAR`).
+
+Tracked diagnostic patch `image/patches/0014-cif-per-lane-deskew-diagnostic.patch` was authored,
+decoupled the shared grouping, and exposed `lane_phase[0..4]` directly to the physical lanes:
+- `lane_phase[0]`: Clock (`lane_id[0] = 2`)
+- `lane_phase[1]`: Data Lane 0 (`lane_id[1] = 4`, Port 0 Near)
+- `lane_phase[2]`: Data Lane 1 (`lane_id[2] = 3`, Port 0 Near)
+- `lane_phase[3]`: Data Lane 2 (`lane_id[3] = 1`, Port 1 Far)
+- `lane_phase[4]`: Data Lane 3 (`lane_id[4] = 0`, Port 1 Far)
+
+A systematic, single-variable-at-a-time sweep was executed on target hardware under strict fail-closed
+discipline (holding `csi_ck_phase=8`, `hs_settle=16`, `pn_swap=0,0,1,0,0` constant unless explicitly noted).
+
+#### Per-Lane Deskew Test Results Summary
+
+| Run / Task | Lane Configuration (`CLK,D0,D1,D2,D3`) | Parameters | T0 Errors (Ecc/Crc/Wc) | T100ms Errors (Ecc/Crc/Wc) | Received Lines / Pixels | Final Mask & Errors |
+|---|---|---|---|---|---|---|
+| **task-9686** | `0, 0, 0, 12, 12` | ck_phase=8, settle=16 | 35 / 5 / 0 | 3752 / 488 / 156 | **81 lines** (155,520 px) | Masked 1.8s (65536 / 7860 / 3514) |
+| **task-9692** | `0, 0, 0, 11, 12` | ck_phase=8, settle=16 | 33 / 2 / 1 | 3869 / 439 / 161 | **86 lines** (166,528 px / line 87) | Masked 1.8s (65536 / 7504 / 3567) |
+| **task-9698** | `0, 0, 0, 10, 12` | ck_phase=8, settle=16 | 100 / 8 / 0 | 3772 / 459 / 173 | 2 lines (5,248 px / line 3) | Masked 1.8s (65536 / 7660 / 3469) |
+| **task-9704** | `0, 0, 0, 13, 12` | ck_phase=8, settle=16 | 33 / 5 / 0 | 3878 / 470 / 173 | 14 lines (28,288 px / line 15) | Masked 1.8s (65536 / 7748 / 3721) |
+| **task-9710** | `0, 0, 0, 11, 11` | ck_phase=8, settle=16 | 104 / 12 / 0 | 3865 / 478 / 185 | 15 lines (30,232 px / line 16) | Masked 1.8s (65536 / 7887 / 3535) |
+| **task-9716** | `0, 0, 0, 11, 13` | ck_phase=8, settle=16 | 35 / 3 / 0 | 3816 / 480 / 176 | 1 line (1,920 px / line 1) | Masked 1.8s (65536 / 8031 / 3449) |
+| **task-9781** | `0, 1, 0, 11, 12` | ck_phase=8, settle=16 | 33 / 6 / 1 | 3747 / 466 / 136 | 12 lines (24,448 px / line 13) | Masked 1.8s (65536 / 7779 / 2394) |
+| **task-9787** | `0, 0, 1, 11, 12` | ck_phase=8, settle=16 | 113 / 12 / 0 | 3865 / 450 / 118 | 75 lines (144,000 px / line 76) | Masked 1.8s (65536 / 7492 / 2347) |
+| **task-9793** | `0, 0, 2, 11, 12` | ck_phase=8, settle=16 | 33 / 7 / 0 | 3735 / 485 / 127 | 16 lines (32,128 px / line 17) | Masked 1.8s (65536 / 7963 / 2421) |
+| **task-9799** | `1, 0, 0, 11, 12` | ck_phase=8, settle=16 | 112 / 19 / 1 | 3871 / 473 / 127 | **152 lines** (293,248 px / line 153) | Masked 1.8s (65536 / 7860 / 2328) |
+| **task-9805** | `2, 0, 0, 11, 12` | ck_phase=8, settle=16 | 52 / 11 / 10 | 3791 / 489 / 136 | 11 lines (22,476 px / line 12) | Masked 1.8s (65536 / 7930 / 2445) |
+| **task-9811** | `1, 0, 0, 11, 12` (repeat) | ck_phase=8, settle=16 | 35 / 3 / 0 | 3822 / 462 / 121 | 4 lines (9,088 px / line 5) | Masked 1.8s (65536 / 7806 / 2490) |
+| **task-9853** | `1, 0, 0, 11, 12` | ck_phase=8, settle=20 | 104 / 2 / 0 | 3624 / **79** / 281 | 1 line (1,408 px / line 1) | Masked 1.8s (65536 / **1608** / 2960); >80% CRC drop |
+
+#### Detailed Findings
+
+1. **Port 1 Decoupling (D2 vs D3)**:
+   - Upstream bundled physical lanes 1 and 0 (`D2` and `D3`) to the same deskew value. Decoupling them revealed that `D2=11` and `D3=12` is the true physical optimum, breaking through the previous 76-line ceiling to 86 complete lines.
+   - The window is extremely narrow: moving `D2` to 10 collapsed lines to 2; moving `D2` to 13 degraded to 14 lines. Moving `D3` to 11 dropped lines to 15; moving `D3` to 13 collapsed lines to 1.
+2. **Port 0 Behavior (D0 and D1)**:
+   - Forcing manual deskew codes on Port 0 near lanes degraded line continuity: `D0=1` dropped lines from 86 to 12. `D1=1` gave 75 lines, and `D1=2` collapsed to 16 lines. Unforced / code 0 (`D0=0, D1=0`) remains optimal for Port 0 near lanes.
+3. **Clock Deskew Breakthrough (`CLK=1`)**:
+   - Setting physical clock lane deskew to code 1 (`lane_phase[0]=1`) extended video reception to a new record of **152 complete lines (293,248 pixels)** into `CSIBDG_A`.
+   - Setting clock deskew to code 2 immediately collapsed line reception back to 11 lines, proving a sharp peak at `CLK=1`.
+4. **Settle Dynamics (`hs_settle=20`)**:
+   - Testing `hs_settle=20` with the optimal per-lane deskew confirmed the dramatic >80% reduction in CRC errors (1,608 total, 79 at T100ms), but packet payload streaming consistently truncates after 1 line. `hs_settle=16` remains required for line streaming.
+5. **Frame Termination Mechanism**:
+   - Two distinct hardware/driver mechanisms bound frame acquisition:
+     a) `CSIBDG_A CH0 frm width less than setting(1920)`: when bit errors truncate a line packet, `CSIBDG` asserts an undersized-width interrupt, causing `_vi_err_handler()` in the VI driver to drop the buffer and re-trigger preraw.
+     b) CIF Software Interrupt Mask (`cif.c:2763`): 1-bit ECC errors (correctable by Hamming code) accumulate at ~35,000/sec, overflowing the 16-bit software counter at 1.8s and writing `0xFF` to `CSI_INTR_MASK`.
+6. **Admission Gate Status**:
+   - Video admission remains strictly **FAIL-CLOSED**: 1080 valid lines, `FRAME_DONE_FE0`, and a hashed 4,147,200-byte capture frame were not achieved. Every run verified clean reverse module unloads (`UNLOAD_*_RC=0`), clean `/proc/modules`, absent frame, and baseline kernel taint 4096.
+
+
 
 

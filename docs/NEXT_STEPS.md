@@ -2,36 +2,36 @@
 
 Updated: 2026-09-19
 
-- The complete 16-state empirical polarity matrix `(D0, D1, D2, D3)` was
-  tested on target under verified fail-closed cleanup conditions (all unloads
-  RC=0, taint 4096, lsmod clean).
-- Setting `pn_swap=0,0,1,0,0` (inverting D1 / physical lane 3) achieved an
-  empirical breakthrough: active video packet decoding (`yuv422-8`) unlocked
-  immediately, streaming **98 active video lines and 187,663 pixels** into
-  `CSIBDG_A` with 440 SOF interrupts.
-- Setting D0=1 was proven across all 8 combinations to completely mute the link
-  (SOF=0, D0 in `hs_idle`). D0 must remain `pn_swap=0`.
-- Setting D3=1 across all combinations prevented header/sync decode (`unknown`).
-  D3 must remain `pn_swap=0`.
-- Sequential single-variable isolation and alternating baseline (`csi_ck_phase=0`)
-  vs clock-phase-8 (`csi_ck_phase=8`) testing confirmed:
-  - Deskew window is strictly centered at 11–12 (deskew 13 collapses line reception to 0).
-  - High-speed settle 20 reproducibly cuts CRC transmission errors by >80% (from ~8,000 down
-    to 1,485; T100ms CRC dropped from 432 to 83).
-  - Clock Phase 8 improves initial T0 ECC errors (36–38 vs 42–92 in baseline), eliminates
-    initial WC errors (0 vs 0–34), and prevents digital D3 from reporting `hs_err` at T100ms.
-  - Across repeated alternating runs, line reception fluctuates between 6 and 15 lines under
-    both baseline and phase 8 (an isolated burst reached 76 lines / 145,920 px in task-9329).
-  - In all runs, the CIF kernel driver automatically masks receiver interrupts at ~1.8–1.9s
-    when the 16-bit software ECC counter saturates at 65,536 (`cif.c:2763-2777`).
+- Per-lane PHY deskew decoupling and single-variable sweeps on target hardware
+  confirmed independent physical lane behavior (`image/patches/0014-cif-per-lane-deskew-diagnostic.patch`):
+  - Port 1 Far Data Lanes: `D2=11` and `D3=12` (`lane_phase[3]=11`, `lane_phase[4]=12`)
+    is strictly optimal (collapsed at D2=10/13 and D3=11/13).
+  - Port 0 Near Data Lanes: unforced code 0 (`D0=0, D1=0`) is optimal (forcing D0=1 collapsed
+    reception to 12 lines; forcing D1=1/2 collapsed to 75 and 16 lines).
+  - Physical Clock Lane: setting `CLK=1` (`lane_phase[0]=1`) unlocked a new all-time record of
+    **152 complete active video lines and 293,248 pixels** into `CSIBDG_A`. Setting `CLK=2`
+    collapsed reception to 11 lines.
+  - Settle Dynamics: `hs_settle=20` confirmed >80% CRC reduction (1,608 total), but truncates
+    line streaming at 1 line. `hs_settle=16` remains required for multi-line streaming.
+- Current Optimal Configuration Baseline:
+  - `lane_phase=1,0,0,11,12` (`CLK=1, D0=0, D1=0, D2=11, D3=12`)
+  - `csi_ck_phase=8`
+  - `hs_settle=16`
+  - `pn_swap=0,0,1,0,0`
+- Frame Acquisition Termination Analysis:
+  1. `CSIBDG_A CH0 frm width less than setting(1920)`: bit errors on the high-speed link
+     prematurely truncate line packets, triggering `_vi_err_handler()` to drop the frame buffer
+     and re-trigger preraw.
+  2. CIF Software Interrupt Mask (`cif.c:2763-2777`): 1-bit ECC errors (correctable by Hamming code)
+     accumulate at ~35,000/sec, overflowing the 16-bit software counter at 1.8s and writing `0xFF`
+     to `CSI_INTR_MASK`.
 - Next bounded steps:
-  1. Evaluate driver interrupt-masking behavior in `cif.c`: 1-bit ECC errors in MIPI CSI-2
-     headers are correctable in hardware by Hamming decoding. Prepare a bounded diagnostic
-     patch to prevent CIF from masking interrupts on 1-bit ECC counter overflow, allowing
-     uninterrupted frame processing up to line 1080 and `FRAME_DONE_FE0`.
-  2. Alternatively, fine-tune individual lane phase delays on Port 0 (`lane_phase[1]`) and
-     Port 1 (`lane_phase[3]`) to reduce the PHY-layer header error rate below the saturation
-     threshold.
+  1. Prepare a time-limited, non-default diagnostic patch (0015) for CIF interrupt masking:
+     cap `errcnt_ecc` at `0xFFFF` without writing `0xFF` to `CSI_INTR_MASK`, or mask only the
+     overflowing error interrupt rather than the entire register, to determine whether later video
+     lines continue streaming beyond 1.8 seconds toward line 1080 and `FRAME_DONE_FE0`.
+  2. Inspect VI frame width error handling: evaluate whether isolated width errors in individual lines
+     can be tolerated without discarding the full frame buffer during diagnostic acquisition.
   3. Keep video admission strictly closed until 1080 lines, `FRAME_DONE_FE0`, and a hashed
      4,147,200-byte planar-YUV422 frame are verified on target hardware, followed by clean
      reverse unload (`RC=0`, empty `/proc/modules`, taint 4096).
