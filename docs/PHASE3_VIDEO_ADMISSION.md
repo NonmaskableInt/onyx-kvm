@@ -1226,7 +1226,56 @@ module identity are evidence of the intended control values, not a full
 register-level equivalence proof. Investigate prerequisite clock/reset and
 initialization differences before further timing sweeps. Video remains closed.
 
+### Clean six-word receiver readback (2026-09-20)
+
+Patch `0016-cif-bounded-control-readback.patch` adds a default-off read of six
+existing mapped CIF control words immediately after the driver's normal CSI
+interrupt unmask. It adds no register write or mapping. The rebuilt builder
+used the pinned Ubuntu base, and the case-sensitive SDK source volume passed
+the exact snapshot checks. The host-tools commit, musl tree ID, and GCC binary
+hash matched the lock, though a freshly generated subtree tar digest did not
+match its historical archived value. The disposable work volume passed Phase 1,
+Phase 2 HID, and Phase 3 video-foundation validation. Kernel and receiver
+module compilation ran with networking disabled.
+
+The final receiver module SHA-256 is
+`0ef652f0cbcaf2d0c78d3d71c12dbbf2523fc76d79fe8f8d8602e4194bc3cd59`;
+the UART copy matched. Its vermagic is `5.10.4-tag- preempt mod_unload riscv`.
+The first test version logged CSI-MAC low byte `ff` because it sampled before
+the driver's ordinary unmask step. The corrected version sampled immediately
+after unmask, before the later error-counter saturation. Every control word
+then matched the stock after-setup baseline exactly:
+
+| Control word | Stock | CleanKVM |
+| --- | --- | --- |
+| PHY4L `REG_08` | `0x00000002` | `0x00000002` |
+| PHY4L `REG_10` | `0x00000208` | `0x00000208` |
+| PHY-TOP `REG_80` | `0x001b003f` | `0x001b003f` |
+| PHY-TOP `REG_84` | `0x08000303` | `0x08000303` |
+| PHY-TOP `REG_88` | `0x00002008` | `0x00002008` |
+| CSI-MAC `REG_04` | `0x000c0000` | `0x000c0000` |
+
+The bounded run used deskew `0,8,8,3,3`, settle 8, CSI clock phase 0,
+PN swaps `0,0,0,0,0`, device 0, and lanes `2,4,3,1,0`. At 100 ms,
+ECC/CRC/WC were `2405/1/310` and D3 reported `hs_err`. At five seconds,
+ECC was 65536 and WC 9009. VI reported zero-line height underflow, the probe
+returned 1, and no frame existed. All six module loads and reverse unloads
+returned 0, no `soph_*` module remained, and taint stayed at 4096. This closes
+the direct six-word control mismatch hypothesis. Investigate source-backed
+clock/reset and initialization-order state next; an RTOS-mediated prerequisite
+is plausible but unproven. Both volatile `/tmp` diagnostic module copies were
+removed and their absence verified. Video remains fail-closed.
+
 ### Stock-only prerequisite source audit (2026-09-20)
+
+The next readback candidate is tracked as
+`image/patches/0016-cif-bounded-control-readback.patch`. Its default-off
+parameter logs the six control words from CIF's existing mappings after
+four-lane device-0 MIPI streaming setup. A dry run against pinned source
+passed. It has not been built or loaded. Podman now responds, but the active
+root and rootless stores both list zero images and zero volumes; the pinned
+builder and isolated source volume are unavailable. No store deletion or
+pruning was attempted.
 
 The stock load order includes `soph_rtos_cmdqu` and `soph_fast_image`, which
 the clean six-module quarantine test excludes. In pinned source,

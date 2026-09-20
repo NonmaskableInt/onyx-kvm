@@ -1,0 +1,58 @@
+diff --git a/osdrv/interdrv/v2/cif/chip/mars/cif.c b/osdrv/interdrv/v2/cif/chip/mars/cif.c
+--- a/osdrv/interdrv/v2/cif/chip/mars/cif.c
++++ b/osdrv/interdrv/v2/cif/chip/mars/cif.c
+@@ -75,6 +75,11 @@
+ static int lane_phase[LANE_SKEW_NUM] = {0x00, 0x03, 0x08, 0x00, 0x03};
+ static int count;
+ module_param_array(lane_phase, int, &count, 0664);
++
++/* Read-only control-word snapshot; disabled unless explicitly requested. */
++static bool cif_diagnostic_readback;
++module_param(cif_diagnostic_readback, bool, 0444);
++MODULE_PARM_DESC(cif_diagnostic_readback, "read six CSI control words after MIPI setup");
+ 
+ static int bypass_mac_clk;
+ module_param(bypass_mac_clk, int, 0644);
+@@ -1946,6 +1951,9 @@
+ 	/* unmask the interrupts */
+ 	if (attr->devno < CIF_MAX_CSI_NUM)
+ 		cif_unmask_csi_int_sts(ctx, 0x1F);
++	if (cif_diagnostic_readback && input_mode == INPUT_MODE_MIPI &&
++	    attr->devno == 0)
++		cif_log_control_words(ctx);
+ 
+ 	return 0;
+ }
+diff --git a/osdrv/interdrv/v2/cif/chip/mars/drv/cif_drv.c b/osdrv/interdrv/v2/cif/chip/mars/drv/cif_drv.c
+--- a/osdrv/interdrv/v2/cif/chip/mars/drv/cif_drv.c
++++ b/osdrv/interdrv/v2/cif/chip/mars/drv/cif_drv.c
+@@ -69,6 +69,18 @@
+ 		addr[i] += (uintptr_t)wrap_base;
+ 	}
+ 	wrap_reg_base[link] = (uintptr_t)wrap_base;
++}
++
++void cif_log_control_words(struct cif_ctx *ctx)
++{
++	uintptr_t phy4l = ctx->wrap_phys_regs[CIF_WRAP_BLK_ID_4L];
++	uintptr_t phytop = ctx->wrap_phys_regs[CIF_WRAP_BLK_ID_TOP];
++	uintptr_t csimac = ctx->mac_phys_regs[CIF_MAC_BLK_ID_CSI];
++
++	pr_info("cif: diagnostic control words phy4l_08=%08x phy4l_10=%08x phy_top_80=%08x phy_top_84=%08x phy_top_88=%08x csi_mac_04=%08x\n",
++		_reg_read(phy4l + 0x08), _reg_read(phy4l + 0x10),
++		_reg_read(phytop + 0x80), _reg_read(phytop + 0x84),
++		_reg_read(phytop + 0x88), _reg_read(csimac + 0x04));
+ }
+ 
+ void cif_init(struct cif_ctx *ctx)
+diff --git a/osdrv/interdrv/v2/cif/chip/mars/drv/cif_drv.h b/osdrv/interdrv/v2/cif/chip/mars/drv/cif_drv.h
+--- a/osdrv/interdrv/v2/cif/chip/mars/drv/cif_drv.h
++++ b/osdrv/interdrv/v2/cif/chip/mars/drv/cif_drv.h
+@@ -531,6 +531,7 @@
+ int cif_check_lvds_fifo_full(struct cif_ctx *ctx);
+ int cif_get_csi_decode_fmt(struct cif_ctx *ctx);
+ int cif_get_csi_phy_state(struct cif_ctx *ctx, union mipi_phy_state *state);
++void cif_log_control_words(struct cif_ctx *ctx);
+ void cif_set_hs_settle(struct cif_ctx *ctx, uint8_t hs_settle);
+ void cif_set_bt_fmt_out(struct cif_ctx *ctx, enum ttl_bt_fmt_out fmt_out);
+ void cif_set_clk_dir(struct cif_ctx *ctx, enum cif_clk_dir_e dir);

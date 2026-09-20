@@ -29,13 +29,14 @@ if "$engine" volume inspect "$work_volume" >/dev/null 2>&1; then
 fi
 
 "$engine" volume create "$work_volume" >/dev/null
-"$engine" run --rm --arch amd64 \
+"$engine" run --rm --arch amd64 --network none \
     -v "$source_volume:/source:ro" \
     -v "$work_volume:/work" \
     -v "$repo_root:/repo:ro" \
     --user 0:0 \
     "$builder" sh -lc '
         set -eu
+        git config --global --add safe.directory /source/sdk/.git
         git clone --no-hardlinks /source/sdk /work/sdk
         git -C /work/sdk checkout --detach d4003f15b35d43ad4842f427050ab2bba0114fa5
         /repo/image/verify-sdk-snapshot.sh /work/sdk
@@ -47,7 +48,7 @@ fi
         chown -R 1000:1000 /work/sdk
     '
 
-"$engine" run --rm --arch amd64 \
+"$engine" run --rm --arch amd64 --network none \
     -v "$work_volume:/work:ro" \
     "$builder" sh -lc '
         set -eu

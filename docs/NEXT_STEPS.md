@@ -2,6 +2,48 @@
 
 Updated: 2026-09-20
 
+## Six-word clean readback completed (2026-09-20)
+
+The default-off `0016` CIF diagnostic reads six control words through existing
+driver mappings after normal CSI interrupt unmask; it adds no register write,
+mapping, or broad memory interface. The rebuilt development builder ID is
+`63dfec0366d6b30d5bc36ea478a1025026c3ef89ed60e7122334635ac1e8bc68`.
+The fresh case-sensitive SDK volume passed snapshot verification. The pinned
+host-tools commit, musl tree ID, and GCC binary hash matched `builder.lock`;
+the historical subtree tar digest did not match a newly generated archive and
+needs provenance follow-up. The disposable work volume passed Phase 1, HID,
+and video-foundation validation. Kernel and receiver compilation ran offline.
+
+The final module `out/phase3-control-readback-v2/soph_mipi_rx.ko` has SHA-256
+`0ef652f0cbcaf2d0c78d3d71c12dbbf2523fc76d79fe8f8d8602e4194bc3cd59`,
+GPL metadata, `soph_base` dependency, and target vermagic
+`5.10.4-tag- preempt mod_unload riscv`. Its volatile UART copy matched that
+hash. The initial v1 snapshot was taken before normal CSI unmask and therefore
+showed low-byte `ff`; moving the read immediately after unmask corrected this
+measurement timing. With stock-equivalent deskew `0,8,8,3,3`, settle 8, clock
+phase 0, PN swaps all zero, device 0, and lanes `2,4,3,1,0`, the clean
+readback matched all six stock control words exactly:
+
+| Word | Stock and CleanKVM |
+| --- | --- |
+| PHY4L `REG_08` | `0x00000002` |
+| PHY4L `REG_10` | `0x00000208` |
+| PHY-TOP `REG_80` | `0x001b003f` |
+| PHY-TOP `REG_84` | `0x08000303` |
+| PHY-TOP `REG_88` | `0x00002008` |
+| CSI-MAC `REG_04` | `0x000c0000` |
+
+Yet at 100 ms ECC/CRC/WC reached `2405/1/310`, with D3 `hs_err`; at five
+seconds ECC reached 65536 and WC 9009. VI reported zero-line height underflow,
+the probe returned 1, and no frame appeared. All six loads and reverse unloads
+returned 0, no `soph_*` module remained, final taint equaled initial 4096, and
+the frame file was absent. Thus direct receiver control-word configuration is
+no longer the explanation for the stock/clean link difference. The next
+bounded discriminator is read-only clock/reset and initialization-order state,
+including possible RTOS-mediated prerequisites. Do not load stock modules or
+open video admission on this evidence. Both volatile test module copies were
+removed from `/tmp` and their absence verified.
+
 ## Prerequisite source audit and next discriminator (2026-09-20)
 
 The two stock-only modules are not passive aliases for CIF configuration.
@@ -24,12 +66,8 @@ timeout, reverse-unload, taint and frame-absence gates. Only if the live
 control words match stock should the inquiry move to clock/reset state and
 the RTOS handshake.
 
-Build preparation is currently blocked by the local Podman image store:
-`podman image ls` reports `readlink /var/lib/containers/storage/overlay:
-invalid argument`, and the pinned builder digest is not known to that store.
-Existing isolated source volumes remain listed. Do not repair the store by
-pruning or deleting unrelated images/volumes. Restore the pinned offline
-builder non-destructively before compiling a new receiver module.
+The readback and its hardware result are recorded above; the earlier Podman
+store issue was resolved by rebuilding the development environment.
 
 ## Corrected stock-equivalent clean test (2026-09-20)
 
