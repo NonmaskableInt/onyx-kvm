@@ -1046,10 +1046,10 @@ and `LANE_SKEW_CROSS_DATA_FAR`).
 Tracked diagnostic patch `image/patches/0014-cif-per-lane-deskew-diagnostic.patch` was authored,
 decoupled the shared grouping, and exposed `lane_phase[0..4]` directly to the physical lanes:
 - `lane_phase[0]`: Clock (`lane_id[0] = 2`)
-- `lane_phase[1]`: Data Lane 0 (`lane_id[1] = 4`, Port 0 Near)
-- `lane_phase[2]`: Data Lane 1 (`lane_id[2] = 3`, Port 0 Near)
-- `lane_phase[3]`: Data Lane 2 (`lane_id[3] = 1`, Port 1 Far)
-- `lane_phase[4]`: Data Lane 3 (`lane_id[4] = 0`, Port 1 Far)
+- `lane_phase[1]`: Data Lane 0 (`lane_id[1] = 4`, Port 1 Far)
+- `lane_phase[2]`: Data Lane 1 (`lane_id[2] = 3`, Port 1 Far)
+- `lane_phase[3]`: Data Lane 2 (`lane_id[3] = 1`, Port 0 Near)
+- `lane_phase[4]`: Data Lane 3 (`lane_id[4] = 0`, Port 0 Near)
 
 A systematic, single-variable-at-a-time sweep was executed on target hardware under strict fail-closed
 discipline (holding `csi_ck_phase=8`, `hs_settle=16`, `pn_swap=0,0,1,0,0` constant unless explicitly noted).
@@ -1150,13 +1150,14 @@ was not used.
 | Run | Clean settings | T0 ECC/CRC/WC | T100ms ECC/CRC/WC | Decode at T100ms | Outcome |
 |---|---|---:|---:|---|---|
 | LT8-tuned | `lane_phase=1,0,0,11,12`, `csi_ck_phase=8`, `pn_swap=0,0,1,0,0`, `hs_settle=8` | `102/0/0` | `3689/0/166` | `raw8` | Initial height error at zero lines; no frame; final `65536/0/3038` and `yuv422-10` decode after masking |
-| LT8-stock-profile | `lane_phase=0,3,3,8,8`, `csi_ck_phase=0`, `pn_swap=0,0,0,0,0`, `hs_settle=8` | `41/0/0` | `4064/0/168` | `raw12` | Initial height error at zero lines; no frame; final `65536/8/2711` |
+| LT8-swapped-deskew (not stock-equivalent) | `lane_phase=0,3,3,8,8`, `csi_ck_phase=0`, `pn_swap=0,0,0,0,0`, `hs_settle=8` | `41/0/0` | `4064/0/168` | `raw12` | Initial height error at zero lines; no frame; final `65536/8/2711` |
 
 The old grouped `lane_phase={0,3,8,0,3}` cannot be passed unchanged to patch
 0014: its five entries now map directly to physical clock and D0–D3. For the
-observed lane order `2,4,3,1,0`, equivalent clock/near/far codes are
-`0,3,3,8,8`. These values reflect the old driver defaults, not independently
-measured stock live deskew registers.
+observed lane order `2,4,3,1,0`, the correct clock/far/far/near/near codes
+are `0,8,8,3,3`. The earlier `0,3,3,8,8` translation was wrong and that
+run did not test stock-equivalent deskew. Live register readback below
+independently confirms the correct physical codes.
 
 Both diagnostic probes returned without a frame (`CVI_VI_GetChnFrame` error
 `0xc00e8040`). All six load and reverse unload commands returned zero, final
@@ -1168,6 +1169,34 @@ error signature. Video admission remains closed. Next, compare read-only
 runtime PHY/CSI and clock/reset register state on stock and clean under the
 same HDMI signal, before attributing the difference to module prerequisites or
 changing the driver again.
+
+### Read-only live stock register baseline (2026-09-20)
+
+The stock image booted with receiver module build #30, device 0, lane order
+`2,4,3,1,0`, and zero PN swaps. Five one-second `/proc/mipi-rx` samples kept
+`yuv422-8`, zero ECC/CRC/HDR/FIFO errors and one WC error. Physical/digital
+lane and clock snapshots alternated between HS and idle; the stock web video
+was black and UART repeatedly reported image-read failures. Thus the low
+counter values do not prove a currently completed stock frame.
+
+Source-mapped, read-only 32-bit control-register values were:
+
+| Block and register | Physical address | Stock value | Decoded significance |
+|---|---:|---:|---|
+| PHY 4L `REG_08` | `0x0a0d0308` | `0x00000002` | Clock lane 2, all PN swaps 0, CSI clock phase 0 |
+| PHY 4L `REG_10` | `0x0a0d0310` | `0x00000208` | HS settle 8, all-zero timing 2, auto-ignore/sync 0 |
+| PHY TOP `REG_80` | `0x0a0d0080` | `0x001b003f` | Forced deskew physical 0,1,3,4; lane 2 unforced |
+| PHY TOP `REG_84` | `0x0a0d0084` | `0x08000303` | Physical deskew codes 0–3: 3,3,0,8 |
+| PHY TOP `REG_88` | `0x0a0d0088` | `0x00002008` | Physical lane 4 code 8 (lane 5 code 32, unused) |
+| CSI MAC `REG_04` | `0x0a0c2404` | `0x000c0000` | Interrupt mask low byte 0 |
+
+The physical port grouping in `cif.c` is `LANE_IS_PORT1(x) = (x > 2)`.
+Clock physical 2 and data physical 1/0 are Port 0 near; data physical 4/3
+are Port 1 far. Consequently patch 0014's per-lane order translates stock
+deskew to `lane_phase=0,8,8,3,3`. Our previous claim and test using
+`0,3,3,8,8` were incorrect. No register was written and no vendor binary
+was transferred to the CleanKVM image. The next controlled clean boot should
+read the same words and test the corrected stock-equivalent setting.
 
 ### Time-Limited Interrupt Mask Diagnostic (Patch 0015) (2026-09-19)
 
@@ -1230,6 +1259,5 @@ All tests executed holding HDMI input, link timings, and lane parameters fixed a
    - In all runs, all six quarantined modules unloaded cleanly with RC=0 (`soph_vpss`, `soph_vi`, `soph_snsr_i2c`,
      `soph_mipi_rx`, `soph_base`, `soph_sys`), leaving `/proc/modules` empty, no frame file created, and kernel taint
      maintained at 4096.
-
 
 

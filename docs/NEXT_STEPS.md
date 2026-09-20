@@ -27,7 +27,7 @@ With independently built patch-0014 MIPI module (SHA-256
 - Tuned lane/polarity/clock settings and settle 8: T0 ECC/CRC/WC `102/0/0`;
   T100ms `3689/0/166`, decode `raw8`; no line or frame completed. ECC masked
   at 65536, with WC 3038 and CRC 0.
-- Stock-profile polarity, clock phase, and correctly translated per-lane deskew
+- Stock-profile polarity and clock phase, but incorrectly translated per-lane deskew
   `0,3,3,8,8`, settle 8: T0 `41/0/0`; T100ms `4064/0/168`, decode `raw12`;
   no line or frame completed. ECC masked at 65536, WC 2711, CRC 8.
 - Both runs used the unchanged standard interrupt mask; all six video modules
@@ -35,8 +35,11 @@ With independently built patch-0014 MIPI module (SHA-256
   kernel taint was 4096. Video remains fail-closed.
 
 Patch 0014 interprets `lane_phase[0..4]` as individual clock/D0/D1/D2/D3
-codes. The old grouped default `{0,3,8,0,3}` therefore translates to
-`0,3,3,8,8`; passing the old array unchanged would not compare stock deskew.
+codes. Correction from live stock registers: the old grouped default
+`{0,3,8,0,3}` translates to `0,8,8,3,3`, **not** `0,3,3,8,8`.
+`LANE_IS_PORT1(x)` is true for physical IDs 3–5: clock 2 and data 1/0
+share Port 0 (near code 3); data 4/3 are Port 1 (far code 8).
+The earlier settle-8 run labeled “stock-profile” did not test stock deskew.
 The stock LT header also declares `devno=1`, whereas the observed stock runtime
 selected device 0, so the header is evidence for settle 8, not a complete
 description of runtime state. Do not infer that settle 8 is the whole stock
@@ -49,11 +52,31 @@ runtime receiver differences before another driver mutation. Preserve the
 stock artifacts as offline evidence only; do not load vendor binaries into
 CleanKVM.
 
+### Live stock receiver baseline (2026-09-20)
+
+Stock boot reached SSH and authenticated web UI at `192.168.2.5`. Receiver
+module build #30 reports device 0, lanes `2,4,3,1,0`, zero PN swaps,
+`yuv422-8`, ECC/CRC/HDR/FIFO `0`, WC `1` through five 1-second samples.
+Clock/lane states fluctuate between high-speed transfer and idle; web video
+is black and UART reports image-read failures, so this does not demonstrate
+successful stock frame capture in the present setup.
+
+Six exact read-only 32-bit control register reads, addresses mapped from pinned
+CIF source, returned: PHY4L `REG_08` `0x0a0d0308=0x00000002` (clock selection
+2, PN swaps 0, clock phase 0); `REG_10` `0x0a0d0310=0x00000208` (settle 8);
+PHY-TOP `REG_80` `0x0a0d0080=0x001b003f` (force deskew physical lanes
+0,1,3,4, not 2), `REG_84` `0x0a0d0084=0x08000303` (physical codes 0..3 =
+3,3,0,8), `REG_88` `0x0a0d0088=0x00002008` (physical code 4 = 8);
+CSI MAC `REG_04` `0x0a0c2404=0x000c0000` (interrupt mask low byte 0).
+No register was written. Compare the same control words on CleanKVM, then
+test `lane_phase=0,8,8,3,3` under patch 0014 with settle 8, zero PN swaps,
+and clock phase 0. The prior swapped-deskew test is not that control.
+
 - Per-lane PHY deskew decoupling and single-variable sweeps on target hardware
   confirmed independent physical lane behavior (`image/patches/0014-cif-per-lane-deskew-diagnostic.patch`):
-  - Port 1 Far Data Lanes: `D2=11` and `D3=12` (`lane_phase[3]=11`, `lane_phase[4]=12`)
+  - Port 0 Near Data Lanes: `D2=11` and `D3=12` (`lane_phase[3]=11`, `lane_phase[4]=12`)
     is strictly optimal (collapsed at D2=10/13 and D3=11/13).
-  - Port 0 Near Data Lanes: unforced code 0 (`D0=0, D1=0`) is optimal (forcing D0=1 collapsed
+  - Port 1 Far Data Lanes: unforced code 0 (`D0=0, D1=0`) is optimal (forcing D0=1 collapsed
     reception to 12 lines; forcing D1=1/2 collapsed to 75 and 16 lines).
   - Physical Clock Lane: setting `CLK=1` (`lane_phase[0]=1`) unlocked a new all-time record of
     **229 complete active video lines and 441,087 pixels** into `CSIBDG_A`. Setting `CLK=2`
