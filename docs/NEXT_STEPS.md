@@ -39,11 +39,20 @@ and embedded artifacts:
 - Reused audited v40 rootfs: `9edec1e81b1b3b3e45654a645f9aebfcb98ce636e37f0a1cd1261e43d58c7751`
 - Reused audited FIP: `96a0b414c6ace8c9911ae4fb140893290706230162099be2daf4ef370fdc05f1`
 
-The next physical step is to resolve the removable card again, flash v41, verify
-the embedded FIT/rootfs/FIP from read-back, boot CleanKVM, and confirm the CIF
-reset request resolves to GPIO361. Run one bounded stock-equivalent receiver
-test first without a reset pulse; only then test the source-exact reset operation
-as a separate single variable. Video remains fail-closed.
+The resolver found two external devices. `/dev/disk4` was a separate 23.8 GB
+ExFAT USB device and was not touched. `/dev/disk5` was the expected 31.0 GB
+CleanKVM card, identified by its 16.8 MB FAT and 62.9 MB Linux layout. After
+unmount, exactly 79,692,288 bytes of v41 were written. The exact-span raw
+read-back SHA-256 was
+`ba416a988edac7a51925c0d91784485f2d40ca1caa0e174f6f641de48c188cf2`;
+macOS FAT bookkeeping changed the whole-span hash, while the embedded FIT,
+rootfs, and FIP each matched their audited artifacts. The card was force-unmounted
+only after verification and safely ejected.
+
+Next boot v41 with HDMI and UART attached and confirm the CIF reset request
+resolves to GPIO361. Run one bounded stock-equivalent receiver test first without
+a reset pulse; only then test the source-exact reset operation as a separate
+single variable. Video remains fail-closed.
 
 ## Current stock runtime handoff (2026-09-20)
 

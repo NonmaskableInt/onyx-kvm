@@ -1290,9 +1290,14 @@ omitting the stock procfs/IRQ addition. Offline build and FIT verification passe
 The v41 image SHA-256 is
 `99e1e64cc56958303baaa538f68d993d2d4f942536257a68d06d20445e55d5fb`;
 FIT is `29fabec01f957246c17bdcd6f930b8a5fcb1034ab5e9e25c9c5ee7221e1f44ed`,
-and its DTB property is phandle 7, offset 9, active-low. The image has not yet
-been flashed. Test reset routing and reset action as separate bounded variables.
-Video stays closed.
+and its DTB property is phandle 7, offset 9, active-low. The uniquely resolved
+31.0 GB CleanKVM card was `/dev/disk5`; the unrelated 23.8 GB ExFAT `/dev/disk4`
+was not touched. Exactly 79,692,288 bytes were written. Raw exact-span read-back
+SHA-256 was
+`ba416a988edac7a51925c0d91784485f2d40ca1caa0e174f6f641de48c188cf2`.
+Although macOS FAT bookkeeping changed the whole-span hash, embedded FIT,
+rootfs, and FIP verification passed. The card was safely ejected. Test reset
+routing and reset action as separate bounded variables. Video stays closed.
 
 ### Clean clock/reset readback and GPIO lifetime (2026-09-20)
 
