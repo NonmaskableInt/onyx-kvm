@@ -1266,6 +1266,34 @@ clock/reset and initialization-order state next; an RTOS-mediated prerequisite
 is plausible but unproven. Both volatile `/tmp` diagnostic module copies were
 removed and their absence verified. Video remains fail-closed.
 
+### Stock clocks, RTOS failure, and NanoKVM reset routing (2026-09-20)
+
+Read-only stock inspection showed the same clock rates as CleanKVM: MIPI PLL
+900 MHz, display PLL 1,187,999,988 Hz, FPLL 1.5 GHz, VIP SYS2 593,999,994 Hz,
+and CSI MAC0 300 MHz. Receiver build #30 remained `yuv422-8` with zero
+ECC/CRC/header/FIFO errors and one word-count error. This closes a simple clock
+rate difference. Stock also logged `SYS_CMD_INFO_LINUX_INIT_DONE fail` and
+`communicate with rtos fail` before CIF probe, so its low-error state does not
+depend on a successful Linux/RTOS ready handshake.
+
+Stock debugfs showed GPIO353 as input `LT-INT` and GPIO361 as output
+`snsr-rst-gpio`; the LT interrupt count was zero. Offline static inspection was
+matched to local SDK commit `d4af3c62f`, which adds the GPIO353 edge handler
+and hardcodes sensor reset to GPIO361 instead of reading `snsr-reset`. The
+handler only samples the pin and updates `/proc/lt_int`; it makes no receiver or
+bridge register write. Thus earlier comparison of identical device-tree bytes
+missed a stock module source override.
+
+Tracked patch `0020-board-map-cif-reset-to-stock-gpio.patch` maps the board's
+CIF reset to port E line 9, the source-level equivalent of stock GPIO361, while
+omitting the stock procfs/IRQ addition. Offline build and FIT verification passed.
+The v41 image SHA-256 is
+`99e1e64cc56958303baaa538f68d993d2d4f942536257a68d06d20445e55d5fb`;
+FIT is `29fabec01f957246c17bdcd6f930b8a5fcb1034ab5e9e25c9c5ee7221e1f44ed`,
+and its DTB property is phandle 7, offset 9, active-low. The image has not yet
+been flashed. Test reset routing and reset action as separate bounded variables.
+Video stays closed.
+
 ### Clean clock/reset readback and GPIO lifetime (2026-09-20)
 
 The default-off `0017` diagnostic records existing CIF clock handles and reset

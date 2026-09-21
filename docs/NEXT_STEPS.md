@@ -2,6 +2,49 @@
 
 Updated: 2026-09-20
 
+## Stock clock comparison and reset-routing image v41 (2026-09-20)
+
+The running stock v1.4.2 image was inspected read-only over the established SSH
+login. Kernel `5.10.4-tag- #46` had taint 4098 and receiver build `#30`. Three
+receiver samples remained `yuv422-8` with ECC/CRC/header/FIFO `0/0/0/0` and
+one word-count error. Stock debugfs reported MIPI PLL 900 MHz, display PLL
+1,187,999,988 Hz, FPLL 1.5 GHz, VIP SYS2 593,999,994 Hz, and CSI MAC0
+300 MHz. These match the CleanKVM clock diagnostic rates exactly, closing the
+clock-rate mismatch hypothesis.
+
+The stock boot log reported `SYS_CMD_INFO_LINUX_INIT_DONE fail` and
+`communicate with rtos fail` before CIF probe. A successful RTOS handshake is
+therefore not required for the observed stock low-error state. Stock's LT-INT
+IRQ count was zero. Offline disassembly and local SDK history identify exact
+corresponding source commit `d4af3c62f` (`Modify cif.c for NanoKVM`): it assigns
+GPIO353 to a passive LT interrupt/counter and replaces the device-tree reset
+lookup with GPIO361. The retained stock module hash remains
+`d40419159a4065de8b7693e0de59c477de36373f24fe164e50afb37d674ed755`.
+Its interrupt handler only logs, samples GPIO353, and increments the `/proc/lt_int`
+counter; it does not program CIF or LT registers.
+
+Patch `0020-board-map-cif-reset-to-stock-gpio.patch` expresses the stock reset
+routing in auditable board source by changing `snsr-reset` from port E line 1
+to port E line 9. It does not add the stock world-writable proc node or interrupt
+handler. A fresh verified SDK volume applied the complete patch chain and built
+the kernel/device tree offline. The repository-owned packager verified the FIT
+and embedded artifacts:
+
+- Image: `out/phase3-reset-routing-v41/cleankvm-phase1.img`
+- Image SHA-256: `99e1e64cc56958303baaa538f68d993d2d4f942536257a68d06d20445e55d5fb`
+- Size: 79,692,288 bytes
+- FIT SHA-256: `29fabec01f957246c17bdcd6f930b8a5fcb1034ab5e9e25c9c5ee7221e1f44ed`
+- DTB SHA-256: `db6c8f1b382c75d62d367c3dba850773ba45a5f93b18e4accd67f2af5f7f95ed`
+- DTB `/cif/snsr-reset`: phandle 7, offset 9, active-low
+- Reused audited v40 rootfs: `9edec1e81b1b3b3e45654a645f9aebfcb98ce636e37f0a1cd1261e43d58c7751`
+- Reused audited FIP: `96a0b414c6ace8c9911ae4fb140893290706230162099be2daf4ef370fdc05f1`
+
+The next physical step is to resolve the removable card again, flash v41, verify
+the embedded FIT/rootfs/FIP from read-back, boot CleanKVM, and confirm the CIF
+reset request resolves to GPIO361. Run one bounded stock-equivalent receiver
+test first without a reset pulse; only then test the source-exact reset operation
+as a separate single variable. Video remains fail-closed.
+
 ## Current stock runtime handoff (2026-09-20)
 
 The verified stock v1.4.2 card is now installed and the stock image is booting.

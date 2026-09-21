@@ -1,0 +1,12 @@
+diff --git a/build/boards/sg200x/sg2002_licheervnano_sd/dts_riscv/sg2002_licheervnano_sd.dts b/build/boards/sg200x/sg2002_licheervnano_sd/dts_riscv/sg2002_licheervnano_sd.dts
+--- a/build/boards/sg200x/sg2002_licheervnano_sd/dts_riscv/sg2002_licheervnano_sd.dts
++++ b/build/boards/sg200x/sg2002_licheervnano_sd/dts_riscv/sg2002_licheervnano_sd.dts
+@@ -182,7 +182,7 @@
+ };
+ 
+ &mipi_rx {
+-        snsr-reset = <&porte 1 GPIO_ACTIVE_LOW>;
++        snsr-reset = <&porte 9 GPIO_ACTIVE_LOW>;
+ };
+ 
+ / {
