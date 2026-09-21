@@ -4,6 +4,31 @@ Updated: 2026-09-21
 
 ## v41 boot result and corrected reset polarity v42 (2026-09-21)
 
+### v42 boot and bounded reset-sequence result
+
+v42 booted with FIT kernel and DTB hash checks passing. The live CIF property
+was `7 9 0`; initial taint was 0, no `soph_*` module was loaded, and no frame
+existed. All six quarantined modules loaded successfully, and CIF logged
+`rst_pin = 361, pol = 0`. The previously audited v35 reset-sequence probe
+(SHA-256 `4f461d8f483f777d5674cc7c5fdcb2ac29092630bea143244ca5af847d76cc2a`)
+was transferred to `/tmp` and verified by device-side SHA-256. It ran once on
+profile 0 with the source-exact sensor reset/MIPI/clock sequence. The driver's
+reset telemetry logged `on=1` then `on=0`, but `gpio_get_value(GPIO361)` was
+0 after **both** operations. Thus a physical high-low pulse was not proven.
+The older diagnostic reads GPIOB at `0x03021000`, whereas the board DTS maps
+port E to `0x05021000`; its raw bank trace cannot establish GPIO361 pad state.
+
+Receiver ECC/CRC/WC were `68/1/8` at T0, `4483/7/496` at 100 ms, and
+`65536/73/6532` at two seconds. D3 entered `hs_err`; VI produced no frame.
+All six modules unloaded with return code 0, the temporary probe and frame
+were removed, and final taint was 4096. Video remains fail-closed. Before
+another pulse experiment, inspect the GPIO361 controller mapping, pinmux,
+`gpio_direction_output` return value, and a bank-correct output/readback path
+using bounded, source-backed diagnostics. Do not treat this test as proof that
+reset routing or an actual pulse has been reproduced.
+
+### v41 no-pulse result and v42 build
+
 v41 booted normally with kernel `5.10.4-tag- #1`, initial taint 0, and no
 `soph_*` modules or captured frame. The live CIF property was phandle 7,
 offset 9, flag 1. Its receiver requested GPIO361 with polarity 1. A bounded

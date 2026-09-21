@@ -1301,6 +1301,25 @@ routing and reset action as separate bounded variables. Video stays closed.
 
 ### v41 GPIO361 test and v42 polarity correction (2026-09-21)
 
+The v42 card booted with kernel and DTB FIT hashes verified. Live
+`/cif/snsr-reset` was `7 9 0`; CIF requested GPIO361 with polarity 0.
+After all six quarantined modules loaded, the previously audited v35
+reset-sequence probe (device-side SHA-256
+`4f461d8f483f777d5674cc7c5fdcb2ac29092630bea143244ca5af847d76cc2a`)
+ran once. Its source-exact sensor reset/MIPI/clock sequence invoked both
+sensor reset directions. The driver logged GPIO361 value 0 after `on=1`
+**and** after `on=0`. Its legacy raw register trace reads GPIOB at
+`0x03021000`, while the board DTS maps GPIOE to `0x05021000`; it cannot prove
+the GPIO361 pad toggled. ECC/CRC/WC rose from
+`68/1/8` at T0 to `4483/7/496` at 100 ms and `65536/73/6532` at two
+seconds; D3 reached `hs_err`, and no frame appeared. All six modules unloaded,
+the temporary probe and frame were removed, and final taint was 4096.
+This does not establish a physical reset pulse. The next bounded diagnostic
+must check GPIO361's bank, mux, output-direction return, and bank-correct
+readback. Video remains closed.
+
+#### v41 no-pulse result and v42 build
+
 v41 booted cleanly. The live `/cif/snsr-reset` was phandle 7, offset 9,
 flag 1, and receiver load logged GPIO361, polarity 1. A fresh-boot bounded
 stock-profile run without a reset pulse used lane phases `0,8,8,3,3`, clock
