@@ -1,0 +1,30 @@
+diff --git a/osdrv/interdrv/v2/cif/chip/mars/cif.c b/osdrv/interdrv/v2/cif/chip/mars/cif.c
+--- a/osdrv/interdrv/v2/cif/chip/mars/cif.c
++++ b/osdrv/interdrv/v2/cif/chip/mars/cif.c
+@@ -2920,11 +2920,22 @@
+ 		link->mac_clk = RX_MAC_CLK_400M;
+ 		link->snsr_rst_pin = of_get_named_gpio_flags(pdev->dev.of_node,
+ 				"snsr-reset", i, &link->snsr_rst_pol);
+-		if (link->snsr_rst_pin < 0)
++		if (link->snsr_rst_pin < 0) {
++			if (cif_diagnostic_clock_readback)
++				pr_info("cif: diagnostic sensor reset lookup index=%d rc=%d\n",
++					i, link->snsr_rst_pin);
+ 			break;
+-
+-		if (gpio_request(link->snsr_rst_pin, "snsr-rst-gpio"))
+-			return 0;
++		}
++
++		{
++			int gpio_rc = gpio_request(link->snsr_rst_pin, "snsr-rst-gpio");
++
++			if (cif_diagnostic_clock_readback)
++				pr_info("cif: diagnostic sensor reset request index=%d gpio=%d rc=%d\n",
++					i, link->snsr_rst_pin, gpio_rc);
++			if (gpio_rc)
++				return 0;
++		}
+ 
+ 		dev_info(&pdev->dev, "rst_pin = %d, pol = %d\n",
+ 			link->snsr_rst_pin, link->snsr_rst_pol);

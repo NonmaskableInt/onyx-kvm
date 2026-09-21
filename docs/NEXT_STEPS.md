@@ -2,6 +2,49 @@
 
 Updated: 2026-09-20
 
+## Clock/reset readback and reset-GPIO lifetime test (2026-09-20)
+
+Patches `0017` through `0019` add a default-off clock/reset snapshot, log the
+existing sensor-reset GPIO lookup/request result, and replace the unmanaged
+`gpio_request` with `devm_gpio_request`. The final offline-built receiver module
+is `out/phase3-clock-reset-readback-v4/soph_mipi_rx.ko`, SHA-256
+`b174b976734cffca6c2129ccdd2147e4c40d9796ed32702049262985ac767bba`,
+with target vermagic `5.10.4-tag- preempt mod_unload riscv`.
+
+After a fresh boot cleared reservations leaked by the earlier diagnostic
+versions, two consecutive bounded runs both requested sensor-reset GPIO 353
+successfully. The second success without reboot proves the device-managed
+request is released on module unload. Both runs reported identical state:
+
+- VIP clock selector/control `0x1c`: `0x01300221`
+- SYS2 clock: `593999994` Hz; parent: `1187999988` Hz
+- MIPI PLL: `900000000` Hz; display PLL: `1187999988` Hz; FPLL: `1500000000` Hz
+- selected CSI MAC enum: `4`
+- PHY and PHY-APB reset status: `-524` (`-ENOTSUPP`)
+
+The reset handles are present. The status result reflects the pinned CVITEK
+reset controller's lack of a `.status` callback, so it is not evidence of a
+missing reset. All six receiver control words still matched stock. Run A had
+ECC/CRC/WC `2504/0/303` at 100 ms and `65536/15/8994` finally; run B had
+`2473/0/384` and `65536/23/9021`. Both produced zero lines and no frame. All
+six loads and reverse unloads returned zero in both runs, no `soph_*` module
+remained, the volatile module was removed, and final taint was 4096.
+
+Live device-tree inspection resolved `cif/snsr-reset` to phandle 7, port E line
+1, GPIO353. The verified pinned Nano SDK source declares the same value, so
+this is not a stale FIT. The stock startup script's GPIO451 (port B line 3) is
+a separate board-level control path; earlier records must not describe it as
+the CIF `snsr-reset` property. Existing hardware evidence shows that pulsing
+GPIO353 restarts the LT6911 link, while stock startup holds GPIO451 high. The
+relationship between these two controls remains unresolved, and neither pin
+should be changed without corresponding source evidence and a bounded
+hypothesis.
+
+The next discriminating comparison is the same read-only clock/reset snapshot
+on a stock boot after HDMI lock, followed by source attribution of any
+difference. Do not load RTOS/fast-image modules into CleanKVM or alter either
+GPIO on the current evidence. Video remains fail-closed.
+
 ## Six-word clean readback completed (2026-09-20)
 
 The default-off `0016` CIF diagnostic reads six control words through existing

@@ -1,0 +1,12 @@
+diff --git a/osdrv/interdrv/v2/cif/chip/mars/cif.c b/osdrv/interdrv/v2/cif/chip/mars/cif.c
+--- a/osdrv/interdrv/v2/cif/chip/mars/cif.c
++++ b/osdrv/interdrv/v2/cif/chip/mars/cif.c
+@@ -2928,7 +2928,7 @@
+ 		}
+ 
+ 		{
+-			int gpio_rc = gpio_request(link->snsr_rst_pin, "snsr-rst-gpio");
++			int gpio_rc = devm_gpio_request(&pdev->dev, link->snsr_rst_pin, "snsr-rst-gpio");
+ 
+ 			if (cif_diagnostic_clock_readback)
+ 				pr_info("cif: diagnostic sensor reset request index=%d gpio=%d rc=%d\n",

@@ -1266,6 +1266,44 @@ clock/reset and initialization-order state next; an RTOS-mediated prerequisite
 is plausible but unproven. Both volatile `/tmp` diagnostic module copies were
 removed and their absence verified. Video remains fail-closed.
 
+### Clean clock/reset readback and GPIO lifetime (2026-09-20)
+
+The default-off `0017` diagnostic records existing CIF clock handles and reset
+handles after normal MIPI setup. `0018` logs the existing sensor-reset GPIO
+lookup/request result, and `0019` uses `devm_gpio_request` so unloading the
+module releases that reservation. The final module SHA-256 is
+`b174b976734cffca6c2129ccdd2147e4c40d9796ed32702049262985ac767bba`.
+It was built offline in the verified builder and has target vermagic
+`5.10.4-tag- preempt mod_unload riscv`.
+
+A fresh-boot baseline had taint 0, no `soph_*` modules, and no frame. In two
+consecutive bounded runs without an intervening reboot, sensor-reset index 0
+resolved to GPIO353 and its request returned zero. Index 1 lookup returned
+`-ENOENT`, consistent with the single device-tree entry. Successful acquisition
+in the second run proves unload released the first reservation. Both snapshots
+were identical: VIP `0x1c=0x01300221`, SYS2 593999994 Hz, parent/display PLL
+1187999988 Hz, MIPI PLL 900000000 Hz, FPLL 1500000000 Hz, and MAC enum 4.
+Both PHY reset-status calls returned `-ENOTSUPP`; pinned reset-controller source
+has no status callback, while the handles themselves are valid.
+
+All six previously compared control words remained stock-equivalent. The two
+100 ms ECC/CRC/WC samples were `2504/0/303` and `2473/0/384`; final values
+were `65536/15/8994` and `65536/23/9021`. Neither run completed a line or
+frame. Every load and reverse unload returned zero, no receiver module remained,
+the volatile diagnostic file was deleted, and final taint was 4096.
+
+The live FIT's `/cif/snsr-reset` property is phandle 7, offset 1, active-low;
+phandle 7 is port E, yielding GPIO353. Offline inspection confirms the verified
+pinned `sg2002_licheervnano_sd.dts` declares `&porte 1`, so the FIT is not
+stale. Stock `S15kvmhwd` separately holds GPIO451 (port B line 3) high. Prior
+text that called GPIO451 the CIF device-tree reset conflated these two paths.
+GPIO353 has been observed to restart the LT6911 link; the electrical relationship
+to GPIO451 is not yet established. No device-tree pin change is justified.
+
+Next capture the same clock/reset values on a stock boot after HDMI lock with a
+source-built read-only diagnostic, then attribute any difference in source.
+Video stays closed.
+
 ### Stock-only prerequisite source audit (2026-09-20)
 
 The next readback candidate is tracked as

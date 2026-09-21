@@ -1,0 +1,41 @@
+diff --git a/osdrv/interdrv/v2/cif/chip/mars/cif.c b/osdrv/interdrv/v2/cif/chip/mars/cif.c
+--- a/osdrv/interdrv/v2/cif/chip/mars/cif.c
++++ b/osdrv/interdrv/v2/cif/chip/mars/cif.c
+@@ -80,6 +80,11 @@
+ static bool cif_diagnostic_readback;
+ module_param(cif_diagnostic_readback, bool, 0444);
+ MODULE_PARM_DESC(cif_diagnostic_readback, "read six CSI control words after MIPI setup");
++
++/* Read-only clock and reset snapshot; disabled unless requested. */
++static bool cif_diagnostic_clock_readback;
++module_param(cif_diagnostic_clock_readback, bool, 0444);
++MODULE_PARM_DESC(cif_diagnostic_clock_readback, "read CSI clock and reset state after MIPI setup");
+ 
+ static int bypass_mac_clk;
+ module_param(bypass_mac_clk, int, 0644);
+@@ -1954,6 +1959,25 @@
+ 	if (cif_diagnostic_readback && input_mode == INPUT_MODE_MIPI &&
+ 	    attr->devno == 0)
+ 		cif_log_control_words(ctx);
++	if (cif_diagnostic_clock_readback && input_mode == INPUT_MODE_MIPI &&
++	    attr->devno == 0) {
++		struct clk *sys2 = dev->vip_sys2.clk_o;
++		struct clk *parent = IS_ERR_OR_NULL(sys2) ? NULL : clk_get_parent(sys2);
++		struct cvi_link *link = &dev->link[0];
++
++		pr_info("cif: diagnostic clock state vip_1c=%08x sys2_hz=%lu parent_hz=%lu mipimpll_hz=%lu disppll_hz=%lu fpll_hz=%lu mac_enum=%u phy_reset=%d phy_apb_reset=%d\n",
++			vip_sys_reg_read(0x1c),
++			IS_ERR_OR_NULL(sys2) ? 0UL : clk_get_rate(sys2),
++			IS_ERR_OR_NULL(parent) ? 0UL : clk_get_rate(parent),
++			IS_ERR_OR_NULL(dev->clk_mipimpll.clk_o) ? 0UL : clk_get_rate(dev->clk_mipimpll.clk_o),
++			IS_ERR_OR_NULL(dev->clk_disppll.clk_o) ? 0UL : clk_get_rate(dev->clk_disppll.clk_o),
++			IS_ERR_OR_NULL(dev->clk_fpll.clk_o) ? 0UL : clk_get_rate(dev->clk_fpll.clk_o),
++			link->mac_clk,
++			IS_ERR(link->phy_reset) ? (int)PTR_ERR(link->phy_reset) :
++			(link->phy_reset ? reset_control_status(link->phy_reset) : -ENODEV),
++			IS_ERR(link->phy_apb_reset) ? (int)PTR_ERR(link->phy_apb_reset) :
++			(link->phy_apb_reset ? reset_control_status(link->phy_apb_reset) : -ENODEV));
++	}
+ 
+ 	return 0;
+ }
