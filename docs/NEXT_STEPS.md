@@ -2,6 +2,15 @@
 
 Updated: 2026-09-20
 
+## Current stock runtime handoff (2026-09-20)
+
+The verified stock v1.4.2 card is now installed and the stock image is booting.
+Use the previously established stock SSH login and password for the next
+read-only comparison; the credential itself remains outside Git and is not
+reproduced in this record. HDMI and UART should remain attached. The immediate
+experiment is the stock-side clock/reset snapshot described below after HDMI
+lock. Do not copy a stock executable or module into CleanKVM.
+
 ## Clock/reset readback and reset-GPIO lifetime test (2026-09-20)
 
 Patches `0017` through `0019` add a default-off clock/reset snapshot, log the
@@ -148,9 +157,9 @@ After unmount, exactly 1,627,390,464 source bytes were written. The card then
 showed stock 16.8 MB FAT / 1.6 GB Linux layout. Its complete Linux partition
 read back at SHA-256
 `c285650ee41892c0cef5fbc371d3b13828f886a3ebb82a400ff06bbec94585a4`,
-matching the retained stock source partition. The card was safely ejected.
-Next physical step: insert this card into the NanoKVM and power-cycle with HDMI
-and UART attached. Capture only read-only stock receiver/clock state after HDMI
+matching the retained stock source partition. The card was safely ejected and
+has since been installed in the NanoKVM. The stock image is now booting; the previously established stock SSH login and
+password apply. Capture only read-only stock receiver/clock state after HDMI
 lock. Do not copy or load stock executables/modules into CleanKVM.
 
 ## Stock LT settle comparison (2026-09-19)

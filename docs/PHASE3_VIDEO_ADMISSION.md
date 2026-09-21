@@ -1300,9 +1300,11 @@ text that called GPIO451 the CIF device-tree reset conflated these two paths.
 GPIO353 has been observed to restart the LT6911 link; the electrical relationship
 to GPIO451 is not yet established. No device-tree pin change is justified.
 
-Next capture the same clock/reset values on a stock boot after HDMI lock with a
-source-built read-only diagnostic, then attribute any difference in source.
-Video stays closed.
+The verified stock v1.4.2 card is now installed and the stock image is booting.
+The previously established stock SSH login and password apply; no credential is
+stored in this repository. Next capture the same clock/reset values after HDMI
+lock with a source-built read-only diagnostic, then attribute any difference in
+source. Video stays closed.
 
 ### Stock-only prerequisite source audit (2026-09-20)
 
