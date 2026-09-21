@@ -1,6 +1,34 @@
 # Next steps
 
-Updated: 2026-09-20
+Updated: 2026-09-21
+
+## v41 boot result and corrected reset polarity v42 (2026-09-21)
+
+v41 booted normally with kernel `5.10.4-tag- #1`, initial taint 0, and no
+`soph_*` modules or captured frame. The live CIF property was phandle 7,
+offset 9, flag 1. Its receiver requested GPIO361 with polarity 1. A bounded
+stock-profile probe without a reset pulse used lane phases `0,8,8,3,3`,
+clock phase 0, settle 8, PN swaps `0,0,0,0,0`, and lanes `2,4,3,1,0`.
+ECC/CRC/WC rose from `30/0/15` at T0 to `4348/6/624` at 100 ms and
+`65536/168/8875` at five seconds. VI saw zero lines, no frame was created,
+and the probe returned 1. All six modules unloaded; final taint was 4096.
+This closes the hypothesis that GPIO361 routing alone fixes the link.
+
+Corresponding stock source hardcodes GPIO361 but leaves `snsr_rst_pol` at its
+zero initialization; stock logs polarity 0 and drives GPIO361 low at rest.
+v41's active-low flag would invert a reset pulse. Patch `0020` now uses
+`GPIO_ACTIVE_HIGH`, retaining GPIO361 with stock-equivalent polarity 0.
+The corrected DTB has `/cif/snsr-reset` `7 9 0` and SHA-256
+`e4ee9d88f4f276cf9edabdee0e5942ff05b8c5c7eecd4a040ab49f630afda928`.
+The offline-built v42 FIT SHA-256 is
+`c54ee63e57f2128d419c970602c10df8ef1230537a7f65381ceada243bb14b4b`.
+The assembled, embedded-artifact-verified v42 image is
+`out/phase3-reset-polarity-v42/cleankvm-phase1.img`, 79,692,288 bytes,
+SHA-256 `523da9612c301d556dbb06133e0650e91e449c7ae5896e7ca957fec2f78d193a`.
+It reuses the audited v40 rootfs and FIP. Next, resolve the card identity
+again, flash v42, verify FIT/rootfs/FIP from read-back, and boot. Confirm
+GPIO361 polarity 0 before one bounded source-exact reset-pulse experiment.
+Video remains fail-closed.
 
 ## Stock clock comparison and reset-routing image v41 (2026-09-20)
 
@@ -49,10 +77,8 @@ macOS FAT bookkeeping changed the whole-span hash, while the embedded FIT,
 rootfs, and FIP each matched their audited artifacts. The card was force-unmounted
 only after verification and safely ejected.
 
-Next boot v41 with HDMI and UART attached and confirm the CIF reset request
-resolves to GPIO361. Run one bounded stock-equivalent receiver test first without
-a reset pulse; only then test the source-exact reset operation as a separate
-single variable. Video remains fail-closed.
+The planned v41 no-pulse test was completed on 2026-09-21 as recorded above.
+Its active-low polarity requires correction before a reset-pulse test.
 
 ## Current stock runtime handoff (2026-09-20)
 

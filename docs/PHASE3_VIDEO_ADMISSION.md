@@ -1299,6 +1299,31 @@ Although macOS FAT bookkeeping changed the whole-span hash, embedded FIT,
 rootfs, and FIP verification passed. The card was safely ejected. Test reset
 routing and reset action as separate bounded variables. Video stays closed.
 
+### v41 GPIO361 test and v42 polarity correction (2026-09-21)
+
+v41 booted cleanly. The live `/cif/snsr-reset` was phandle 7, offset 9,
+flag 1, and receiver load logged GPIO361, polarity 1. A fresh-boot bounded
+stock-profile run without a reset pulse used lane phases `0,8,8,3,3`, clock
+phase 0, settle 8, PN swaps `0,0,0,0,0`, and lanes `2,4,3,1,0`.
+ECC/CRC/WC were `30/0/15` at T0, `4348/6/624` at 100 ms, and
+`65536/168/8875` at five seconds. VI reported zero lines, probe returned 1,
+and no frame existed. All six modules unloaded; taint changed 0 to 4096.
+GPIO361 routing alone does not produce a frame.
+
+The corresponding stock source hardcodes GPIO361 while `snsr_rst_pol` remains
+zero-initialized. Stock logs polarity 0 and leaves the pin low at rest.
+v41's active-low flag would invert an intentional pulse, so tracked patch
+`0020` now specifies port E line 9 `GPIO_ACTIVE_HIGH`. The v42 DTB property
+is `7 9 0`, SHA-256
+`e4ee9d88f4f276cf9edabdee0e5942ff05b8c5c7eecd4a040ab49f630afda928`.
+Offline FIT SHA-256 is
+`c54ee63e57f2128d419c970602c10df8ef1230537a7f65381ceada243bb14b4b`.
+The assembled v42 image SHA-256 is
+`523da9612c301d556dbb06133e0650e91e449c7ae5896e7ca957fec2f78d193a`;
+embedded FIT, rootfs, and FIP verification passed. Card flashing and hardware
+test remain pending. The next bounded variable is a source-exact reset pulse
+after confirming GPIO361 polarity 0 on v42. Video remains closed.
+
 ### Clean clock/reset readback and GPIO lifetime (2026-09-20)
 
 The default-off `0017` diagnostic records existing CIF clock handles and reset
