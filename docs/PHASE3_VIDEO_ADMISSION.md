@@ -1320,8 +1320,12 @@ Offline FIT SHA-256 is
 `c54ee63e57f2128d419c970602c10df8ef1230537a7f65381ceada243bb14b4b`.
 The assembled v42 image SHA-256 is
 `523da9612c301d556dbb06133e0650e91e449c7ae5896e7ca957fec2f78d193a`;
-embedded FIT, rootfs, and FIP verification passed. Card flashing and hardware
-test remain pending. The next bounded variable is a source-exact reset pulse
+embedded FIT, rootfs, and FIP verification passed. The uniquely identified
+31.0 GB card (`/dev/disk4` at this insertion) was flashed with exactly
+79,692,288 bytes. Exact-span card read-back SHA-256 was
+`ad68fed9cc514532126c1594069ac613dd30cb713a68a4c4f1c573539a115584`;
+the embedded FIT, rootfs, and FIP matched despite macOS FAT bookkeeping changes.
+The card was safely ejected. The next bounded variable is a source-exact reset pulse
 after confirming GPIO361 polarity 0 on v42. Video remains closed.
 
 ### Clean clock/reset readback and GPIO lifetime (2026-09-20)

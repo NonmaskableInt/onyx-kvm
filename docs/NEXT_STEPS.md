@@ -25,8 +25,13 @@ The offline-built v42 FIT SHA-256 is
 The assembled, embedded-artifact-verified v42 image is
 `out/phase3-reset-polarity-v42/cleankvm-phase1.img`, 79,692,288 bytes,
 SHA-256 `523da9612c301d556dbb06133e0650e91e449c7ae5896e7ca957fec2f78d193a`.
-It reuses the audited v40 rootfs and FIP. Next, resolve the card identity
-again, flash v42, verify FIT/rootfs/FIP from read-back, and boot. Confirm
+It reuses the audited v40 rootfs and FIP. On 2026-09-21 the resolver uniquely
+identified `/dev/disk4` as the removable 31.0 GB card with the expected 16.8 MB
+FAT and 62.9 MB Linux partitions. Exactly 79,692,288 image bytes were written.
+The exact-span read-back SHA-256 was
+`ad68fed9cc514532126c1594069ac613dd30cb713a68a4c4f1c573539a115584`;
+macOS FAT bookkeeping changed the whole-span digest, while the embedded FIT,
+rootfs, and FIP matched. The card was ejected. Next boot v42 and confirm
 GPIO361 polarity 0 before one bounded source-exact reset-pulse experiment.
 Video remains fail-closed.
 
