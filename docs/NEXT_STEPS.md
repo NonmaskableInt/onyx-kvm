@@ -2,6 +2,80 @@
 
 Updated: 2026-09-21
 
+## GPIOE9 mux discriminator completed on v42 (2026-09-21)
+
+Tracked patch `0021-cif-read-pwr-on-gpioe-reset-state.patch` changes only
+default-off CIF reset telemetry: it reads the source-identified `PWR_ON` mux
+register `0x0300109c`, GPIOE registers at `0x05021000`, and the return from
+the existing `gpio_direction_output` operation. It adds no register write.
+The offline-built temporary receiver module SHA-256 is
+`f0560a842d666c1ed67373c18714b979a5f726096f594ccc18e13e7e5f3ce17d`;
+target vermagic is `5.10.4-tag- preempt mod_unload riscv`. Its compressed
+transfer and the audited v35 reset probe both matched their host hashes on
+the running v42 device.
+
+One bounded reset-sequence run showed:
+
+| Step | `PWR_ON` mux | GPIOE output | GPIOE direction | GPIOE sampled input | GPIO361 read | direction return |
+| --- | --- | --- | --- | --- | --- | --- |
+| Before assert | `0` | `0x00000000` | `0x00000200` | `0x00000562` | — | — |
+| After assert | `0` | `0x00000200` | `0x00000200` | `0x00000162` | 0 | 0 |
+| Before release | `0` | `0x00000200` | `0x00000200` | `0x00000562` | — | — |
+| After release | `0` | `0x00000000` | `0x00000200` | `0x00000562` | 0 | 0 |
+
+GPIOE9's output latch (bit 9) changed low-high-low and direction remained
+output, but its sampled input bit 9 stayed low. The `PWR_ON` mux remained
+function 0 throughout, while pinned U-Boot definitions assign GPIOE9 mode 3.
+The changes in the sampled input word are bit 10, not bit 9. The normal GPIO
+calls returned success; they did not make a visible GPIOE9 pad pulse. This
+supports a mux-related explanation for the v42 readback, but the stock
+runtime mux value and board electrical connection remain unmeasured.
+
+The diagnostic receiver's ECC/CRC/WC reached `65536/12/2474` by two seconds;
+no video admission followed. All six modules unloaded with return code 0,
+the two temporary binaries and frame path were removed, and taint remained
+4096 from the earlier module load. Next compare the **read-only** stock
+`PWR_ON` mux and GPIOE9 direction/output/input state during normal HDMI lock.
+Do not set mux mode 3 until stock runtime evidence and the pad's power-control
+role establish a safe, bounded hypothesis. Video remains fail-closed.
+
+## Stock GPIO361 pinmux and software-path audit (2026-09-21)
+
+Offline inspection of the stock v1.4.2 root filesystem and matching CIF source
+separates three paths. CIF's GPIO353 `LT-INT` edge handler samples the pin and
+updates `/proc/lt_int`; it does not write GPIO, pinmux, or LT6911 registers.
+The same stock CIF change hardcodes GPIO361 as `snsr-rst-gpio`; only the
+`CVI_MIPI_RESET_SENSOR` and `CVI_MIPI_UNRESET_SENSOR` ioctl paths call
+`gpio_direction_output` for it. The stock `S15kvmhwd` script instead exports
+GPIO451 (`PCIe_HDMI_RST_Pin`), sets it as output, and leaves it high. It does
+not operate GPIO353 or GPIO361.
+
+The SG200x board DTS maps port E to `0x05021000`. GPIO361 is port E line 9,
+whose pad is named `PWR_ON`; the pinned U-Boot pin-function table assigns
+`PWR_ON` function 0 and `PWR_GPIO_9` function 3 at pinmux register
+`0x0300109c`. The Nano board initialization source has no explicit write to
+that register. This makes a missing GPIO mux a concrete hypothesis, not a
+proven stock/clean difference: the shipped stock FIP loader is packed and its
+live pinmux value has not been captured. Existing reset telemetry reads GPIOB
+registers and ignores the return from `gpio_direction_output`, so it cannot
+resolve the hypothesis.
+
+The stock `kvm_system` and `NanoKVM-Server` binaries were extracted as data
+from the stock image and inspected for GPIO/MIPI paths without execution.
+The server exposes GPIO503/504/505/507 paths; simple string inspection found
+no GPIO353/361 or direct MIPI device path in either binary. This does not rule
+out indirect calls through linked code. The stock CIF source and observed
+module behavior provide the stronger evidence for the interrupt/reset paths.
+
+The running CleanKVM kernel has `/dev/gpiochip0` through `4` but no sysfs GPIO
+or debugfs mountpoint; `/dev/mem` remains absent. A read-only GPIO line-info
+query can identify ownership, but direct mux and GPIOE register values require
+a bounded kernel diagnostic or a later stock runtime capture. Next implement
+a default-off diagnostic that checks `gpio_direction_output` return status and
+reads `0x0300109c` plus GPIOE registers at `0x05021000` before and after an
+existing reset ioctl. Do not write pinmux registers or infer a physical pulse
+from `gpio_get_value` alone. Video remains fail-closed.
+
 ## v41 boot result and corrected reset polarity v42 (2026-09-21)
 
 ### v42 boot and bounded reset-sequence result

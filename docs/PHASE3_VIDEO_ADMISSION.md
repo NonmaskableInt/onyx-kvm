@@ -1301,6 +1301,38 @@ routing and reset action as separate bounded variables. Video stays closed.
 
 ### v41 GPIO361 test and v42 polarity correction (2026-09-21)
 
+The follow-up GPIOE diagnostic module from tracked patch `0021` was built
+offline (SHA-256
+`f0560a842d666c1ed67373c18714b979a5f726096f594ccc18e13e7e5f3ce17d`,
+target vermagic `5.10.4-tag- preempt mod_unload riscv`) and hash-verified on
+the running v42 device. It reads `PWR_ON` mux `0x0300109c` and GPIOE base
+`0x05021000` without writing either register. A single audited reset-sequence
+run found `direction_rc=0` for assert and release. GPIOE output bit 9 changed
+0 → 1 → 0, direction bit 9 stayed output, but sampled input bit 9 and
+`gpio_get_value(GPIO361)` stayed low; mux stayed function 0. Pinned pin-function
+definitions assign GPIOE9 function 3. ECC/CRC/WC saturated at
+`65536/12/2474` by two seconds. All six modules unloaded and temporary files
+were removed. This supports a mux explanation for the missing pad pulse; it
+does not establish the stock mux state or the LT6911 electrical connection.
+Next compare the stock runtime mux and GPIOE state read-only before considering
+any mux write. Video remains closed.
+
+Offline stock software audit on 2026-09-21 confirmed that the GPIO353
+`LT-INT` ISR only reads that pin and updates `/proc/lt_int`. The separately
+hardcoded GPIO361 is driven only by CIF sensor reset/unreset ioctl calls.
+Stock `S15kvmhwd` sets GPIO451 as an output held high and does not touch
+GPIO353 or GPIO361. GPIO361 is GPIOE9, whose pad is `PWR_ON`; pinned U-Boot
+definitions assign GPIO mode value 3 at `0x0300109c`, while the Nano board
+initialization source contains no explicit write there. GPIOE's controller
+base is `0x05021000`. The stock FIP loader's runtime pinmux setting remains
+unmeasured. Stock `kvm_system` and `NanoKVM-Server` were extracted and
+inspected offline without execution; initial string inspection found no
+direct GPIO353/361 or MIPI device paths, but cannot exclude indirect calls.
+On the running clean kernel `/dev/mem` is absent, as required, and neither
+debugfs nor sysfs GPIO is exposed. The next source-backed diagnostic must
+read the correct mux/GPIOE registers and check the return from the existing
+`gpio_direction_output` calls; no pinmux write is justified yet.
+
 The v42 card booted with kernel and DTB FIT hashes verified. Live
 `/cif/snsr-reset` was `7 9 0`; CIF requested GPIO361 with polarity 0.
 After all six quarantined modules loaded, the previously audited v35

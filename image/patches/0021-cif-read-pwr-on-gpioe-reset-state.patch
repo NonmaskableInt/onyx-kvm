@@ -1,0 +1,54 @@
+--- a/osdrv/interdrv/v2/cif/chip/mars/cif.c
++++ b/osdrv/interdrv/v2/cif/chip/mars/cif.c
+@@ -2418,7 +2418,8 @@
+ {
+ 	struct cvi_link *link;
+ 	void __iomem *mux;
+-	void __iomem *gpio_b;
++	void __iomem *gpio_e;
++	int direction_rc;
+ 	int reset;
+ 
+ 	if (devno >= MAX_LINK_NUM)
+@@ -2429,27 +2430,27 @@
+ 
+ 	if (!gpio_is_valid(link->snsr_rst_pin))
+ 		return 0;
+-	mux = ioremap(0x030010f8, sizeof(u32));
+-	gpio_b = ioremap(0x03021000, 0x54);
+-	if (mux && gpio_b)
++	mux = ioremap(0x0300109c, sizeof(u32));
++	gpio_e = ioremap(0x05021000, 0x54);
++	if (mux && gpio_e)
+ 		dev_err(dev->miscdev.this_device,
+ 			 "cleankvm-reset before: dev=%u pin=%d pol=%u on=%u mux=%08x out=%08x dir=%08x sample=%08x\n",
+ 			 devno, link->snsr_rst_pin, link->snsr_rst_pol, on,
+-			 readl(mux), readl(gpio_b), readl(gpio_b + 0x04),
+-			 readl(gpio_b + 0x50));
++			 readl(mux), readl(gpio_e), readl(gpio_e + 0x04),
++			 readl(gpio_e + 0x50));
+ 	if (on)
+-		gpio_direction_output(link->snsr_rst_pin, reset);
++		direction_rc = gpio_direction_output(link->snsr_rst_pin, reset);
+ 	else
+-		gpio_direction_output(link->snsr_rst_pin, !reset);
+-	if (mux && gpio_b)
++		direction_rc = gpio_direction_output(link->snsr_rst_pin, !reset);
++	if (mux && gpio_e)
+ 		dev_err(dev->miscdev.this_device,
+-			 "cleankvm-reset after: dev=%u pin=%d value=%d mux=%08x out=%08x dir=%08x sample=%08x\n",
++			 "cleankvm-reset after: dev=%u pin=%d value=%d direction_rc=%d mux=%08x out=%08x dir=%08x sample=%08x\n",
+ 			 devno, link->snsr_rst_pin,
+-			 gpio_get_value(link->snsr_rst_pin), readl(mux),
+-			 readl(gpio_b), readl(gpio_b + 0x04),
+-			 readl(gpio_b + 0x50));
+-	if (gpio_b)
+-		iounmap(gpio_b);
++			 gpio_get_value(link->snsr_rst_pin), direction_rc, readl(mux),
++			 readl(gpio_e), readl(gpio_e + 0x04),
++			 readl(gpio_e + 0x50));
++	if (gpio_e)
++		iounmap(gpio_e);
+ 	if (mux)
+ 		iounmap(mux);
+ 
