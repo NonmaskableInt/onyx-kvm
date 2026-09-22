@@ -1301,6 +1301,28 @@ routing and reset action as separate bounded variables. Video stays closed.
 
 ### v41 GPIO361 test and v42 polarity correction (2026-09-21)
 
+**Stock live comparison, 2026-09-22.** Stock kernel `#46` and receiver build
+`#30` remained stable at `yuv422-8`, with ECC/CRC/header/WC `0/0/0/0`.
+GPIO353 was input high with IRQ and `/proc/lt_int` was zero; GPIO361 was output
+low. The fixed-address, read-only stock register reader in
+`image/diagnostics/stock-gpioe-read.c` was built offline, device-hash-verified
+(SHA-256 `63119661409a572d160c7014716cac5e720c1ce7f7b49e80db4a76d5631570ab`),
+run, and removed. It used the stock system's existing `/dev/mem` only for
+one-page `PROT_READ` mappings; it did not write registers or affect CleanKVM.
+Two stock snapshots agreed: `PWR_ON` mux `0`, `PWR_GPIO0` mux `0`,
+`PWR_GPIO2` mux `0`, GPIOE output `0x5`, direction `0x205`, and input
+`0x167`/`0x567`. GPIOE9 thus matches v42's mux 0 and low sampled pin; the
+missing GPIO361 pad pulse is not the stock/clean link-state difference.
+GPIOE0 and GPIOE2 are the measured difference: stock output-high, clean
+input-low. Pinned Nano board-init source muxes GPIOE0 with an LCD-reset
+comment and GPIOE2 with a beta-board backlight comment, but neither source
+nor the stock startup/CIF paths identify an output-high operation. The stock
+and clean FIP loader hashes differ, leaving boot-stage initialization open.
+Their electrical role on NanoKVM Lite remains unverified. No GPIOE pin state
+was changed. Confirm the board nets before any experiment that could drive
+them; if unrelated to the bridge, return to CSI link initialization. Video
+remains closed.
+
 The follow-up GPIOE diagnostic module from tracked patch `0021` was built
 offline (SHA-256
 `f0560a842d666c1ed67373c18714b979a5f726096f594ccc18e13e7e5f3ce17d`,
@@ -1312,10 +1334,9 @@ run found `direction_rc=0` for assert and release. GPIOE output bit 9 changed
 `gpio_get_value(GPIO361)` stayed low; mux stayed function 0. Pinned pin-function
 definitions assign GPIOE9 function 3. ECC/CRC/WC saturated at
 `65536/12/2474` by two seconds. All six modules unloaded and temporary files
-were removed. This supports a mux explanation for the missing pad pulse; it
-does not establish the stock mux state or the LT6911 electrical connection.
-Next compare the stock runtime mux and GPIOE state read-only before considering
-any mux write. Video remains closed.
+were removed. This explains the missing GPIO361 pad pulse; the later stock
+comparison above shows the same mux state and does not establish the LT6911
+electrical connection. No mux write is justified. Video remains closed.
 
 Offline stock software audit on 2026-09-21 confirmed that the GPIO353
 `LT-INT` ISR only reads that pin and updates `/proc/lt_int`. The separately
@@ -1324,8 +1345,8 @@ Stock `S15kvmhwd` sets GPIO451 as an output held high and does not touch
 GPIO353 or GPIO361. GPIO361 is GPIOE9, whose pad is `PWR_ON`; pinned U-Boot
 definitions assign GPIO mode value 3 at `0x0300109c`, while the Nano board
 initialization source contains no explicit write there. GPIOE's controller
-base is `0x05021000`. The stock FIP loader's runtime pinmux setting remains
-unmeasured. Stock `kvm_system` and `NanoKVM-Server` were extracted and
+base is `0x05021000`. The later stock runtime comparison measured mux 0.
+Stock `kvm_system` and `NanoKVM-Server` were extracted and
 inspected offline without execution; initial string inspection found no
 direct GPIO353/361 or MIPI device paths, but cannot exclude indirect calls.
 On the running clean kernel `/dev/mem` is absent, as required, and neither

@@ -1,6 +1,52 @@
 # Next steps
 
-Updated: 2026-09-21
+Updated: 2026-09-22
+
+## Stock live GPIOE comparison closes GPIO361 mux hypothesis (2026-09-22)
+
+The stock v1.4.2 card booted with kernel `5.10.4-tag- #46` and receiver build
+`#30`. During stable `yuv422-8` reception, `/proc/mipi-rx` reported
+ECC/CRC/header/WC `0/0/0/0`. GPIO debugfs showed GPIO353 (`LT-INT`) as an
+input high with IRQ, GPIO361 (`snsr-rst-gpio`) as output low, and the interrupt
+counter at zero. Stock GPIO451 remained output high.
+
+Because stock pinctrl debugfs registers no pin controller, a temporary
+source-auditable reader in `image/diagnostics/stock-gpioe-read.c` used the
+stock system's existing `/dev/mem` **read-only**, mapping one 4 KiB page at a
+time with `PROT_READ` and reading only six fixed 32-bit registers. No register
+write or CleanKVM `/dev/mem` exposure was added. A direct `pread` attempt
+returned `EFAULT`; the bounded read-only mappings succeeded. The final
+offline-built RISC-V reader SHA-256 was
+`63119661409a572d160c7014716cac5e720c1ce7f7b49e80db4a76d5631570ab`,
+verified on the stock device before use and removed from `/tmp` afterward.
+
+| Register | Stock, HDMI stable | Clean v42 diagnostic |
+| --- | --- | --- |
+| `PWR_ON` mux, `0x0300109c` | `0` | `0` |
+| `PWR_GPIO0` mux, `0x030010a4` | `0` | not yet read |
+| `PWR_GPIO2` mux, `0x030010ac` | `0` | not yet read |
+| GPIOE output, `0x05021000` | `0x00000005` | `0x00000000` before reset |
+| GPIOE direction, `0x05021004` | `0x00000205` | `0x00000200` |
+| GPIOE input, `0x05021050` | `0x00000167`/`0x00000567` | `0x00000562`/`0x00000162` |
+
+Both stock and clean leave the GPIO361/`PWR_ON` pad at mux function 0 with
+GPIOE9 output direction, low output latch, and low sampled input. Therefore
+the GPIO361 mux is **not** the stock/clean video discriminator. The toggling
+input-word bit 10 is independent of GPIOE9. Stock additionally drives GPIOE0
+and GPIOE2 high as outputs, with mux function 0 on both; clean v42 showed
+those GPIOE bits low as inputs. This is a measured boot-state difference,
+not yet a proven bridge control or cause of CSI errors. Pinned Nano board-init
+source muxes PWR_GPIO0 to GPIO mode with an LCD-reset comment, and PWR_GPIO2
+to GPIO mode with a beta-board backlight comment; it has no identified
+output-high write for either. The stock startup script and matching CIF
+source also contain no identified GPIOE0/E2 output write. Stock and clean
+FIP `LOADER_2ND` hashes differ (`5dde2075...` versus `74633e50...`), so
+boot-stage initialization remains a plausible source of the state difference.
+These source labels do not prove the NanoKVM Lite circuit connection. Next
+confirm GPIOE0/E2 nets against the board schematic and capture a clean
+read-only mux snapshot. Do not drive either pad until its load and purpose
+are source-backed. If unrelated to the bridge, resume the bounded CSI link
+initialization comparison. Video remains fail-closed.
 
 ## GPIOE9 mux discriminator completed on v42 (2026-09-21)
 
@@ -28,16 +74,16 @@ output, but its sampled input bit 9 stayed low. The `PWR_ON` mux remained
 function 0 throughout, while pinned U-Boot definitions assign GPIOE9 mode 3.
 The changes in the sampled input word are bit 10, not bit 9. The normal GPIO
 calls returned success; they did not make a visible GPIOE9 pad pulse. This
-supports a mux-related explanation for the v42 readback, but the stock
-runtime mux value and board electrical connection remain unmeasured.
+explains the v42 GPIO361 readback. The stock comparison above shows the same
+mux value, so it is not the video discriminator; the board electrical
+connection remains unmeasured.
 
 The diagnostic receiver's ECC/CRC/WC reached `65536/12/2474` by two seconds;
 no video admission followed. All six modules unloaded with return code 0,
 the two temporary binaries and frame path were removed, and taint remained
-4096 from the earlier module load. Next compare the **read-only** stock
-`PWR_ON` mux and GPIOE9 direction/output/input state during normal HDMI lock.
-Do not set mux mode 3 until stock runtime evidence and the pad's power-control
-role establish a safe, bounded hypothesis. Video remains fail-closed.
+4096 from the earlier module load. The subsequent stock read-only comparison
+is recorded above. Do not set mux mode 3: stock also leaves it at 0.
+Video remains fail-closed.
 
 ## Stock GPIO361 pinmux and software-path audit (2026-09-21)
 
@@ -55,8 +101,9 @@ whose pad is named `PWR_ON`; the pinned U-Boot pin-function table assigns
 `PWR_ON` function 0 and `PWR_GPIO_9` function 3 at pinmux register
 `0x0300109c`. The Nano board initialization source has no explicit write to
 that register. This makes a missing GPIO mux a concrete hypothesis, not a
-proven stock/clean difference: the shipped stock FIP loader is packed and its
-live pinmux value has not been captured. Existing reset telemetry reads GPIOB
+proven stock/clean difference: the shipped stock FIP loader is packed. The
+later live comparison above resolved the mux value as 0 on both images.
+Existing reset telemetry reads GPIOB
 registers and ignores the return from `gpio_direction_output`, so it cannot
 resolve the hypothesis.
 
