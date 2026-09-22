@@ -9,15 +9,17 @@ A source-auditable static RISC-V reader mapped only 46 source-identified CSI
 control, wrapper, and four-lane PHY words with `PROT_READ`. Its on-target hash
 matched `15ead6efb22ed20f1a86da4e4e6be30a7c9cb629d76f20e1f16ed3659484c870`.
 Two stock kernel `#46` snapshots two seconds apart were byte-for-byte
-identical; the reader was removed afterward. No register was written and stock
-taint remained 4098.
+identical; the reader was removed afterward. A second stock reboot reproduced
+every static control and status word. No register was written and stock taint
+remained 4098.
 
 The previously established six control words reproduced exactly. The expanded
 control set adds CSI `00=00000003`, `40=00010001`, `70=00000f00` and PHY4L
 `04=00000134`, `0c=00ff000f`, `20=0fff0009`, `34=06000caa`,
-`38=000000ff`; other captured control words were zero. Live PHY state was
-`DBG_90=00000021`, `DBG_94=00005555`, `STATUS_A4=20202001`, and
-`STATUS_A8=00000060`. At the same instant `/proc/mipi-rx` reported
+`38=000000ff`; other captured control words were zero. Live PHY samples moved
+between idle (`DBG_90=1`, `DBG_94=0`) and active transfer
+(`DBG_90=21`, `DBG_94=5555`) on the repeated boot. Invariant status was
+`STATUS_A4=20202001` and `STATUS_A8=00000060`. `/proc/mipi-rx` reported
 `yuv422-8`, zero link errors, an active high-speed clock, and D2/D3 high-speed
 transitions.
 

@@ -22,10 +22,13 @@ The six previously compared control words reproduced exactly: CSI control
 `PHY4L_34=0x06000caa`, and `PHY4L_38=0x000000ff`; the remaining captured
 control words were zero.
 
-Dynamic PHY state was active and stable during both reads:
-`DBG_90=0x00000021`, `DBG_94=0x00005555`,
-`STATUS_98/9C=0`, `STATUS_A4=0x20202001`, and
-`STATUS_A8=0x00000060`. `/proc/mipi-rx` simultaneously reported device 0,
+On the first boot, dynamic PHY state was active during both reads:
+`DBG_90=0x00000021` and `DBG_94=0x00005555`. A second stock reboot
+reproduced every static control and status word exactly, while its first
+dynamic sample was idle (`DBG_90=0x00000001`, `DBG_94=0`) and its second was
+active (`0x21`/`0x5555`). This is expected sampling of a live link, not a
+configuration difference. `STATUS_98/9C=0`, `STATUS_A4=0x20202001`, and
+`STATUS_A8=0x00000060` were invariant. `/proc/mipi-rx` reported device 0,
 lanes `2,4,3,1,0`, zero PN swaps, `yuv422-8`, zero ECC/CRC/header/WC/FIFO
 errors, high-speed clock active, and D2/D3 in high-speed transition. The LT
 interrupt count was zero. Baseline stock taint was 4098 with 27 modules and
