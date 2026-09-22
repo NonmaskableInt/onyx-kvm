@@ -10,8 +10,8 @@ output low, and GPIO451 output high. After SHA-256 verification, the same
 read-only helper returned the identical six register values twice, two
 seconds apart: muxes `0/0/0`, GPIOE output `0x5`, direction `0x205`, and
 input `0x167`. The temporary helper was removed. This confirms the stock
-GPIOE0/E2 output-high state persists across a reboot; its circuit role
-remains unverified.
+GPIOE0/E2 output-high state persists across a reboot. The offline loader
+trace below identifies it as stock U-Boot display setup.
 
 The stock v1.4.2 card booted with kernel `5.10.4-tag- #46` and receiver build
 `#30`. During stable `yuv422-8` reception, `/proc/mipi-rx` reported
@@ -43,19 +43,10 @@ GPIOE9 output direction, low output latch, and low sampled input. Therefore
 the GPIO361 mux is **not** the stock/clean video discriminator. The toggling
 input-word bit 10 is independent of GPIOE9. Stock additionally drives GPIOE0
 and GPIOE2 high as outputs, with mux function 0 on both; clean v42 showed
-those GPIOE bits low as inputs. This is a measured boot-state difference,
-not yet a proven bridge control or cause of CSI errors. Pinned Nano board-init
-source muxes PWR_GPIO0 to GPIO mode with an LCD-reset comment, and PWR_GPIO2
-to GPIO mode with a beta-board backlight comment; it has no identified
-output-high write for either. The stock startup script and matching CIF
-source also contain no identified GPIOE0/E2 output write. Stock and clean
-FIP `LOADER_2ND` hashes differ (`5dde2075...` versus `74633e50...`), so
-boot-stage initialization remains a plausible source of the state difference.
-These source labels do not prove the NanoKVM Lite circuit connection. Next
-confirm GPIOE0/E2 nets against the board schematic and trace the stock-only
-early direction/output setup. Do not drive either pad until its load and
-purpose are source-backed. If unrelated to the bridge, resume the bounded
-CSI link initialization comparison. Video remains fail-closed.
+those GPIOE bits low as inputs. The offline loader trace below identifies the
+source as the stock U-Boot display driver. This state difference is unrelated
+to CSI receive and is closed as a video discriminator. Resume the bounded
+CSI initialization comparison. Video remains fail-closed.
 
 ### Clean read-only GPIOE boot snapshot (2026-09-22)
 
@@ -75,8 +66,34 @@ the temporary module was removed, and taint was the expected `4096`. This
 confirms the stock/clean difference exists before the clean reset ioctl:
 stock boot establishes GPIOE0/E2 output-high and GPIOE9 output-low, whereas
 CleanKVM leaves all three as inputs with low output latches. The shared mux
-values rule out a mux difference. Electrical net identification remains the
-gate before any output experiment.
+values rule out a mux difference. The owner identified below removes the need
+for an output experiment.
+
+### GPIOE0/E2 owner identified and hypothesis closed (2026-09-22)
+
+The stock and v42 FIPs were parsed offline with the pinned CVITEK FIP tool.
+Their LZMA `LOADER_2ND` payloads were decompressed as data and disassembled;
+no stock binary or script was executed. Stock loader SHA-256 remains
+`5dde20754744ec177447340e6e849f4c669d9908d392f3da0526ef4b5af4ec65`;
+v42 is `74633e501bbb4bf91aa574ec288a97a56e38e1676cdc877841f28d35563f097d`.
+
+Both embedded U-Boot device trees contain the same `cvitek,vo` node. It maps
+`reset-gpio = <&gpio4 0 GPIO_ACTIVE_LOW>` and
+`pwm-gpio = <&gpio4 2 GPIO_ACTIVE_LOW>`, which are GPIOE0 and GPIOE2. Pinned
+source `drivers/video/cvitek/cvi_disp.c` requests both with
+`GPIOD_IS_OUT | GPIOD_IS_OUT_ACTIVE`; the MIPI/LVDS display paths subsequently
+set their logical values. The matching warning and display-GPIO strings exist
+in the stock loader and are absent from v42. CleanKVM's verified U-Boot
+fragment explicitly disables `CONFIG_DM_VIDEO` and `CONFIG_VIDEO_CVITEK`.
+
+This explains the live observation: stock U-Boot probes the display path and
+leaves E0/E2 as output-high, while reduced CleanKVM U-Boot does not bind that
+driver and Linux initially sees both as inputs. The offline-extracted stock
+rootfs startup scripts contain no E0/E2 operation. These pins are display
+reset and PWM controls in the shared boot device tree, not LT6911 or CSI
+receive controls. Do not reproduce this unused display initialization in
+CleanKVM. Close GPIOE0/E2 as the no-frame cause and return to a bounded
+stock/clean CSI initialization comparison.
 
 ## GPIOE9 mux discriminator completed on v42 (2026-09-21)
 

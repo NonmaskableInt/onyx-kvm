@@ -1342,7 +1342,24 @@ All three loaded modules unloaded, the temporary file was removed, and taint
 ended at the expected `4096`. Thus stock's GPIOE0/E2 output-high and GPIOE9
 output-low setup occurs before Linux runtime comparison, while CleanKVM
 leaves those lines as inputs at receiver probe. The mux configuration is the
-same. No output experiment is admitted until the board nets are identified.
+same. The offline loader trace below identifies E0/E2 as display controls, so
+no output experiment is needed.
+
+**GPIOE0/E2 owner identified, 2026-09-22.** Offline parsing and LZMA
+decompression of the stock and v42 `LOADER_2ND` payloads found the same
+embedded `cvitek,vo` device-tree properties: GPIOE0 is active-low
+`reset-gpio` and GPIOE2 is active-low `pwm-gpio`. Pinned CVITEK U-Boot source
+requests both as active outputs in `cvi_vo_probe`; its MIPI/LVDS display code
+then operates them. Matching display-driver strings are present in the stock
+loader and absent from v42. CleanKVM explicitly disables `CONFIG_DM_VIDEO`
+and `CONFIG_VIDEO_CVITEK`. The offline-extracted stock rootfs startup scripts
+do not operate E0/E2. No stock executable was run.
+
+The live register difference is therefore a predictable result of stock
+U-Boot display probing. It is not LT6911 reset, interrupt, or CSI receive
+setup and does not justify enabling the unused display driver in CleanKVM.
+GPIOE0/E2 is closed as the no-frame hypothesis. Continue with bounded CSI
+initialization comparison; video remains closed.
 
 The follow-up GPIOE diagnostic module from tracked patch `0021` was built
 offline (SHA-256
