@@ -2,6 +2,34 @@
 
 Updated: 2026-09-22
 
+## Stock userspace LT6911 initialization path closed (2026-09-22)
+
+The stock v1.4.2 root filesystem was extracted and inspected offline. No stock
+program or script was executed. `S15kvmhwd` releases GPIO451 high, recreates
+the GPIO-backed I2C bus, and uses `i2cdetect` only to distinguish address
+`0x2c` from `0x2b`. `S95nanokvm` copies `sensor_cfg.ini.LT` into place and
+starts `kvm_system` and `NanoKVM-Server`; it does not invoke the separate EDID
+utility.
+
+RISC-V disassembly found exactly two direct calls to the I2C write wrapper in
+the stripped `kvm_system` binary. Both belong to the OLED paths: its two I2C
+objects are constructed for buses 1 and 5 and write addresses `0x3d` and
+`0x3c`. The bridge operations reside in stock `libkvm.so`. Its exported
+symbols and strings match the pinned, published `kvm_vision.cpp`. During the
+normal LT6911UXC loop that source stops the MCU, selects the documented HDMI
+status or CSI-dimension bank, reads status and dimensions, and resumes the
+MCU. Firmware reads and EDID programming are separate functions and have no
+normal-startup call site. There is no CSI-transmitter setup table or bridge
+firmware upload in the ordinary stock runtime.
+
+This closes a hidden stock userspace bridge-initialization sequence as the
+stock/clean discriminator. CleanKVM has already reproduced the same published
+status path and observed zero HDMI status and zero CSI dimensions. The next
+bounded experiment is a read-only stock-versus-clean snapshot of the SoC CSI
+receiver configuration and status registers while the same HDMI source is
+connected. Compare only source-identified registers, make no stock or clean
+register writes, and keep video fail-closed.
+
 ## Stock live GPIOE comparison closes GPIO361 mux hypothesis (2026-09-22)
 
 A separate stock reboot on 2026-09-22 reproduced kernel `#46`, receiver

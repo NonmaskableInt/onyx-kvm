@@ -3,6 +3,22 @@
 Status: diagnostic modules are present only in a non-autoload quarantine;
 video capture, streaming, and MCP exposure are not admitted.
 
+## Stock userspace bridge path (2026-09-22)
+
+Offline extraction and RISC-V call-site inspection close the remaining opaque
+startup concern. The stock hardware script probes I2C address `0x2b` but does
+not program it. The stripped `kvm_system` binary's only direct I2C writes are
+to the two supported OLED addresses. Stock `libkvm.so` contains the LT6911
+path and matches the pinned published `kvm_vision.cpp`: ordinary operation
+only stops the UXC MCU, reads HDMI status and CSI dimensions through documented
+bank selections, and resumes the MCU. Its EDID and firmware routines are
+separate and are not called by normal startup. No bridge firmware upload or
+CSI-transmitter initialization sequence was found. A hidden stock userspace
+LT6911 setup is therefore closed as the explanation for capture behavior.
+
+The next comparison is read-only SoC CSI receiver configuration and status on
+stock and CleanKVM with the same source attached. Video remains fail-closed.
+
 Current checkpoint (2026-09-19): The complete 16-state empirical polarity
 matrix `(D0, D1, D2, D3)` was tested on target under verified fail-closed
 cleanup conditions (all unloads RC=0, taint 4096, lsmod clean). A major
