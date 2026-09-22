@@ -4,6 +4,15 @@ Updated: 2026-09-22
 
 ## Stock live GPIOE comparison closes GPIO361 mux hypothesis (2026-09-22)
 
+A separate stock reboot on 2026-09-22 reproduced kernel `#46`, receiver
+build `#30`, zero ECC/CRC/header/WC errors, GPIO353 input high IRQ, GPIO361
+output low, and GPIO451 output high. After SHA-256 verification, the same
+read-only helper returned the identical six register values twice, two
+seconds apart: muxes `0/0/0`, GPIOE output `0x5`, direction `0x205`, and
+input `0x167`. The temporary helper was removed. This confirms the stock
+GPIOE0/E2 output-high state persists across a reboot; its circuit role
+remains unverified.
+
 The stock v1.4.2 card booted with kernel `5.10.4-tag- #46` and receiver build
 `#30`. During stable `yuv422-8` reception, `/proc/mipi-rx` reported
 ECC/CRC/header/WC `0/0/0/0`. GPIO debugfs showed GPIO353 (`LT-INT`) as an

@@ -1323,6 +1323,13 @@ was changed. Confirm the board nets before any experiment that could drive
 them; if unrelated to the bridge, return to CSI link initialization. Video
 remains closed.
 
+**Independent stock reboot, 2026-09-22.** The kernel, receiver build,
+error-free `yuv422-8` state, and GPIO353/361/451 directions and levels
+recurred. The same SHA-256-verified read-only helper returned muxes `0/0/0`,
+GPIOE output `0x5`, direction `0x205`, and input `0x167` in two reads two
+seconds apart. It was removed afterward. Thus GPIOE0/E2 output-high is
+repeatable across stock boots; the pins' electrical role is still unknown.
+
 The follow-up GPIOE diagnostic module from tracked patch `0021` was built
 offline (SHA-256
 `f0560a842d666c1ed67373c18714b979a5f726096f594ccc18e13e7e5f3ce17d`,
