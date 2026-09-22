@@ -2,6 +2,41 @@
 
 Updated: 2026-09-22
 
+## Full read-only stock CSI snapshot captured (2026-09-22)
+
+The stock card booted kernel `5.10.4-tag- #46` at its newly assigned address
+`192.168.2.5`. The offline-built reader matched its expected SHA-256
+`15ead6efb22ed20f1a86da4e4e6be30a7c9cb629d76f20e1f16ed3659484c870`
+on target before execution. Two snapshots two seconds apart were identical
+across all 46 source-identified CSI control, wrapper, and four-lane PHY words.
+The reader was then removed from `/tmp` and its absence verified. It made no
+register write.
+
+The six previously compared control words reproduced exactly: CSI control
+`REG_04=0x000c0000`; wrapper top `REG_80/84/88 =
+0x001b003f/0x08000303/0x00002008`; PHY4L `REG_08=0x00000002` and
+`REG_10=0x00000208`. Additional stable stock controls include
+`CSI_CTRL_00=0x00000003`, `CSI_CTRL_40=0x00010001`,
+`CSI_CTRL_70=0x00000f00`, `PHY4L_04=0x00000134`,
+`PHY4L_0C=0x00ff000f`, `PHY4L_20=0x0fff0009`,
+`PHY4L_34=0x06000caa`, and `PHY4L_38=0x000000ff`; the remaining captured
+control words were zero.
+
+Dynamic PHY state was active and stable during both reads:
+`DBG_90=0x00000021`, `DBG_94=0x00005555`,
+`STATUS_98/9C=0`, `STATUS_A4=0x20202001`, and
+`STATUS_A8=0x00000060`. `/proc/mipi-rx` simultaneously reported device 0,
+lanes `2,4,3,1,0`, zero PN swaps, `yuv422-8`, zero ECC/CRC/header/WC/FIFO
+errors, high-speed clock active, and D2/D3 in high-speed transition. The LT
+interrupt count was zero. Baseline stock taint was 4098 with 27 modules and
+did not change.
+
+This expands the stock baseline but does not yet identify a causal control
+difference. Next boot CleanKVM and collect the same 46 words immediately after
+its normal CSI setup using an independently built, default-off read-only module
+diagnostic. Separate static control differences from dynamic PHY status before
+any driver mutation. Video remains fail-closed.
+
 ## Stock userspace LT6911 initialization path closed (2026-09-22)
 
 The stock v1.4.2 root filesystem was extracted and inspected offline. No stock
@@ -40,12 +75,8 @@ CleanKVM. The offline static RISC-V binary SHA-256 is
 `/proc/mipi-rx`, interrupt, VI, and receiver-log context without changing
 target state.
 
-The 2026-09-22 UART preflight found that the card currently in the device is
-still CleanKVM recovery (`#1`, built 2026-09-21), not stock kernel `#46`.
-It had zero loaded modules; taint was the expected residual `4096` from the
-earlier diagnostic module. No stock result was recorded from that boot. Boot
-the stock card before transferring or running the reader, verify its SHA-256
-on target, take two snapshots, then remove it from `/tmp`.
+An initial 2026-09-22 UART preflight found CleanKVM recovery still installed;
+the subsequent stock boot and completed capture are recorded above.
 
 ## Stock live GPIOE comparison closes GPIO361 mux hypothesis (2026-09-22)
 

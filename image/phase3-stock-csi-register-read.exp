@@ -1,0 +1,53 @@
+#!/usr/bin/expect -f
+
+# Transfer and run the source-auditable read-only stock CSI reader twice.
+set timeout 90
+set credential_path [lindex $argv 0]
+set binary_path [lindex $argv 1]
+set expected_sha [lindex $argv 2]
+set target "root@[lindex $argv 3]"
+set known_hosts {/private/tmp/nanokvm-stock-known-hosts}
+
+set fh [open $credential_path r]
+set credential_text [read $fh]
+close $fh
+if {![regexp -line {^password=(.*)$} $credential_text -> password]} {
+    exit 2
+}
+
+proc authenticate {password} {
+    expect {
+        -re {(?i)password: *$} {
+            log_user 0
+            send -- "$password\r"
+            log_user 1
+        }
+        timeout { exit 3 }
+        eof { exit 4 }
+    }
+}
+
+spawn /usr/bin/scp -o StrictHostKeyChecking=accept-new \
+    -o UserKnownHostsFile=$known_hosts -- $binary_path ${target}:/tmp/stock-csi-read.new
+authenticate $password
+expect {
+    -re {100%} {}
+    timeout { exit 5 }
+    eof {}
+}
+expect eof
+
+set remote_command "set -eu; echo STOCK_CSI_REGISTER_READ_V1; uname -a; actual=\$(sha256sum /tmp/stock-csi-read.new | awk '{print \$1}'); echo READER_SHA256=\$actual; test \"\$actual\" = \"$expected_sha\"; chmod 500 /tmp/stock-csi-read.new; echo SNAPSHOT_1; /tmp/stock-csi-read.new; sleep 2; echo SNAPSHOT_2; /tmp/stock-csi-read.new; echo MIPI_RX; cat /proc/mipi-rx 2>/dev/null || true; echo LT_INT; cat /proc/lt_int 2>/dev/null || true; printf 'TAINT='; cat /proc/sys/kernel/tainted; printf 'MODULE_COUNT='; wc -l </proc/modules; rm -f /tmp/stock-csi-read.new; test ! -e /tmp/stock-csi-read.new; echo READER_REMOVED; echo STOCK_CSI_REGISTER_READ_END"
+
+spawn /usr/bin/ssh -o StrictHostKeyChecking=accept-new \
+    -o UserKnownHostsFile=$known_hosts -- $target $remote_command
+authenticate $password
+expect {
+    -re {STOCK_CSI_REGISTER_READ_END} {}
+    timeout { exit 6 }
+    eof { exit 7 }
+}
+expect eof
+
+unset password
+unset credential_text
