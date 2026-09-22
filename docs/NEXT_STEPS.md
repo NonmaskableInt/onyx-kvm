@@ -2,6 +2,28 @@
 
 Updated: 2026-09-22
 
+## Clean full-register diagnostic prepared (2026-09-22)
+
+Tracked patch `0023-cif-full-read-only-register-snapshot.patch` adds a
+default-off module parameter that reads the same bounded 46-word CSI, wrapper,
+and four-lane PHY set immediately after the driver's ordinary MIPI setup. It
+uses only the driver's existing mappings and `_reg_read`; it adds no mapping or
+write. The kernel and diagnostic receiver were compiled with networking
+disabled from a disposable copy of the verified SDK. The resulting module is
+`out/phase3-full-readback-v44/soph_mipi_rx.ko`, SHA-256
+`f77f2df5d91accaef31e2ec9e6304838f12527a9b34eff609fd73963d4339a2b`,
+with target vermagic `5.10.4-tag- preempt mod_unload riscv`. Its compressed
+UART transfer has SHA-256
+`acfa93563c820e0f2ac0db5023c092c97c5d7e56aa385bc2b8538e11d40ca70e`.
+
+`image/phase3-full-readback-test.exp` verifies both hashes, requires
+`/dev/mem` to remain absent, loads the existing six-module allowlist with the
+replacement receiver and stock-equivalent settings, runs one bounded local
+probe, records the snapshot, then reverse-unloads and deletes temporary files.
+The first requested CleanKVM preflight still reached stock hostname `kvm-44be`;
+the script exited at login before uploading anything. Boot CleanKVM recovery
+and confirm kernel build `#1` before running this diagnostic.
+
 ## Full read-only stock CSI snapshot captured (2026-09-22)
 
 The stock card booted kernel `5.10.4-tag- #46` at its newly assigned address

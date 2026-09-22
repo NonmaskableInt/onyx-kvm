@@ -1,0 +1,92 @@
+#!/usr/bin/expect -f
+
+# Upload one independently built diagnostic module over UART and run one
+# fail-closed capture attempt. The module's added path performs reads only.
+set timeout 180
+set credential_path [lindex $argv 0]
+set gzip_path [lindex $argv 1]
+set expected_gzip_sha [lindex $argv 2]
+set expected_module_sha [lindex $argv 3]
+
+set fh [open $credential_path r]
+set credential_text [read $fh]
+close $fh
+if {![regexp -line {^password=(.*)$} $credential_text -> password]} {
+    exit 2
+}
+set encoded [exec /usr/bin/base64 -i $gzip_path]
+
+spawn /usr/bin/sudo /usr/bin/cu -l /dev/cu.usbserial-112440 -s 115200
+expect {
+    -re {Connected\.} {}
+    timeout { exit 7 }
+}
+send "\003\r"
+set logged_in 0
+expect {
+    -re {# $} { set logged_in 1 }
+    -re {login: *$} {}
+    timeout { send "~."; exit 3 }
+}
+if {!$logged_in} {
+    send "root\r"
+    expect {
+        -re {Password: *$} {}
+        timeout { send "~."; exit 4 }
+    }
+    log_user 0
+    send -- "$password\r"
+    expect {
+        -re {# $} {}
+        timeout { log_user 1; send "~."; exit 5 }
+    }
+}
+unset password
+unset credential_text
+
+proc run_command {command} {
+    send -- "$command\r"
+    expect {
+        -re {# $} {}
+        timeout { send "~."; exit 6 }
+    }
+}
+
+log_user 0
+send -- "cat > /tmp/soph_mipi_rx.ko.gz.b64 <<'CLEANKVM_EOF'\r$encoded\rCLEANKVM_EOF\r"
+expect {
+    -re {# $} {}
+    timeout { log_user 1; send "~."; exit 8 }
+}
+unset encoded
+log_user 1
+
+set module_dir /usr/lib/cleankvm/video-quarantine
+set frame /run/cleankvm-frame.yuv422p
+run_command {echo CLEANKVM_PHASE3_FULL_READBACK_V1}
+run_command "actual=\$(sha256sum /tmp/soph_mipi_rx.ko.gz.b64 | awk '{print \$1}'); echo BASE64_FILE_SHA256=\$actual"
+run_command {base64 -d /tmp/soph_mipi_rx.ko.gz.b64 >/tmp/soph_mipi_rx.ko.gz; rm -f /tmp/soph_mipi_rx.ko.gz.b64}
+run_command "actual=\$(sha256sum /tmp/soph_mipi_rx.ko.gz | awk '{print \$1}'); echo GZIP_SHA256=\$actual; test \"\$actual\" = \"$expected_gzip_sha\""
+run_command {gzip -dc /tmp/soph_mipi_rx.ko.gz >/tmp/soph_mipi_rx.ko; rm -f /tmp/soph_mipi_rx.ko.gz; chmod 400 /tmp/soph_mipi_rx.ko}
+run_command "actual=\$(sha256sum /tmp/soph_mipi_rx.ko | awk '{print \$1}'); echo MODULE_SHA256=\$actual; test \"\$actual\" = \"$expected_module_sha\""
+run_command {rm -f /run/cleankvm-frame.yuv422p; test ! -e /dev/mem; echo DEVMEM_ABSENT_RC=$?}
+run_command {printf 'PRE_TAINT='; cat /proc/sys/kernel/tainted; printf 'PRELOADED='; awk '$1 ~ /^soph_/ {printf "%s,", $1}' /proc/modules; echo}
+run_command "insmod $module_dir/soph_sys.ko; echo LOAD_soph_sys_RC=\$?"
+run_command "insmod $module_dir/soph_base.ko; echo LOAD_soph_base_RC=\$?"
+run_command {insmod /tmp/soph_mipi_rx.ko cif_diagnostic_full_readback=1 lane_phase=0,8,8,3,3 csi_ck_phase=0 hs_settle=8; echo LOAD_soph_mipi_rx_RC=$?}
+foreach module {soph_snsr_i2c soph_vi soph_vpss} {
+    run_command "insmod $module_dir/$module.ko; echo LOAD_${module}_RC=\$?"
+}
+run_command "/usr/libexec/cleankvm-raw-frame-probe $frame; echo PROBE_RC=\$?"
+run_command {echo '[FULL_READBACK]'; dmesg | grep 'cif-full' | tail -9}
+run_command {echo '[MIPI_RX]'; cat /proc/mipi-rx}
+run_command {if test -f /run/cleankvm-frame.yuv422p; then stat -c 'FRAME_BYTES=%s' /run/cleankvm-frame.yuv422p; sha256sum /run/cleankvm-frame.yuv422p; else echo FRAME_ABSENT; fi}
+run_command {rm -f /run/cleankvm-frame.yuv422p}
+foreach module {soph_vpss soph_vi soph_snsr_i2c soph_mipi_rx soph_base soph_sys} {
+    run_command "rmmod $module; echo UNLOAD_${module}_RC=\$?"
+}
+run_command {rm -f /tmp/soph_mipi_rx.ko; test ! -e /tmp/soph_mipi_rx.ko; echo MODULE_CLEANUP_RC=$?}
+run_command {printf 'FINAL_LOADED='; awk '$1 ~ /^soph_/ {printf "%s,", $1}' /proc/modules; echo; printf 'POST_TAINT='; cat /proc/sys/kernel/tainted}
+run_command {echo CLEANKVM_PHASE3_FULL_READBACK_END}
+send "~."
+expect eof
