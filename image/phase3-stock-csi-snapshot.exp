@@ -1,0 +1,60 @@
+#!/usr/bin/expect -f
+
+# Read-only stock reference snapshot. This script changes no target state.
+set timeout 90
+set credential_path [lindex $argv 0]
+set fh [open $credential_path r]
+set credential_text [read $fh]
+close $fh
+if {![regexp -line {^password=(.*)$} $credential_text -> password]} {
+    exit 2
+}
+
+spawn /usr/bin/sudo /usr/bin/cu -l /dev/cu.usbserial-112440 -s 115200
+expect {
+    -re {Connected\.} {}
+    timeout { exit 7 }
+}
+send "\003\r"
+set logged_in 0
+expect {
+    -re {# $} { set logged_in 1 }
+    -re {login: *$} {}
+    timeout { send "~."; exit 3 }
+}
+if {!$logged_in} {
+    send "root\r"
+    expect {
+        -re {Password: *$} {}
+        timeout { send "~."; exit 4 }
+    }
+    log_user 0
+    send -- "$password\r"
+    expect {
+        -re {# $} {}
+        timeout { log_user 1; send "~."; exit 5 }
+    }
+}
+unset password
+unset credential_text
+log_user 1
+
+proc run_command {command} {
+    send -- "$command\r"
+    expect {
+        -re {# $} {}
+        timeout { send "~."; exit 6 }
+    }
+}
+
+run_command {echo STOCK_CSI_SNAPSHOT_V1}
+run_command {printf 'KERNEL='; uname -a}
+run_command {printf 'TAINT='; cat /proc/sys/kernel/tainted; printf 'MODULE_COUNT='; wc -l </proc/modules}
+run_command {echo '[MODULES]'; cat /proc/modules}
+run_command {echo '[MIPI_RX]'; cat /proc/mipi-rx 2>/dev/null || echo absent}
+run_command {echo '[LT_INT]'; cat /proc/lt_int 2>/dev/null || echo absent}
+run_command {echo '[VIDEO_DIMENSIONS]'; for f in /proc/cvitek/vi_dbg /proc/cvitek/vi; do test -r "$f" && { echo "$f"; cat "$f"; }; done}
+run_command {echo '[CSI_LOG]'; dmesg | grep -E 'cif|mipi|MIPI|CSI|LT6911|sensor' | tail -160}
+run_command {echo STOCK_CSI_SNAPSHOT_END}
+send "~."
+expect eof

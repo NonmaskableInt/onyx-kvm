@@ -30,6 +30,23 @@ receiver configuration and status registers while the same HDMI source is
 connected. Compare only source-identified registers, make no stock or clean
 register writes, and keep video fail-closed.
 
+The stock-side reader is now prepared as
+`image/diagnostics/stock-csi-read.c`. It opens `/dev/mem` read-only and maps
+only the source-identified CSI control, wrapper-top, and four-lane PHY words
+with `PROT_READ`; it contains no write path and must never be packaged in
+CleanKVM. The offline static RISC-V binary SHA-256 is
+`15ead6efb22ed20f1a86da4e4e6be30a7c9cb629d76f20e1f16ed3659484c870`.
+`image/phase3-stock-csi-snapshot.exp` captures the stock kernel, module,
+`/proc/mipi-rx`, interrupt, VI, and receiver-log context without changing
+target state.
+
+The 2026-09-22 UART preflight found that the card currently in the device is
+still CleanKVM recovery (`#1`, built 2026-09-21), not stock kernel `#46`.
+It had zero loaded modules; taint was the expected residual `4096` from the
+earlier diagnostic module. No stock result was recorded from that boot. Boot
+the stock card before transferring or running the reader, verify its SHA-256
+on target, take two snapshots, then remove it from `/tmp`.
+
 ## Stock live GPIOE comparison closes GPIO361 mux hypothesis (2026-09-22)
 
 A separate stock reboot on 2026-09-22 reproduced kernel `#46`, receiver
