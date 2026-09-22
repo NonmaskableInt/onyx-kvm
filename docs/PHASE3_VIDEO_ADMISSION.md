@@ -1330,6 +1330,20 @@ GPIOE output `0x5`, direction `0x205`, and input `0x167` in two reads two
 seconds apart. It was removed afterward. Thus GPIOE0/E2 output-high is
 repeatable across stock boots; the pins' electrical role is still unknown.
 
+**Clean read-only boot snapshot, 2026-09-22.** Tracked patch `0022` adds a
+probe-time read of the three mux words and GPIOE output, direction, and input;
+it performs no GPIO or register write. The offline-built diagnostic module
+SHA-256 was `40b960a3abb7440aee63b4204334b6ce4ae3e233d35b6a6c7eb367befb1d845e`
+and its transferred gzip SHA-256 was
+`1592a39d419bbf9ef10a8ec8658200bd7a2ddc82616ede6021f040613ea2e29d`.
+The v42 baseline had no modules, taint zero, and no `/dev/mem`. The snapshot
+reported muxes `0/0/0`, GPIOE output `0`, direction `0`, and input `0x162`.
+All three loaded modules unloaded, the temporary file was removed, and taint
+ended at the expected `4096`. Thus stock's GPIOE0/E2 output-high and GPIOE9
+output-low setup occurs before Linux runtime comparison, while CleanKVM
+leaves those lines as inputs at receiver probe. The mux configuration is the
+same. No output experiment is admitted until the board nets are identified.
+
 The follow-up GPIOE diagnostic module from tracked patch `0021` was built
 offline (SHA-256
 `f0560a842d666c1ed67373c18714b979a5f726096f594ccc18e13e7e5f3ce17d`,

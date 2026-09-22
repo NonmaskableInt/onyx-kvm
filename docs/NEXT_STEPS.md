@@ -32,11 +32,11 @@ verified on the stock device before use and removed from `/tmp` afterward.
 | Register | Stock, HDMI stable | Clean v42 diagnostic |
 | --- | --- | --- |
 | `PWR_ON` mux, `0x0300109c` | `0` | `0` |
-| `PWR_GPIO0` mux, `0x030010a4` | `0` | not yet read |
-| `PWR_GPIO2` mux, `0x030010ac` | `0` | not yet read |
-| GPIOE output, `0x05021000` | `0x00000005` | `0x00000000` before reset |
-| GPIOE direction, `0x05021004` | `0x00000205` | `0x00000200` |
-| GPIOE input, `0x05021050` | `0x00000167`/`0x00000567` | `0x00000562`/`0x00000162` |
+| `PWR_GPIO0` mux, `0x030010a4` | `0` | `0` |
+| `PWR_GPIO2` mux, `0x030010ac` | `0` | `0` |
+| GPIOE output, `0x05021000` | `0x00000005` | `0x00000000` |
+| GPIOE direction, `0x05021004` | `0x00000205` | `0x00000000` at module probe; `0x00000200` after the reset diagnostic |
+| GPIOE input, `0x05021050` | `0x00000167`/`0x00000567` | `0x00000162` at module probe; previously `0x00000562`/`0x00000162` |
 
 Both stock and clean leave the GPIO361/`PWR_ON` pad at mux function 0 with
 GPIOE9 output direction, low output latch, and low sampled input. Therefore
@@ -52,10 +52,31 @@ source also contain no identified GPIOE0/E2 output write. Stock and clean
 FIP `LOADER_2ND` hashes differ (`5dde2075...` versus `74633e50...`), so
 boot-stage initialization remains a plausible source of the state difference.
 These source labels do not prove the NanoKVM Lite circuit connection. Next
-confirm GPIOE0/E2 nets against the board schematic and capture a clean
-read-only mux snapshot. Do not drive either pad until its load and purpose
-are source-backed. If unrelated to the bridge, resume the bounded CSI link
-initialization comparison. Video remains fail-closed.
+confirm GPIOE0/E2 nets against the board schematic and trace the stock-only
+early direction/output setup. Do not drive either pad until its load and
+purpose are source-backed. If unrelated to the bridge, resume the bounded
+CSI link initialization comparison. Video remains fail-closed.
+
+### Clean read-only GPIOE boot snapshot (2026-09-22)
+
+Tracked patch `0022-cif-log-read-only-gpioe-boot-state.patch` adds one
+probe-time diagnostic that maps and reads the three mux words and GPIOE
+output, direction, and sampled-input words. It contains no GPIO or register
+write. The module was built offline with networking disabled. Its SHA-256 is
+`40b960a3abb7440aee63b4204334b6ce4ae3e233d35b6a6c7eb367befb1d845e`;
+the transferred gzip SHA-256 is
+`1592a39d419bbf9ef10a8ec8658200bd7a2ddc82616ede6021f040613ea2e29d`.
+
+The v42 baseline had zero modules, taint zero, and no `/dev/mem`. After hash
+verification, loading only `soph_sys`, `soph_base`, and the diagnostic
+receiver produced muxes `0/0/0`, GPIOE output `0`, direction `0`, and sampled
+input `0x162`. All three modules unloaded, `/proc/modules` returned to zero,
+the temporary module was removed, and taint was the expected `4096`. This
+confirms the stock/clean difference exists before the clean reset ioctl:
+stock boot establishes GPIOE0/E2 output-high and GPIOE9 output-low, whereas
+CleanKVM leaves all three as inputs with low output latches. The shared mux
+values rule out a mux difference. Electrical net identification remains the
+gate before any output experiment.
 
 ## GPIOE9 mux discriminator completed on v42 (2026-09-21)
 
