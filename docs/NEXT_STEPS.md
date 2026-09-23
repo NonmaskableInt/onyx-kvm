@@ -2,6 +2,34 @@
 
 Updated: 2026-09-22
 
+## Preserving stock MIPI pad pulls does not recover the link (2026-09-22)
+
+The prepared CleanKVM diagnostic passed both on-target hash checks from a
+zero-taint, no-module baseline, and `/dev/mem` remained absent. With
+`cif_diagnostic_preserve_pad_pulls=1`, all five selected clock/data P/N pairs
+remained `0x48` through setup, exactly matching stock. Every static CSI,
+wrapper, and PHY control word again matched the stock baseline.
+
+The link did not improve materially. ECC/CRC/WC was `2948/1/246` at 100 ms
+and `65536/12/5588` at five seconds, decode was `yuv422-10`, D3 moved through
+`hs_err`/idle states, VI recorded one height-underflow event, and no frame
+completed. The comparable pull-cleared run was `2756/1/235` at 100 ms and
+`65536/15/6249` at five seconds, also with no frame. The small counter
+variation supplies no recovery signal.
+
+All six modules reverse-unloaded with return code zero, the frame and temporary
+module were absent, and final taint was only the expected out-of-tree bit 4096.
+This closes the MIPI pad pull state as the no-frame cause. Do not make pad-pull
+preservation the production default.
+
+The remaining repeatable discriminator is live electrical behavior: stock
+reaches `DBG_94=0x5555` with stable `yuv422-8`, while this clean run sampled
+`DBG_94=0x0555` immediately after setup and repeatedly showed D3 instability.
+The next bounded step is physical measurement of the clock and four data pairs,
+especially the D3 path, under stock and CleanKVM boots with the same source.
+Use a suitable high-bandwidth differential probe or CSI analyzer; do not infer
+a new register write from status alone. Video remains fail-closed.
+
 ## Stock preserves MIPI pad pulls; bounded clean test next (2026-09-22)
 
 The extended stock reader was rebuilt offline and matched SHA-256
@@ -18,7 +46,7 @@ clears both bits on the five selected clock/data lane pairs, producing `0x40`;
 stock leaves bit 3 set on all six pairs at `0x48`. Do not assume the SDK's
 commented pull clearing is correct for this board.
 
-The next bounded experiment is a default-off CleanKVM diagnostic that preserves
+The completed bounded experiment used a default-off CleanKVM diagnostic that preserves
 the initial `0x48` pad words during otherwise unchanged stock-equivalent setup,
 verifies the post-setup words, and runs the existing short frame probe. Compare
 decode and ECC/CRC/WC progression, then reverse-unload and remove the temporary
@@ -34,7 +62,8 @@ its deterministic gzip transfer has SHA-256
 The module reports GPL, depends only on `soph_base`, and has target vermagic
 `5.10.4-tag- preempt mod_unload riscv`. `image/phase3-pad-pulls-test.exp`
 performs the hash checks, confirms `/dev/mem` is absent, records preserved pad
-values plus receiver state, and enforces reverse cleanup. The existing verified
+values plus receiver state, and enforces reverse cleanup. Its result is recorded
+above. The existing verified
 CLEANKVM card was identified as `/dev/disk5` alongside an unrelated 23.8 GB
 device and safely ejected without rewriting it.
 

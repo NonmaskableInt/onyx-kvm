@@ -3,6 +3,26 @@
 Status: diagnostic modules are present only in a non-autoload quarantine;
 video capture, streaming, and MCP exposure are not admitted.
 
+## Stock pad-pull preservation test result (2026-09-22)
+
+The default-off diagnostic started with taint zero, no Sophgo modules, and no
+`/dev/mem`. Both transferred hashes matched. It preserved `0x48` on every P/N
+pair for lane IDs `2,4,3,1,0`, and the expanded snapshot reconfirmed all static
+receiver controls at their stock values.
+
+At 100 ms, ECC/CRC/WC was `2948/1/246` with erroneous `yuv422-10` decode. At
+five seconds it was `65536/12/5588`; D3 remained unstable, VI saw one height
+underflow, and no frame existed. This is equivalent in outcome to the earlier
+pull-cleared run and closes the pad pull difference as causal. Every unload
+returned zero, no temporary module or frame remained, and final taint was 4096.
+
+Stock's active PHY sample reaches `DBG_94=0x5555`; the clean setup snapshot in
+this test was `0x0555`, consistent with the repeated D3 status failure. Further
+software mutation is not admitted from this status observation. Compare the
+physical clock and data-pair signals between stock and CleanKVM with suitable
+differential measurement equipment before proposing another control change.
+Video remains fail-closed.
+
 ## MIPI pad electrical-state difference (2026-09-22)
 
 An extended source-auditable stock reader mapped the twelve fixed MIPI pad
@@ -17,17 +37,18 @@ setup. Its observed result is `0x40` on lane IDs `2,4,3,1,0`. Stock therefore
 preserves the pull-down bit that CleanKVM clears. This is the first static
 electrical control difference found after the full receiver comparison.
 
-The admitted next diagnostic may only suppress that existing pad write behind
+The completed diagnostic suppressed that existing pad write behind
 a default-off module parameter, confirm that the words remain `0x48`, run one
 bounded local probe, and perform the established reverse cleanup. It must not
 add any new register value or expose physical memory. Video remains fail-closed.
 
-That diagnostic is prepared as tracked patch `0024` and
+That diagnostic completed using tracked patch `0024` and
 `image/phase3-pad-pulls-test.exp`. The offline-built module SHA-256 is
 `39c08a6df7ce3ee229450c8c6cf529bbfe6486df9b07819fa7d4250faac99c90`;
 the gzip SHA-256 is
 `4b4b68be72354a6a6cf3b659928be5040576a9e4fe08961cae9fd9dc0e9d4694`.
-Its vermagic matches the target, and it depends only on `soph_base`.
+Its vermagic matches the target, and it depends only on `soph_base`. The result
+above rejects the difference as causal.
 
 ## Complete receiver configuration comparison (2026-09-22)
 
