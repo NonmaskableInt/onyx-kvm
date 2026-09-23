@@ -38,6 +38,11 @@ state (`0x03001c30` through `0x03001c5f`) before and after normal setup, followe
 by physical signal measurement if those controls also match. Video remains
 fail-closed.
 
+The completed clean run already supplies its setup transition: for clock/data
+lane IDs `2,4,3,1,0`, every P and N pad word changed from `0x48` to `0x40` when
+the existing driver cleared only the documented pull-up/pull-down bits. Capture
+the same ten words read-only on stock before changing either implementation.
+
 ## Clean full-register diagnostic prepared (2026-09-22)
 
 Tracked patch `0023-cif-full-read-only-register-snapshot.patch` adds a

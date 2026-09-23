@@ -19,6 +19,10 @@ unloaded normally, no frame or module remained, and `/dev/mem` stayed absent.
 This closes the compared receiver configuration as the cause. Next compare the
 source-identified pad electrical words read-only. Video remains fail-closed.
 
+CleanKVM's existing setup log records all ten clock/data P/N pad words changing
+uniformly from `0x48` to `0x40` as the documented pull-up/pull-down bits are
+cleared. The stock side of this read-only comparison remains outstanding.
+
 ## Expanded stock CSI register baseline (2026-09-22)
 
 A source-auditable static RISC-V reader mapped only 46 source-identified CSI
