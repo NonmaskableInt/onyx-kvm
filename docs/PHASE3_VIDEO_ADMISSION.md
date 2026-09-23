@@ -3,6 +3,34 @@
 Status: diagnostic modules are present only in a non-autoload quarantine;
 video capture, streaming, and MCP exposure are not admitted.
 
+## RTOS handshake-only hardware result (2026-09-23)
+
+The independently built mailbox module and containment-patched fast-image
+module completed a boot-scoped handshake test. On-target hashes matched. The
+baseline had no `/dev/mem`, no loaded Sophgo module, and taint zero.
+`soph_rtos_cmdqu` registered mailbox PLIC IRQ101 with count zero. Fast-image's
+bounded request then logged `RTOS_CMDQU_SEND_WAIT timeout`,
+`SYS_CMD_INFO_LINUX_INIT_DONE fail`, and `communicate with rtos fail`.
+
+The same failed handshake was captured on the working stock image. No shared
+transfer structure was accepted, no RTOS-addressed ION allocation was started,
+and no ISP/JPEG/codec interrupt ownership was transferred. Thus the two modules
+do not create the missing stock initialization state in this boot condition.
+Adding them to the six-module video probe would only repeat a failed handoff.
+
+The diagnostic patch defaults off and permits STOP_ISR/IRQ restoration only
+after a valid handoff. Every IRQ variable begins invalid, only discovered IRQs
+can be enabled, driver-registration failure is contained, and all possible ION
+allocations are freed on exit. Fast-image SHA-256 was
+`2e7d377d2633a2a7a721b5cdf3f5ab44b8d0f3873319646d31eefc65df241864`;
+mailbox SHA-256 was
+`929ab1671f8edf064412ad92a14f9f9f1dd573012c0861e7eae91b95b02e86ae`.
+All four modules reverse-unloaded with return code zero, the final module set
+and temporary-file search were empty, and final taint was 4096.
+
+Continue software attribution in boot configuration and pre-Linux
+pin/clock/reset state. Video remains fail-closed.
+
 ## Receiver binary comparison and revised next step (2026-09-23)
 
 Physical probing is no longer planned. Stock succeeds and CleanKVM fails on
@@ -17,18 +45,9 @@ which the bounded probe deliberately never invokes. Receiver initialization
 must therefore be sought in external boot ordering/state rather than another
 undocumented CSI register mutation.
 
-Audit the source-built RTOS mailbox and fast-image modules for bounded boot-time
-effects. Per-frame mailbox transport is already excluded; boot-time shared
-memory or IRQ handoff remains a hypothesis. Video remains fail-closed.
-
-The two pinned modules now build offline with matching target vermagic, but
-remain unloaded. Mailbox setup maps `0x01900000..0x01900fff` and owns IRQ101.
-Fast-image maps the reserved RTOS memory, waits 200 ms for the init response,
-validates a shared transfer structure, and may allocate three RTOS-addressed
-ION regions. Its stock exit unconditionally stops RTOS ISR ownership and
-enables four IRQ variables even after failed initialization, without complete
-allocation cleanup. A default-off, state-tracked, cleanup-safe diagnostic patch
-is required before a single boot-scoped experiment.
+The RTOS boot-time hypothesis was tested and excluded by the handshake-only
+result above. Per-frame mailbox transport was already excluded. Video remains
+fail-closed.
 
 ## Active-snapshot cleanup closure (2026-09-23)
 

@@ -1,0 +1,128 @@
+--- a/osdrv/interdrv/v2/fast_image/fast_image.c
++++ b/osdrv/interdrv/v2/fast_image/fast_image.c
+@@ -62,11 +62,17 @@
+ static int cvi_allocate_mcu_shm(struct platform_device *pdev);
+ static void cvi_fast_image_ion_alloc(void);
+ //static void __iomem *top_base;
+-static int vcodec_h264_irq;
+-static int vcodec_h265_irq;
+-static int jpu_irq;
+-static int isp_irq;
++static int vcodec_h264_irq = -1;
++static int vcodec_h265_irq = -1;
++static int jpu_irq = -1;
++static int isp_irq = -1;
++static bool cleankvm_diagnostic_enable;
++static bool cleankvm_handoff_ready;
+ 
++module_param(cleankvm_diagnostic_enable, bool, 0400);
++MODULE_PARM_DESC(cleankvm_diagnostic_enable,
++		 "CleanKVM bounded RTOS handoff diagnostic (default off)");
++
+ static int cvi_fast_image_open(struct inode *inode, struct file *file)
+ {
+ 	return 0;
+@@ -83,6 +89,9 @@
+ 	cmdqu_t cmdq;
+ 	int ret;
+ 
++	if (!cleankvm_handoff_ready)
++		return -ENODEV;
++
+ 	cmdq.ip_id = IP_SYSTEM;
+ 	cmdq.cmd_id = SYS_CMD_INFO_STOP_ISR;
+ 	cmdq.param_ptr = 0;
+@@ -91,14 +100,15 @@
+ 	ret = rtos_cmdqu_send_wait(&cmdq, SYS_CMD_INFO_STOP_ISR_DONE);
+ 	if (ret)
+ 		pr_err("SYS_CMD_INFO_STOP_ISR wait fail\n");
+-	pr_debug("%s enable_irq vcode h264 %d\n", __func__, vcodec_h264_irq);
+-	enable_irq(vcodec_h264_irq);
+-	pr_debug("%s enable_irq vcode h265 %d\n", __func__, vcodec_h265_irq);
+-	enable_irq(vcodec_h265_irq);
+-	pr_debug("%s enable_irq jpu %d\n", __func__, jpu_irq);
+-	enable_irq(jpu_irq);
+-	pr_debug("%s enable_irq isp %d\n", __func__, isp_irq);
+-	enable_irq(isp_irq);
++	if (vcodec_h264_irq >= 0)
++		enable_irq(vcodec_h264_irq);
++	if (vcodec_h265_irq >= 0)
++		enable_irq(vcodec_h265_irq);
++	if (jpu_irq >= 0)
++		enable_irq(jpu_irq);
++	if (isp_irq >= 0)
++		enable_irq(isp_irq);
++	cleankvm_handoff_ready = false;
+ 	pr_debug("%s done\n", __func__);
+ 	return 0;
+ }
+@@ -608,8 +618,12 @@
+ 	pr_debug("mcu_transfer_config_offset = %x\n", mcu_transfer_config_offset);
+ 	// get communication pa from rtos
+ 	ret = cvi_allocate_mcu_shm(pdev);
+-	if (ret == 0)
++	if (ret == 0) {
+ 		cvi_fast_image_ion_alloc();
++		cleankvm_handoff_ready = true;
++		pr_info("fast_image: CleanKVM RTOS handoff ready, image_type=%u\n",
++			transfer_config->image_type);
++	}
+ 	platform_set_drvdata(pdev, ndev);
+ 	pr_debug("%s DONE\n", __func__);
+ 	return 0;
+@@ -645,9 +659,14 @@
+ static void cvi_fast_image_exit(void)
+ {
+ 	pr_debug("%s start\n", __func__);
+-	cvi_stop_fast_image();
++	if (cleankvm_handoff_ready)
++		cvi_stop_fast_image();
++	cvi_fast_image_isp_ion_free();
++	cvi_fast_image_img_ion_free();
++	cvi_fast_image_enc_ion_free();
+ 	platform_driver_unregister(&cvi_fast_image_driver);
+-	class_destroy(pbase_class);
++	if (!IS_ERR_OR_NULL(pbase_class))
++		class_destroy(pbase_class);
+ 	pr_debug("%s DONE\n", __func__);
+ }
+ 
+@@ -914,15 +933,25 @@
+ {
+ 	int rc;
+ 
++	if (!cleankvm_diagnostic_enable) {
++		pr_err("fast_image: CleanKVM diagnostic is disabled\n");
++		return -EPERM;
++	}
++	cleankvm_handoff_ready = false;
+ 	pr_debug("cvi_fast_image_init");
+ 	pbase_class = class_create(THIS_MODULE, FAST_IMAGE_DEV_NAME);
+ 	if (IS_ERR(pbase_class)) {
+ 		pr_err("create class failed\n");
+-		rc = PTR_ERR(pbase_class);
+-		goto cleanup;
++		return PTR_ERR(pbase_class);
+ 	}
+ 
+-	platform_driver_register(&cvi_fast_image_driver);
++	rc = platform_driver_register(&cvi_fast_image_driver);
++	if (rc) {
++		pr_err("fast_image: platform driver registration failed: %d\n", rc);
++		class_destroy(pbase_class);
++		pbase_class = NULL;
++		return rc;
++	}
+ 
+ 	/* image_type = 0 --> not enable camera sensor */
+ 	if (transfer_config != NULL && transfer_config->image_type) {
+@@ -937,9 +966,6 @@
+ 	pr_debug("%s\n", __func__);
+ 
+ 	return 0;
+-cleanup:
+-	cvi_fast_image_exit();
+-	return rc;
+ }
+ 
+ MODULE_DESCRIPTION("CVI_FAST_IMAGE");

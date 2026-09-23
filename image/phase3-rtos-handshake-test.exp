@@ -1,0 +1,122 @@
+#!/usr/bin/expect -f
+
+# Upload the independently built RTOS mailbox and bounded fast-image modules,
+# attempt only their boot-time handshake, then reverse-unload and clean up.
+set timeout 180
+set credential_path [lindex $argv 0]
+set rtos_gzip_path [lindex $argv 1]
+set expected_rtos_gzip_sha [lindex $argv 2]
+set expected_rtos_module_sha [lindex $argv 3]
+set fast_gzip_path [lindex $argv 4]
+set expected_fast_gzip_sha [lindex $argv 5]
+set expected_fast_module_sha [lindex $argv 6]
+
+set fh [open $credential_path r]
+set credential_text [read $fh]
+close $fh
+if {![regexp -line {^password=(.*)$} $credential_text -> password]} { exit 2 }
+
+set rtos_encoded [exec /usr/bin/base64 -i $rtos_gzip_path]
+set fast_encoded [exec /usr/bin/base64 -i $fast_gzip_path]
+
+spawn /usr/bin/sudo /usr/bin/cu -l /dev/cu.usbserial-112440 -s 115200
+expect {
+    -re {Connected\.} {}
+    timeout { exit 7 }
+}
+send "\003\r"
+set logged_in 0
+expect {
+    -re {# $} { set logged_in 1 }
+    -re {login: *$} {}
+    timeout { send "~."; exit 3 }
+}
+if {!$logged_in} {
+    send "root\r"
+    expect {
+        -re {Password: *$} {}
+        timeout { send "~."; exit 4 }
+    }
+    log_user 0
+    send -- "$password\r"
+    log_user 1
+    expect {
+        -re {# $} {}
+        timeout { send "~."; exit 5 }
+    }
+}
+unset password
+unset credential_text
+
+proc run_command {command} {
+    send -- "$command\r"
+    expect {
+        -re {# $} {}
+        timeout { send "~."; exit 6 }
+    }
+}
+
+proc run_checked {command marker} {
+    send -- "$command && printf '$marker\\n'\r"
+    expect {
+        -re "\\r\\n${marker}\\r\\n" {}
+        -re {# $} { exit 9 }
+        timeout { send "~."; exit 10 }
+    }
+    expect {
+        -re {# $} {}
+        timeout { send "~."; exit 11 }
+    }
+}
+
+proc upload_encoded {encoded remote_path} {
+    log_user 0
+    regsub -all {\s} $encoded {} encoded
+    send -- ": > $remote_path\r"
+    expect -re {# $}
+    set encoded_length [string length $encoded]
+    for {set offset 0} {$offset < $encoded_length} {incr offset 384} {
+        set chunk [string range $encoded $offset [expr {$offset + 383}]]
+        send -- "printf %s '$chunk' >> $remote_path\r"
+        expect {
+            -re {# $} {}
+            timeout { log_user 1; send "~."; exit 8 }
+        }
+    }
+    log_user 1
+}
+
+upload_encoded $rtos_encoded /tmp/soph_rtos_cmdqu.ko.gz.b64
+unset rtos_encoded
+upload_encoded $fast_encoded /tmp/soph_fast_image.ko.gz.b64
+unset fast_encoded
+
+set module_dir /usr/lib/cleankvm/video-quarantine
+run_command {echo CLEANKVM_PHASE3_RTOS_HANDSHAKE_V1}
+run_command {rm -f /tmp/soph_rtos_cmdqu.ko /tmp/soph_fast_image.ko}
+run_command {base64 -d /tmp/soph_rtos_cmdqu.ko.gz.b64 >/tmp/soph_rtos_cmdqu.ko.gz; rm -f /tmp/soph_rtos_cmdqu.ko.gz.b64}
+run_checked "actual=\$(sha256sum /tmp/soph_rtos_cmdqu.ko.gz | awk '{print \$1}'); echo RTOS_GZIP_SHA256=\$actual; test \"\$actual\" = \"$expected_rtos_gzip_sha\"" RTOS_GZIP_HASH_OK
+run_checked {gzip -dc /tmp/soph_rtos_cmdqu.ko.gz >/tmp/soph_rtos_cmdqu.ko; rm -f /tmp/soph_rtos_cmdqu.ko.gz; chmod 400 /tmp/soph_rtos_cmdqu.ko} RTOS_DECODE_OK
+run_checked "actual=\$(sha256sum /tmp/soph_rtos_cmdqu.ko | awk '{print \$1}'); echo RTOS_MODULE_SHA256=\$actual; test \"\$actual\" = \"$expected_rtos_module_sha\"" RTOS_MODULE_HASH_OK
+run_command {base64 -d /tmp/soph_fast_image.ko.gz.b64 >/tmp/soph_fast_image.ko.gz; rm -f /tmp/soph_fast_image.ko.gz.b64}
+run_checked "actual=\$(sha256sum /tmp/soph_fast_image.ko.gz | awk '{print \$1}'); echo FAST_GZIP_SHA256=\$actual; test \"\$actual\" = \"$expected_fast_gzip_sha\"" FAST_GZIP_HASH_OK
+run_checked {gzip -dc /tmp/soph_fast_image.ko.gz >/tmp/soph_fast_image.ko; rm -f /tmp/soph_fast_image.ko.gz; chmod 400 /tmp/soph_fast_image.ko} FAST_DECODE_OK
+run_checked "actual=\$(sha256sum /tmp/soph_fast_image.ko | awk '{print \$1}'); echo FAST_MODULE_SHA256=\$actual; test \"\$actual\" = \"$expected_fast_module_sha\"" FAST_MODULE_HASH_OK
+
+run_command {test ! -e /dev/mem; echo DEVMEM_ABSENT_RC=$?; printf 'PRE_TAINT='; cat /proc/sys/kernel/tainted; printf 'PRELOADED='; awk '$1 ~ /^soph_/ {printf "%s,", $1}' /proc/modules; echo}
+run_command {dmesg -c >/dev/null}
+run_command "insmod $module_dir/soph_sys.ko; echo LOAD_soph_sys_RC=\$?"
+run_command "insmod $module_dir/soph_base.ko; echo LOAD_soph_base_RC=\$?"
+run_command {insmod /tmp/soph_rtos_cmdqu.ko; echo LOAD_soph_rtos_cmdqu_RC=$?}
+run_command {insmod /tmp/soph_fast_image.ko cleankvm_diagnostic_enable=1; echo LOAD_soph_fast_image_RC=$?}
+run_command {echo '[RTOS_HANDSHAKE_DMESG]'; dmesg | grep -E 'fast_image|rtos|RTOS|mailbox|SYS_CMD' || true}
+run_command {echo '[MAILBOX_IRQ]'; grep -E '(^| )[[:space:]]*101:|mailbox' /proc/interrupts || true}
+run_command {printf 'ACTIVE_LOADED='; awk '$1 ~ /^soph_/ {printf "%s,", $1}' /proc/modules; echo}
+foreach module {soph_fast_image soph_rtos_cmdqu soph_base soph_sys} {
+    run_command "rmmod $module; echo UNLOAD_${module}_RC=\$?"
+}
+run_command {rm -f /tmp/soph_rtos_cmdqu.ko /tmp/soph_fast_image.ko /tmp/*.ko.gz /tmp/*.ko.gz.b64}
+run_command {printf 'FINAL_LOADED='; awk '$1 ~ /^soph_/ {printf "%s,", $1}' /proc/modules; echo; printf 'POST_TAINT='; cat /proc/sys/kernel/tainted; find /tmp -maxdepth 1 -name 'soph_*' -print}
+run_command {echo CLEANKVM_PHASE3_RTOS_HANDSHAKE_END}
+send "~."
+expect eof

@@ -2,6 +2,37 @@
 
 Updated: 2026-09-23
 
+## RTOS boot-time handoff excluded (2026-09-23)
+
+The source-built mailbox module and a containment-patched fast-image module
+completed a handshake-only hardware cycle. Both payload hashes matched on the
+target. The run began with `/dev/mem` absent, taint zero, and no Sophgo module
+loaded. `soph_rtos_cmdqu` loaded, registered the mailbox on PLIC IRQ101, and
+showed zero interrupts. The bounded 200 ms fast-image request then reported
+`RTOS_CMDQU_SEND_WAIT timeout`, `SYS_CMD_INFO_LINUX_INIT_DONE fail`, and
+`communicate with rtos fail`.
+
+This is the same failed handoff already observed in the working stock boot.
+No valid transfer structure was returned, so fast-image did not mark a handoff
+ready, allocate RTOS-described ION regions, or transfer ISP/JPEG/codec IRQ
+ownership. All four modules reverse-unloaded with return code zero, no payload
+remained in `/tmp`, and the final loaded-module set was empty. Final taint was
+the expected out-of-tree bit, 4096.
+
+The tested fast-image patch is default-off, refuses its exported stop routine
+without a successful handoff, initializes every IRQ slot invalid, enables only
+discovered IRQs, checks platform-driver registration, and frees all three ION
+classes on exit. Its SHA-256 was
+`2e7d377d2633a2a7a721b5cdf3f5ab44b8d0f3873319646d31eefc65df241864`;
+the mailbox module remained
+`929ab1671f8edf064412ad92a14f9f9f1dd573012c0861e7eae91b95b02e86ae`.
+
+Do not add these RTOS modules to the full video load: the working stock system
+also receives no handoff, and the handshake-only run produced no initialization
+state that can account for its clean CSI packets. Continue offline comparison
+of stock versus CleanKVM boot configuration and pre-Linux pin/clock/reset state,
+using source-backed reads and image differences. Video remains fail-closed.
+
 ## Physical comparison withdrawn; receiver binary delta narrowed (2026-09-23)
 
 The physical waveform comparison is withdrawn as a next step. The same device,
