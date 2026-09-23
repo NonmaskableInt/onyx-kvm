@@ -3,6 +3,28 @@
 Status: diagnostic modules are present only in a non-autoload quarantine;
 video capture, streaming, and MCP exposure are not admitted.
 
+## Stock beta RX0N mux equivalence (2026-09-23)
+
+Offline stock-rootfs inspection found one receiver-adjacent init write outside
+the loader comparison. The beta branch of `/etc/init.d/S02config` writes
+function 5 (`CAM_MCLK1`) to MIPI_RX0N at `0x0300118c` after the kernel modules
+load. A default-off diagnostic saved that exact word, applied only the
+source-documented function bits, verified them, and restored the saved word on
+unload.
+
+The CleanKVM value before the diagnostic write was already `0x00000005`, and
+the active value remained `0x00000005`. The attempted stock-state application
+was therefore a no-op. With all pull words preserved at `0x48`, the capture
+still produced no frame, ECC saturated at 65,536, CRC/WC ended at `13/6423`,
+and pre-FE remained zero. All six modules unloaded with return code zero, the
+temporary payload was removed, the final module set was empty, and taint
+remained 4096. Module SHA-256 was
+`f80e755c670278039cc30fec67cb1ea8a055aa5038b3dfe1f7527dca53e05095`.
+
+This closes the late stock RX0N mux write as the missing initialization.
+Continue offline attribution of earlier VIP/CSI clock and reset-domain writes.
+Video remains fail-closed.
+
 ## RTOS handshake-only hardware result (2026-09-23)
 
 The independently built mailbox module and containment-patched fast-image

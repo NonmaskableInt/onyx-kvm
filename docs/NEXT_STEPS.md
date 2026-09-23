@@ -2,6 +2,34 @@
 
 Updated: 2026-09-23
 
+## Stock beta RX0N mux is already present on CleanKVM (2026-09-23)
+
+Offline extraction of stock `/etc/init.d/S02config` found a post-module-load
+beta-board write that the earlier loader comparison did not cover: it writes
+function 5 (`CAM_MCLK1`) to MIPI_RX0N at `0x0300118c`. The stock alpha branch
+instead writes function 3 there and function 5 to RX4N. The NanoKVM Lite path
+is beta, so this was a source-backed, receiver-adjacent software difference
+worth checking after the bridge became active.
+
+Tracked patch `0026-cif-stock-rx0n-mclk1-diagnostic.patch` adds a default-off,
+single-word diagnostic. It maps only `0x0300118c`, saves the full word, changes
+only function bits 0..2 to 5, verifies the readback, and restores the complete
+saved word on unload. The offline-built module SHA-256 was
+`f80e755c670278039cc30fec67cb1ea8a055aa5038b3dfe1f7527dca53e05095`.
+
+On hardware, the value saved before any diagnostic write was already
+`0x00000005`; the active readback remained `0x00000005`. Thus current CleanKVM
+already has the exact stock beta RX0N mux state, and the diagnostic write was a
+no-op. The pull words remained `0x48`. The run produced no frame, saturated
+ECC at 65,536, accumulated CRC/WC `13/6423`, and left pre-FE at zero. All six
+modules reverse-unloaded with return code zero, no Sophgo module or temporary
+payload remained, and taint stayed 4096.
+
+This closes the late stock RX0N mux write as the discriminator. Continue the
+offline pre-Linux audit with source-attributed BL2/monitor/loader writes to the
+VIP, CSI clock, and reset domains and compare the relevant live device-tree
+resources. Video remains fail-closed.
+
 ## RTOS boot-time handoff excluded (2026-09-23)
 
 The source-built mailbox module and a containment-patched fast-image module

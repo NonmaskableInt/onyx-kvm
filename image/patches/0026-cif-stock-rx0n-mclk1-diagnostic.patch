@@ -1,0 +1,88 @@
+--- a/osdrv/interdrv/v2/cif/chip/mars/cif.c
++++ b/osdrv/interdrv/v2/cif/chip/mars/cif.c
+@@ -109,6 +109,15 @@
+ static bool cif_diagnostic_preserve_pad_pulls;
+ module_param(cif_diagnostic_preserve_pad_pulls, bool, 0444);
+ MODULE_PARM_DESC(cif_diagnostic_preserve_pad_pulls, "preserve MIPI pad PU/PD bits during setup");
++
++/* Diagnostic only: reproduce the stock beta S02config RX0N CAM_MCLK1 mux. */
++static bool cif_diagnostic_stock_rx0n_mclk1;
++module_param(cif_diagnostic_stock_rx0n_mclk1, bool, 0444);
++MODULE_PARM_DESC(cif_diagnostic_stock_rx0n_mclk1,
++		 "temporarily select stock beta CAM_MCLK1 function on RX0N");
++static void __iomem *cleankvm_rx0n_mux;
++static u32 cleankvm_rx0n_mux_saved;
++static bool cleankvm_rx0n_mux_applied;
+ 
+ static int bypass_mac_clk;
+ module_param(bypass_mac_clk, int, 0644);
+@@ -3421,7 +3430,52 @@
+ 	if (mux)
+ 		iounmap(mux);
+ }
++
++static void cleankvm_apply_stock_rx0n_mux(struct device *device)
++{
++	u32 value;
+ 
++	if (!cif_diagnostic_stock_rx0n_mclk1)
++		return;
++	cleankvm_rx0n_mux = ioremap(0x0300118c, sizeof(u32));
++	if (!cleankvm_rx0n_mux) {
++		dev_err(device, "cleankvm-rx0n-mux map failed\n");
++		return;
++	}
++	cleankvm_rx0n_mux_saved = readl(cleankvm_rx0n_mux);
++	value = (cleankvm_rx0n_mux_saved & ~0x7U) | 0x5U;
++	writel(value, cleankvm_rx0n_mux);
++	value = readl(cleankvm_rx0n_mux);
++	if ((value & 0x7U) != 0x5U) {
++		dev_err(device, "cleankvm-rx0n-mux apply failed saved=%08x readback=%08x\n",
++			cleankvm_rx0n_mux_saved, value);
++		writel(cleankvm_rx0n_mux_saved, cleankvm_rx0n_mux);
++		iounmap(cleankvm_rx0n_mux);
++		cleankvm_rx0n_mux = NULL;
++		return;
++	}
++	cleankvm_rx0n_mux_applied = true;
++	dev_info(device, "cleankvm-rx0n-mux applied saved=%08x active=%08x\n",
++		 cleankvm_rx0n_mux_saved, value);
++}
++
++static void cleankvm_restore_rx0n_mux(struct device *device)
++{
++	u32 value;
++
++	if (!cleankvm_rx0n_mux)
++		return;
++	if (cleankvm_rx0n_mux_applied) {
++		writel(cleankvm_rx0n_mux_saved, cleankvm_rx0n_mux);
++		value = readl(cleankvm_rx0n_mux);
++		dev_info(device, "cleankvm-rx0n-mux restored=%08x expected=%08x\n",
++			 value, cleankvm_rx0n_mux_saved);
++	}
++	iounmap(cleankvm_rx0n_mux);
++	cleankvm_rx0n_mux = NULL;
++	cleankvm_rx0n_mux_applied = false;
++}
++
+ static int cvi_cif_probe(struct platform_device *pdev)
+ {
+ 	int rc = 0;
+@@ -3458,6 +3512,7 @@
+ 		dev_err(&pdev->dev, "cif: can't init procfs.\n");
+ #endif
+ 
++	cleankvm_apply_stock_rx0n_mux(&pdev->dev);
+ 	return 0;
+ }
+ 
+@@ -3470,6 +3525,8 @@
+ 		return -EINVAL;
+ 	}
+ 
++	cleankvm_restore_rx0n_mux(&pdev->dev);
++
+ 	/* rm cif_cb */
+ 	if (cif_rm_cb())
+ 		dev_err(&pdev->dev, "cif: failed to rm cb.\n");
