@@ -2,6 +2,51 @@
 
 Updated: 2026-09-22
 
+## Complete polarity matrix with stock pull-downs active (2026-09-22)
+
+The complete 16-state D0/D1/D2/D3 PN matrix was repeated with the MIPI pad
+pull-down bit preserved at stock value `0x48`. All other matrix conditions
+matched the 2026-09-19 run: lanes `2,4,3,1,0`, deskew `0,0,12,0,0`, settle
+16, and clock phase 0. Both transferred hashes matched, `/dev/mem` remained
+absent, and the run started with no Sophgo module loaded.
+
+| Test | PN swap | Final decode | Final ECC/CRC/WC | Post-probe SOF | Final D0/D1/D2/D3 |
+| ---: | --- | --- | --- | ---: | --- |
+| 1 | `0,0,0,0,0` | `yuv422-8` | `65536/9056/3871` | 191000 | idle/idle/idle/idle |
+| 2 | `0,0,1,0,0` | `yuv422-8` | `65536/5301/1724` | 385 | hst/idle/hst/hst |
+| 3 | `0,0,0,1,0` | `yuv422-8` | `65536/1596/4239` | 1433 | idle/idle/idle/idle |
+| 4 | `0,0,1,1,0` | `yuv422-8` | `65536/4762/9419` | 205460 | hst/idle/idle/idle |
+| 5 | `0,0,0,0,1` | unknown | `65536/0/4` | 171 | hst/hst/hst/idle |
+| 6 | `0,0,1,0,1` | unknown | `65536/0/0` | 182 | hst/idle/hst/idle |
+| 7 | `0,0,0,1,1` | unknown | `65536/0/4` | 221 | idle/idle/idle/idle |
+| 8 | `0,0,1,1,1` | unknown | `65536/0/0` | 874 | hst/idle/idle/idle |
+| 9 | `0,1,0,0,0` | unknown | `1/0/0` | 0 | idle/hst/hst/idle |
+| 10 | `0,1,1,0,0` | unknown | `0/0/0` | 0 | idle/idle/hst/idle |
+| 11 | `0,1,0,1,0` | unknown | `0/0/0` | 0 | idle/hst/idle/idle |
+| 12 | `0,1,1,1,0` | unknown | `0/0/0` | 0 | idle/idle/idle/err |
+| 13 | `0,1,0,0,1` | unknown | `0/0/0` | 0 | idle/idle/idle/idle |
+| 14 | `0,1,1,0,1` | unknown | `0/0/0` | 0 | idle/idle/hst/idle |
+| 15 | `0,1,0,1,1` | unknown | `0/0/0` | 0 | idle/hst/idle/idle |
+| 16 | `0,1,1,1,1` | unknown | `0/0/0` | 0 | idle/idle/idle/idle |
+
+Every probe returned 1 and no frame was created. All 96 module unloads returned
+zero, every per-state remainder was empty, the temporary module and logs were
+removed, and final taint remained 4096.
+
+With pull-downs active, all four states having D0=0 and D3=0 decoded
+`yuv422-8`; D1 inversion is no longer uniquely required. D3 inversion still
+prevents format decoding, and D0 inversion still eliminates SOF in all eight
+permutations. Stock polarity reached high SOF activity but still saturated
+ECC/CRC/WC and completed no frame.
+
+The earlier single stock-profile pull test only showed that preserving `0x48`
+was insufficient at stock deskew `0,8,8,3,3` and settle 8. It did not close the
+pad pull state across the timing space. The next bounded software step is to
+repeat the existing single-variable deskew/clock/settle evaluation with
+pull-downs preserved, beginning at unswapped polarity. Physical comparison
+remains useful if that search cannot eliminate errors. Video remains
+fail-closed.
+
 ## Physical MIPI comparison prepared (2026-09-22)
 
 Offline disassembly of the retained stock and CleanKVM second-stage loaders
@@ -35,16 +80,16 @@ variation supplies no recovery signal.
 
 All six modules reverse-unloaded with return code zero, the frame and temporary
 module were absent, and final taint was only the expected out-of-tree bit 4096.
-This closes the MIPI pad pull state as the no-frame cause. Do not make pad-pull
-preservation the production default.
+This shows only that pad preservation is insufficient at the stock-equivalent
+timing profile. The complete matrix above demonstrates that it materially
+changes receiver behavior, so no production default is selected yet.
 
-The remaining repeatable discriminator is live electrical behavior: stock
+One remaining repeatable discriminator is live electrical behavior: stock
 reaches `DBG_94=0x5555` with stable `yuv422-8`, while this clean run sampled
 `DBG_94=0x0555` immediately after setup and repeatedly showed D3 instability.
-The next bounded step is physical measurement of the clock and four data pairs,
-especially the D3 path, under stock and CleanKVM boots with the same source.
-Use a suitable high-bandwidth differential probe or CSI analyzer; do not infer
-a new register write from status alone. Video remains fail-closed.
+Physical measurement of the clock and four data pairs, especially D3, remains
+prepared if the pull-preserved timing sweep does not resolve the errors. Do not
+infer a new register write from status alone. Video remains fail-closed.
 
 ## Stock preserves MIPI pad pulls; bounded clean test next (2026-09-22)
 
@@ -62,11 +107,11 @@ clears both bits on the five selected clock/data lane pairs, producing `0x40`;
 stock leaves bit 3 set on all six pairs at `0x48`. Do not assume the SDK's
 commented pull clearing is correct for this board.
 
-The completed bounded experiment used a default-off CleanKVM diagnostic that preserves
+The completed bounded experiment used a default-off CleanKVM diagnostic that
+preserves
 the initial `0x48` pad words during otherwise unchanged stock-equivalent setup,
-verifies the post-setup words, and runs the existing short frame probe. Compare
-decode and ECC/CRC/WC progression, then reverse-unload and remove the temporary
-module. Video remains fail-closed.
+verifies the post-setup words, runs the existing short frame probe, then
+reverse-unloads and removes the temporary module. Video remains fail-closed.
 
 Tracked patch `0024-cif-preserve-stock-pad-pulls-diagnostic.patch` implements
 that single default-off switch without adding a register write. The module was

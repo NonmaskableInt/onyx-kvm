@@ -3,6 +3,25 @@
 Status: diagnostic modules are present only in a non-autoload quarantine;
 video capture, streaming, and MCP exposure are not admitted.
 
+## Pull-preserved 16-state polarity matrix (2026-09-22)
+
+`image/phase3-pad-pulls-matrix.exp` repeated every D0/D1/D2/D3 PN combination
+with pad words preserved at stock value `0x48`, fixed lanes `2,4,3,1,0`,
+deskew `0,0,12,0,0`, settle 16, and clock phase 0. Hash, `/dev/mem`, load,
+unload, remainder, frame-absence, and cleanup gates passed.
+
+The result differs materially from the pull-cleared matrix. Every combination
+with D0=0 and D3=0 decoded `yuv422-8`, including stock polarity
+`0,0,0,0,0`, which reached 191000 post-probe SOFs. `0,0,1,1,0` reached
+205460. All four still saturated ECC plus CRC/WC and produced no frame. Every
+D3-inverted state had unknown decode, while every D0-inverted state had zero
+SOF. Thus D0=0 and D3=0 remain strong constraints, but D1 inversion is no
+longer uniquely effective when stock pull-downs are active.
+
+The single stock-timing test did not justify globally closing pad pulls. A
+pull-preserved, single-variable deskew/clock/settle sweep at unswapped polarity
+now precedes physical measurement. Video remains fail-closed.
+
 ## Physical signal comparison prepared (2026-09-22)
 
 Retained stock and CleanKVM second-stage loader disassemblies contain identical
@@ -22,15 +41,15 @@ receiver controls at their stock values.
 
 At 100 ms, ECC/CRC/WC was `2948/1/246` with erroneous `yuv422-10` decode. At
 five seconds it was `65536/12/5588`; D3 remained unstable, VI saw one height
-underflow, and no frame existed. This is equivalent in outcome to the earlier
-pull-cleared run and closes the pad pull difference as causal. Every unload
+underflow, and no frame existed. At that timing point this was equivalent in
+outcome to the earlier pull-cleared run. Every unload
 returned zero, no temporary module or frame remained, and final taint was 4096.
 
 Stock's active PHY sample reaches `DBG_94=0x5555`; the clean setup snapshot in
-this test was `0x0555`, consistent with the repeated D3 status failure. Further
-software mutation is not admitted from this status observation. Compare the
-physical clock and data-pair signals between stock and CleanKVM with suitable
-differential measurement equipment before proposing another control change.
+this test was `0x0555`, consistent with the repeated D3 status failure. The
+complete matrix above shows a broader behavioral effect, so repeat only the
+already bounded timing variables with pulls preserved before comparing the
+physical clock and data-pair signals.
 Video remains fail-closed.
 
 ## MIPI pad electrical-state difference (2026-09-22)
@@ -57,8 +76,9 @@ That diagnostic completed using tracked patch `0024` and
 `39c08a6df7ce3ee229450c8c6cf529bbfe6486df9b07819fa7d4250faac99c90`;
 the gzip SHA-256 is
 `4b4b68be72354a6a6cf3b659928be5040576a9e4fe08961cae9fd9dc0e9d4694`.
-Its vermagic matches the target, and it depends only on `soph_base`. The result
-above rejects the difference as causal.
+Its vermagic matches the target, and it depends only on `soph_base`. The first
+result rejected recovery at one timing point; the matrix above retains pad
+pulls as a material timing interaction.
 
 ## Complete receiver configuration comparison (2026-09-22)
 
