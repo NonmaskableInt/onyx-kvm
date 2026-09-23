@@ -1,0 +1,32 @@
+#!/usr/bin/expect -f
+set timeout 60
+set fh [open [lindex $argv 0] r]
+set text [read $fh]
+close $fh
+regexp -line {^password=(.*)$} $text -> password
+spawn /usr/bin/sudo /usr/bin/cu -l /dev/cu.usbserial-112440 -s 115200
+expect -re {Connected\.}
+send "\003\r"
+expect {
+    -re {# $} {}
+    -re {login: *$} {
+        send "root\r"
+        expect -re {Password: *$}
+        log_user 0
+        send -- "$password\r"
+        log_user 1
+        expect -re {# $}
+    }
+}
+unset password
+unset text
+proc run {cmd} { send -- "$cmd\r"; expect -re {# $} }
+run {killall cleankvm-raw-frame-probe 2>/dev/null || true}
+run {rm -f /tmp/timing-sweep.pid /tmp/timing-sweep.log /run/cleankvm-frame.yuv422p}
+foreach m {soph_vpss soph_vi soph_snsr_i2c soph_mipi_rx soph_base soph_sys} {
+    run "rmmod $m; echo CLEANUP_${m}_RC=\$?"
+}
+run {rm -f /tmp/soph_mipi_rx.ko /tmp/soph_mipi_rx.ko.gz /tmp/soph_mipi_rx.ko.gz.b64}
+run {printf 'CLEANUP_REMAINDER='; awk '$1 ~ /^soph_/ {printf "%s,", $1}' /proc/modules; echo; printf 'POST_TAINT='; cat /proc/sys/kernel/tainted; test ! -e /run/cleankvm-frame.yuv422p; echo FRAME_ABSENT_RC=$?}
+send "~."
+expect eof

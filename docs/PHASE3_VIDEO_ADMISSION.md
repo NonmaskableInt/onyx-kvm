@@ -3,6 +3,21 @@
 Status: diagnostic modules are present only in a non-autoload quarantine;
 video capture, streaming, and MCP exposure are not admitted.
 
+## Matched active CleanKVM IRQ snapshot (2026-09-23)
+
+At three seconds the pull-preserved CleanKVM condition had 85,004 CIF IRQs,
+59,896 VI IRQs, zero scaler IRQs, ECC/CRC/WC
+`65536/7833/11721`, 74,927 reported SOFs, and zero pre-FE frames. Stock instead
+showed stable receiver errors, active pre-FE, and scaler IRQs. Thus CleanKVM's
+SOFs are not valid frames entering the ISP pipeline; corruption stops progress
+before pre-FE and scaler. The identical ISR bodies are executing but reacting
+to different receiver input.
+
+The background diagnostic did not exit after sampling, and serial recovery
+ended in EOF before cleanup verification. A target reboot and clean-baseline
+verification are mandatory before further work. The runner now explicitly
+terminates the background probe after T+3. Video remains fail-closed.
+
 ## Stock runtime interrupt ownership (2026-09-23)
 
 The stock two-second read-only snapshot showed active Linux VI and scaler

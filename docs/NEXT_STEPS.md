@@ -2,6 +2,37 @@
 
 Updated: 2026-09-23
 
+## Active CleanKVM interrupt comparison localizes the break (2026-09-23)
+
+The matched active snapshot used stock polarity, lanes `2,4,3,1,0`, D1 deskew
+12, settle 16, clock phase 0, and preserved `0x48` pad words. Both hashes
+matched, `/dev/mem` was absent, the run began at taint zero with no Sophgo
+module loaded, and all six diagnostic modules loaded successfully.
+
+| Sample | CIF IRQ26 | VI IRQ24 | Scaler IRQ25 | ECC/CRC/WC | SOF | Pre-FE |
+| --- | ---: | ---: | ---: | --- | ---: | ---: |
+| Before probe | 0 | 0 | 0 | n/a | n/a | n/a |
+| T+1 s | 45600 | 13940 | 0 | `35328/4279/6365` | 28747 | 0 |
+| T+3 s | 85004 | 59896 | 0 | `65536/7833/11721` | 74927 | 0 |
+
+VI reported the configured 1920x1080 dimensions but FPS zero, pre-FE zero,
+pre-BE/post zero, one height-underflow event, and no scaler interrupt. Stock,
+by contrast, produced no new CIF error IRQ, advanced VI by 365 and scaler by
+201 over two seconds, and advanced pre-FE by 201 with stable receiver errors.
+
+This localizes the CleanKVM break before pre-FE/scaler admission: corrupted CSI
+packets generate an interrupt storm and false SOFs, but no valid frame reaches
+the downstream pipeline. RTOS mailbox/frame transport and missing Linux ISR
+logic are excluded as primary causes. `soph_fast_image` cannot repair malformed
+CSI packets upstream.
+
+The background probe failed to exit after the measurements. Attempts to
+interrupt it and regain the authenticated console ended with serial EOF before
+reverse unload could be verified. The runner is now bounded to terminate the
+probe explicitly after its T+3 sample. The current target must be rebooted
+before any further experiment; verify zero loaded modules and absence of all
+temporary files after boot. Video remains fail-closed.
+
 ## Stock runtime IRQ ownership captured (2026-09-23)
 
 The read-only stock snapshot booted kernel `5.10.4-tag- #46`, with the expected
