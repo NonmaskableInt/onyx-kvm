@@ -2,6 +2,50 @@
 
 Updated: 2026-09-23
 
+## Stock and CleanKVM video ISRs are byte-identical (2026-09-23)
+
+Offline ELF symbol and section parsing compared the extracted stock modules
+with independently built CleanKVM v7. The complete 262-byte `cif_isr` machine
+code is byte-identical, SHA-256
+`81c99f22bfea462d3ec529e711333de586f8f56d0ce0bd4a2f6e9f7be374674d`.
+Its relocation targets also match: five calls to `cif_check_csi_int_sts`, then
+the same counter-limit branch, `cif_mask_csi_int_sts`, error reports, and
+`cif_clear_csi_int_sts`.
+
+The VI interrupt paths are also byte-identical. The 22-byte `vi_core_isr` has
+SHA-256 `3844890fdc88d3c8213ea6075b0429c6c645d938cdd93045174e6beb6fbad1c2`;
+the complete 2,444-byte `vi_irq_handler` has SHA-256
+`fd38193a6818948ce81017bed1d6edbbb1a65b2fc67c61c6a3450f96c9f9df49`.
+CleanKVM's observed CSI error counters and VI SOF counts independently show
+that both handlers execute on target. Missing CSI or VI ISR implementation is
+therefore closed as the no-frame explanation.
+
+Pinned source confirms `soph_rtos_cmdqu` owns a separate mailbox IRQ and
+dispatches RTOS command callbacks. `soph_fast_image` sends the Linux/RTOS init
+handshake, maps RTOS shared memory, allocates expected ISP/image/encoder ION
+buffers, and coordinates transfer of ISP/JPEG/codec interrupt ownership. It
+does not register or replace the CIF ISR or VI frame-done ISR. These modules
+could affect downstream ISP ownership and buffer handoff, but cannot by
+themselves explain upstream CSI ECC/WC corruption. Stock has also logged
+`SYS_CMD_INFO_LINUX_INIT_DONE fail`, so successful RTOS handoff must be
+measured rather than assumed.
+
+`image/phase3-runtime-interrupt-snapshot.exp` now captures an unchanged,
+read-only two-second inventory of loaded modules, every IRQ count, MIPI state,
+VI state, taint, and relevant device-tree nodes. Run it first on stock with the
+receiver active, then under the matched CleanKVM diagnostic condition. Compare
+CIF, VI/ISP, and mailbox IRQ ownership and deltas before considering a bounded
+source-built RTOS experiment. Video remains fail-closed.
+
+The unloaded CleanKVM baseline completed with no module, MIPI, or VI proc entry.
+PLIC hardware IRQ 26 (CSI0) retained count 1,562,120 and IRQ 24 (VI/ISP)
+retained count 3,128,024 from the preceding diagnostic cycles, but neither
+advanced during the two-second sample. Their Linux action names were empty
+after module unload. Mailbox IRQ 101 had no `/proc/interrupts` entry. This is
+consistent with clean handler removal and independently confirms that both
+Linux video IRQ paths ran during earlier probes; it is not evidence of live
+RTOS interrupt activity in the unloaded baseline.
+
 ## Settle refinement closes the bounded software sweep (2026-09-23)
 
 The fixed-condition refinement sampled settle 17, 18, 19, 21, 22, and 23

@@ -3,6 +3,30 @@
 Status: diagnostic modules are present only in a non-autoload quarantine;
 video capture, streaming, and MCP exposure are not admitted.
 
+## ISR equivalence and RTOS ownership boundary (2026-09-23)
+
+Offline comparison found identical machine code in stock and CleanKVM for all
+three relevant Linux interrupt functions: 262-byte `cif_isr`, 22-byte
+`vi_core_isr`, and 2,444-byte `vi_irq_handler`. Their respective SHA-256 values
+are `81c99f22...74674d`, `3844890f...ad1c2`, and
+`fd38193a...9df49`. The CIF relocation targets also match. The receiver and VI
+interrupt logic is therefore present, and live CleanKVM counters prove that it
+runs.
+
+`soph_rtos_cmdqu` instead handles the Linux/RTOS mailbox. `soph_fast_image`
+performs the init handshake, shared-memory/ION setup, and ISP/JPEG/codec IRQ
+handoff. It is capable of affecting downstream ownership and buffers, but it
+does not decode CSI packets or replace CIF/VI frame interrupts. The next
+discriminator is the prepared read-only stock/CleanKVM runtime IRQ inventory,
+not execution of either stock module. Video remains fail-closed.
+
+The first unloaded CleanKVM snapshot resolved PLIC 26 as CSI0 and PLIC 24 as
+VI/ISP from pinned DTS source. Their retained counts were 1,562,120 and
+3,128,024, respectively, and neither changed over two seconds after all video
+modules had been removed. Mailbox IRQ 101 was absent. The counts therefore
+record prior Linux diagnostic activity rather than a currently active RTOS
+handler.
+
 ## Pull-preserved settle refinement (2026-09-23)
 
 `image/phase3-pad-pulls-settle-refine.exp` completed the unsampled settle

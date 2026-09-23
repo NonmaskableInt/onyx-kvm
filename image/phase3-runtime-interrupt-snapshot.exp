@@ -1,0 +1,65 @@
+#!/usr/bin/expect -f
+
+# Capture a read-only runtime inventory from either stock or CleanKVM. The
+# credential is supplied from an ignored/local file and is never printed.
+set timeout 60
+set credential_path [lindex $argv 0]
+set label [lindex $argv 1]
+
+set fh [open $credential_path r]
+set credential_text [read $fh]
+close $fh
+if {![regexp -line {^password=(.*)$} $credential_text -> password]} {
+    exit 2
+}
+
+spawn /usr/bin/sudo /usr/bin/cu -l /dev/cu.usbserial-112440 -s 115200
+expect {
+    -re {Connected\.} {}
+    timeout { exit 7 }
+}
+send "\003\r"
+set logged_in 0
+expect {
+    -re {# $} { set logged_in 1 }
+    -re {login: *$} {}
+    timeout { send "~."; exit 3 }
+}
+if {!$logged_in} {
+    send "root\r"
+    expect {
+        -re {Password: *$} {}
+        timeout { send "~."; exit 4 }
+    }
+    log_user 0
+    send -- "$password\r"
+    log_user 1
+    expect {
+        -re {# $} {}
+        timeout { send "~."; exit 5 }
+    }
+}
+unset password
+unset credential_text
+
+proc run_command {command} {
+    send -- "$command\r"
+    expect {
+        -re {# $} {}
+        timeout { send "~."; exit 6 }
+    }
+}
+
+run_command "echo PHASE3_RUNTIME_IRQ_SNAPSHOT_BEGIN LABEL=$label"
+run_command {uname -a; printf 'TAINT='; cat /proc/sys/kernel/tainted}
+run_command {echo MODULES; cat /proc/modules}
+run_command {echo INTERRUPTS_T0; cat /proc/interrupts}
+run_command {echo MIPI_T0; cat /proc/mipi-rx 2>/dev/null || true}
+run_command {echo VI_T0; cat /proc/cvitek/vi_dbg 2>/dev/null || cat /proc/vi_dbg 2>/dev/null || true}
+run_command {sleep 2; echo INTERRUPTS_T2000; cat /proc/interrupts}
+run_command {echo MIPI_T2000; cat /proc/mipi-rx 2>/dev/null || true}
+run_command {echo VI_T2000; cat /proc/cvitek/vi_dbg 2>/dev/null || cat /proc/vi_dbg 2>/dev/null || true}
+run_command {echo DT_IRQ_BINDINGS; find /proc/device-tree -maxdepth 4 -type d 2>/dev/null | grep -E '/(cif|vi|rtos_cmdqu|rtos_image|mailbox)(@|$)' || true}
+run_command "echo PHASE3_RUNTIME_IRQ_SNAPSHOT_END LABEL=$label"
+send "~."
+expect eof
