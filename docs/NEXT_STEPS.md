@@ -2,6 +2,42 @@
 
 Updated: 2026-09-22
 
+## Full stock/CleanKVM CSI comparison closes receiver configuration (2026-09-22)
+
+The clean-side diagnostic module and compressed UART payload matched their
+recorded SHA-256 values on target. `/dev/mem` remained absent. All six modules
+loaded normally, the replacement receiver used device 0, lanes `2,4,3,1,0`,
+zero PN swaps, settle 8, clock phase 0, and deskew `0,8,8,3,3`. The diagnostic
+then read the same 46 source-identified words immediately after ordinary MIPI
+setup.
+
+Every configuration word matched stock exactly, including all CSI mode,
+interrupt, lane selection, polarity, settle, deskew force/code, and PHY timing
+words. Two observed values differed but are status, not configuration:
+
+- CSI `REG_40` was `0x00010001` in the live stock sample and zero in the clean
+  setup-time sample. Pinned fields identify this register as ECC/CRC/WC/FIFO
+  and decoded-format status; stock's value means no ECC error and decode format
+  1 at that instant.
+- PHY4L `STATUS_A8` was `0x60` on stock and `0x20` on clean. Pinned fields
+  identify it solely as the live D3 low-power status output. Stock dynamic
+  samples already demonstrated that PHY status changes with link timing.
+
+The clean link still diverged dynamically: at T0 ECC was 25 with unknown
+decode; at 100 ms ECC/CRC/WC was `2756/1/235` with `yuv422-10`; at five seconds
+it was `65536/15/6249`, D3 was `hs_err`, and no frame completed. VI saw one
+height-underflow event, zero completed frames, and the probe returned 1. Every
+module reverse-unloaded with return code zero, no `soph_*` module or frame
+remained, the temporary module was deleted, and taint returned to the initial
+4096 left by the earlier rejected-module attempt.
+
+This closes a stock/CleanKVM difference in the complete source-identified CSI
+receiver configuration set sampled here. Do not write stock status values into
+CleanKVM. The next bounded discriminator is the read-only MIPI pad electrical
+state (`0x03001c30` through `0x03001c5f`) before and after normal setup, followed
+by physical signal measurement if those controls also match. Video remains
+fail-closed.
+
 ## Clean full-register diagnostic prepared (2026-09-22)
 
 Tracked patch `0023-cif-full-read-only-register-snapshot.patch` adds a

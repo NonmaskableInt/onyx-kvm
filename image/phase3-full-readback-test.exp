@@ -53,11 +53,31 @@ proc run_command {command} {
     }
 }
 
+proc run_checked {command marker} {
+    send -- "$command && printf '$marker\\n'\r"
+    expect {
+        -re "\\r\\n${marker}\\r\\n" {}
+        -re {# $} { exit 9 }
+        timeout { send "~."; exit 10 }
+    }
+    expect {
+        -re {# $} {}
+        timeout { send "~."; exit 11 }
+    }
+}
+
 log_user 0
-send -- "cat > /tmp/soph_mipi_rx.ko.gz.b64 <<'CLEANKVM_EOF'\r$encoded\rCLEANKVM_EOF\r"
-expect {
-    -re {# $} {}
-    timeout { log_user 1; send "~."; exit 8 }
+regsub -all {\s} $encoded {} encoded
+send -- ": > /tmp/soph_mipi_rx.ko.gz.b64\r"
+expect -re {# $}
+set encoded_length [string length $encoded]
+for {set offset 0} {$offset < $encoded_length} {incr offset 384} {
+    set chunk [string range $encoded $offset [expr {$offset + 383}]]
+    send -- "printf %s '$chunk' >> /tmp/soph_mipi_rx.ko.gz.b64\r"
+    expect {
+        -re {# $} {}
+        timeout { log_user 1; send "~."; exit 8 }
+    }
 }
 unset encoded
 log_user 1
@@ -67,9 +87,9 @@ set frame /run/cleankvm-frame.yuv422p
 run_command {echo CLEANKVM_PHASE3_FULL_READBACK_V1}
 run_command "actual=\$(sha256sum /tmp/soph_mipi_rx.ko.gz.b64 | awk '{print \$1}'); echo BASE64_FILE_SHA256=\$actual"
 run_command {base64 -d /tmp/soph_mipi_rx.ko.gz.b64 >/tmp/soph_mipi_rx.ko.gz; rm -f /tmp/soph_mipi_rx.ko.gz.b64}
-run_command "actual=\$(sha256sum /tmp/soph_mipi_rx.ko.gz | awk '{print \$1}'); echo GZIP_SHA256=\$actual; test \"\$actual\" = \"$expected_gzip_sha\""
-run_command {gzip -dc /tmp/soph_mipi_rx.ko.gz >/tmp/soph_mipi_rx.ko; rm -f /tmp/soph_mipi_rx.ko.gz; chmod 400 /tmp/soph_mipi_rx.ko}
-run_command "actual=\$(sha256sum /tmp/soph_mipi_rx.ko | awk '{print \$1}'); echo MODULE_SHA256=\$actual; test \"\$actual\" = \"$expected_module_sha\""
+run_checked "actual=\$(sha256sum /tmp/soph_mipi_rx.ko.gz | awk '{print \$1}'); echo GZIP_SHA256=\$actual; test \"\$actual\" = \"$expected_gzip_sha\"" GZIP_HASH_OK
+run_checked {gzip -dc /tmp/soph_mipi_rx.ko.gz >/tmp/soph_mipi_rx.ko; rm -f /tmp/soph_mipi_rx.ko.gz; chmod 400 /tmp/soph_mipi_rx.ko} GZIP_DECODE_OK
+run_checked "actual=\$(sha256sum /tmp/soph_mipi_rx.ko | awk '{print \$1}'); echo MODULE_SHA256=\$actual; test \"\$actual\" = \"$expected_module_sha\"" MODULE_HASH_OK
 run_command {rm -f /run/cleankvm-frame.yuv422p; test ! -e /dev/mem; echo DEVMEM_ABSENT_RC=$?}
 run_command {printf 'PRE_TAINT='; cat /proc/sys/kernel/tainted; printf 'PRELOADED='; awk '$1 ~ /^soph_/ {printf "%s,", $1}' /proc/modules; echo}
 run_command "insmod $module_dir/soph_sys.ko; echo LOAD_soph_sys_RC=\$?"
@@ -78,7 +98,7 @@ run_command {insmod /tmp/soph_mipi_rx.ko cif_diagnostic_full_readback=1 lane_pha
 foreach module {soph_snsr_i2c soph_vi soph_vpss} {
     run_command "insmod $module_dir/$module.ko; echo LOAD_${module}_RC=\$?"
 }
-run_command "/usr/libexec/cleankvm-raw-frame-probe $frame; echo PROBE_RC=\$?"
+run_command "/usr/libexec/cleankvm-raw-frame-probe 0 1080 8 0,0,0,0,0 2,4,3,1,0; echo PROBE_RC=\$?"
 run_command {echo '[FULL_READBACK]'; dmesg | grep 'cif-full' | tail -9}
 run_command {echo '[MIPI_RX]'; cat /proc/mipi-rx}
 run_command {if test -f /run/cleankvm-frame.yuv422p; then stat -c 'FRAME_BYTES=%s' /run/cleankvm-frame.yuv422p; sha256sum /run/cleankvm-frame.yuv422p; else echo FRAME_ABSENT; fi}

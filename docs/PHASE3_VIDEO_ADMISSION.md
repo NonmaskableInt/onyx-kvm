@@ -3,6 +3,22 @@
 Status: diagnostic modules are present only in a non-autoload quarantine;
 video capture, streaming, and MCP exposure are not admitted.
 
+## Complete receiver configuration comparison (2026-09-22)
+
+The hash-verified CleanKVM diagnostic captured the same 46 CSI, wrapper, and
+four-lane PHY words as the repeated stock baseline. Every configuration word
+matched stock exactly. CSI `REG_40` (`stock 0x00010001`, clean setup-time zero)
+is decoded-format and link-error status, and PHY4L `STATUS_A8` (`0x60` versus
+`0x20`) is live D3 low-power status; neither is a programmable initialization
+discriminator.
+
+Despite identical controls, CleanKVM accumulated ECC/CRC/WC
+`2756/1/235` by 100 ms and `65536/15/6249` by five seconds, decoded
+`yuv422-10`, reached D3 `hs_err`, and completed no frame. All six modules
+unloaded normally, no frame or module remained, and `/dev/mem` stayed absent.
+This closes the compared receiver configuration as the cause. Next compare the
+source-identified pad electrical words read-only. Video remains fail-closed.
+
 ## Expanded stock CSI register baseline (2026-09-22)
 
 A source-auditable static RISC-V reader mapped only 46 source-identified CSI
