@@ -5,12 +5,14 @@ repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 engine=${CONTAINER_ENGINE:-podman}
 builder=${CLEANKVM_BUILDER_TAG:-localhost/cleankvm-builder:ubuntu-22.04-amd64}
 work_volume=${CLEANKVM_WORK_VOLUME:-cleankvm-work-v5}
+host_tools_volume=${CLEANKVM_HOST_TOOLS_VOLUME:-cleankvm-host-tools}
 artifact_dir=${CLEANKVM_ARTIFACT_DIR:-"$repo_root/out/phase1"}
 
 mkdir -p "$artifact_dir"
 
 "$engine" run --rm --arch amd64 --network none \
     -v "$work_volume:/work:ro" \
+    -v "$host_tools_volume:/host-tools:ro" \
     -v "$repo_root:/repo:ro" \
     -v "$artifact_dir:/artifacts:rw" \
     "$builder" bash -lc '
