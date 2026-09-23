@@ -1,0 +1,47 @@
+--- a/osdrv/interdrv/v2/cif/chip/mars/cif.c
++++ b/osdrv/interdrv/v2/cif/chip/mars/cif.c
+@@ -105,6 +105,11 @@
+ module_param(cif_diagnostic_full_readback, bool, 0444);
+ MODULE_PARM_DESC(cif_diagnostic_full_readback, "read bounded CSI/PHY register snapshot after MIPI setup");
+ 
++/* Diagnostic only: preserve the boot pad pull state observed on stock. */
++static bool cif_diagnostic_preserve_pad_pulls;
++module_param(cif_diagnostic_preserve_pad_pulls, bool, 0444);
++MODULE_PARM_DESC(cif_diagnostic_preserve_pad_pulls, "preserve MIPI pad PU/PD bits during setup");
++
+ static int bypass_mac_clk;
+ module_param(bypass_mac_clk, int, 0644);
+ MODULE_PARM_DESC(bypass_mac_clk, "byass mac clk");
+@@ -542,19 +547,24 @@
+ 				clk_port = -1;
+ 		}
+ 		cif_set_lane_id(ctx, i, attr->lane_id[i], attr->pn_swap[i]);
+-		/* clear pad ctrl pu/pd */
++		/* Preserve stock pad pulls only for the explicit bounded diagnostic. */
+ 		if (dev->pad_ctrl) {
+ 			u32 v0, v1;
+ 
+ 			v0 = ioread32(dev->pad_ctrl + PSD_CTRL_OFFSET(attr->lane_id[i]));
+-			value = v0 & ~(PAD_CTRL_PU | PAD_CTRL_PD);
+-			iowrite32(value, dev->pad_ctrl + PSD_CTRL_OFFSET(attr->lane_id[i]));
+ 			v1 = ioread32(dev->pad_ctrl + PSD_CTRL_OFFSET(attr->lane_id[i]) + 4);
+-			value = v1 & ~(PAD_CTRL_PU | PAD_CTRL_PD);
+-			iowrite32(value, dev->pad_ctrl + PSD_CTRL_OFFSET(attr->lane_id[i]) + 4);
+-			pr_info("cif: lane_id[%d]=%d cleared pad PU/PD: P(0x%x->0x%x) N(0x%x->0x%x)\n",
+-				i, attr->lane_id[i], v0, (u32)(v0 & ~(PAD_CTRL_PU | PAD_CTRL_PD)),
+-				v1, (u32)(v1 & ~(PAD_CTRL_PU | PAD_CTRL_PD)));
++			if (cif_diagnostic_preserve_pad_pulls) {
++				pr_info("cif: lane_id[%d]=%d preserved pad PU/PD: P=0x%x N=0x%x\n",
++					i, attr->lane_id[i], v0, v1);
++			} else {
++				value = v0 & ~(PAD_CTRL_PU | PAD_CTRL_PD);
++				iowrite32(value, dev->pad_ctrl + PSD_CTRL_OFFSET(attr->lane_id[i]));
++				value = v1 & ~(PAD_CTRL_PU | PAD_CTRL_PD);
++				iowrite32(value, dev->pad_ctrl + PSD_CTRL_OFFSET(attr->lane_id[i]) + 4);
++				pr_info("cif: lane_id[%d]=%d cleared pad PU/PD: P(0x%x->0x%x) N(0x%x->0x%x)\n",
++					i, attr->lane_id[i], v0, (u32)(v0 & ~(PAD_CTRL_PU | PAD_CTRL_PD)),
++					v1, (u32)(v1 & ~(PAD_CTRL_PU | PAD_CTRL_PD)));
++			}
+ 		}
+ 		tbl &= ~(1<<attr->lane_id[i]);
+ 		j++;

@@ -19,6 +19,18 @@ struct register_read {
  * driver diagnostics. Every mapping below is PROT_READ.
  */
 static const struct register_read reads[] = {
+	{ "PAD0_P", 0x03001c30 },
+	{ "PAD0_N", 0x03001c34 },
+	{ "PAD1_P", 0x03001c38 },
+	{ "PAD1_N", 0x03001c3c },
+	{ "PAD2_P", 0x03001c40 },
+	{ "PAD2_N", 0x03001c44 },
+	{ "PAD3_P", 0x03001c48 },
+	{ "PAD3_N", 0x03001c4c },
+	{ "PAD4_P", 0x03001c50 },
+	{ "PAD4_N", 0x03001c54 },
+	{ "PAD5_P", 0x03001c58 },
+	{ "PAD5_N", 0x03001c5c },
 	{ "CSI_CTRL_00", 0x0a0c2400 },
 	{ "CSI_CTRL_04", 0x0a0c2404 },
 	{ "CSI_CTRL_30", 0x0a0c2430 },

@@ -2,6 +2,42 @@
 
 Updated: 2026-09-22
 
+## Stock preserves MIPI pad pulls; bounded clean test next (2026-09-22)
+
+The extended stock reader was rebuilt offline and matched SHA-256
+`5cd69f546316589f702b43cad32f3e999d43e2bd7a301c5c5139b3ab977a13d3`
+on the stock kernel `#46` before execution. Two snapshots two seconds apart
+read all twelve MIPI P/N pad words at `0x03001c30` through `0x03001c5c` as
+`0x00000048`. The temporary reader was removed and verified absent. Stock
+taint remained 4098. The receiver was active as `yuv422-8`, with zero
+ECC/CRC/header errors and one WC error in the final live sample.
+
+This exposes a concrete stock/CleanKVM difference. Pinned source defines bit 2
+as pad pull-up and bit 3 as pad pull-down. The clean receiver's ordinary setup
+clears both bits on the five selected clock/data lane pairs, producing `0x40`;
+stock leaves bit 3 set on all six pairs at `0x48`. Do not assume the SDK's
+commented pull clearing is correct for this board.
+
+The next bounded experiment is a default-off CleanKVM diagnostic that preserves
+the initial `0x48` pad words during otherwise unchanged stock-equivalent setup,
+verifies the post-setup words, and runs the existing short frame probe. Compare
+decode and ECC/CRC/WC progression, then reverse-unload and remove the temporary
+module. Video remains fail-closed.
+
+Tracked patch `0024-cif-preserve-stock-pad-pulls-diagnostic.patch` implements
+that single default-off switch without adding a register write. The module was
+built with networking disabled from a disposable copy of the verified SDK.
+`out/phase3-pad-pulls-v45/soph_mipi_rx.ko` has SHA-256
+`39c08a6df7ce3ee229450c8c6cf529bbfe6486df9b07819fa7d4250faac99c90`;
+its deterministic gzip transfer has SHA-256
+`4b4b68be72354a6a6cf3b659928be5040576a9e4fe08961cae9fd9dc0e9d4694`.
+The module reports GPL, depends only on `soph_base`, and has target vermagic
+`5.10.4-tag- preempt mod_unload riscv`. `image/phase3-pad-pulls-test.exp`
+performs the hash checks, confirms `/dev/mem` is absent, records preserved pad
+values plus receiver state, and enforces reverse cleanup. The existing verified
+CLEANKVM card was identified as `/dev/disk5` alongside an unrelated 23.8 GB
+device and safely ejected without rewriting it.
+
 ## Full stock/CleanKVM CSI comparison closes receiver configuration (2026-09-22)
 
 The clean-side diagnostic module and compressed UART payload matched their
@@ -40,8 +76,8 @@ fail-closed.
 
 The completed clean run already supplies its setup transition: for clock/data
 lane IDs `2,4,3,1,0`, every P and N pad word changed from `0x48` to `0x40` when
-the existing driver cleared only the documented pull-up/pull-down bits. Capture
-the same ten words read-only on stock before changing either implementation.
+the existing driver cleared only the documented pull-up/pull-down bits. The
+stock comparison above shows that stock instead preserves `0x48`.
 
 ## Clean full-register diagnostic prepared (2026-09-22)
 

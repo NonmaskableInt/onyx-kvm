@@ -3,6 +3,32 @@
 Status: diagnostic modules are present only in a non-autoload quarantine;
 video capture, streaming, and MCP exposure are not admitted.
 
+## MIPI pad electrical-state difference (2026-09-22)
+
+An extended source-auditable stock reader mapped the twelve fixed MIPI pad
+words read-only. Its verified SHA-256 was
+`5cd69f546316589f702b43cad32f3e999d43e2bd7a301c5c5139b3ab977a13d3`.
+Both snapshots returned `0x48` for every P/N pair from pad 0 through pad 5;
+the helper was removed afterward and stock taint remained 4098.
+
+CleanKVM starts at the same `0x48`, but the pinned receiver source clears
+`PAD_CTRL_PU` bit 2 and `PAD_CTRL_PD` bit 3 for each selected lane during MIPI
+setup. Its observed result is `0x40` on lane IDs `2,4,3,1,0`. Stock therefore
+preserves the pull-down bit that CleanKVM clears. This is the first static
+electrical control difference found after the full receiver comparison.
+
+The admitted next diagnostic may only suppress that existing pad write behind
+a default-off module parameter, confirm that the words remain `0x48`, run one
+bounded local probe, and perform the established reverse cleanup. It must not
+add any new register value or expose physical memory. Video remains fail-closed.
+
+That diagnostic is prepared as tracked patch `0024` and
+`image/phase3-pad-pulls-test.exp`. The offline-built module SHA-256 is
+`39c08a6df7ce3ee229450c8c6cf529bbfe6486df9b07819fa7d4250faac99c90`;
+the gzip SHA-256 is
+`4b4b68be72354a6a6cf3b659928be5040576a9e4fe08961cae9fd9dc0e9d4694`.
+Its vermagic matches the target, and it depends only on `soph_base`.
+
 ## Complete receiver configuration comparison (2026-09-22)
 
 The hash-verified CleanKVM diagnostic captured the same 46 CSI, wrapper, and
@@ -21,7 +47,8 @@ source-identified pad electrical words read-only. Video remains fail-closed.
 
 CleanKVM's existing setup log records all ten clock/data P/N pad words changing
 uniformly from `0x48` to `0x40` as the documented pull-up/pull-down bits are
-cleared. The stock side of this read-only comparison remains outstanding.
+cleared. The completed stock comparison above shows all twelve words remain
+`0x48`.
 
 ## Expanded stock CSI register baseline (2026-09-22)
 
