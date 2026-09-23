@@ -36,9 +36,10 @@ if {!$logged_in} {
     }
     log_user 0
     send -- "$password\r"
+    log_user 1
     expect {
         -re {# $} {}
-        timeout { log_user 1; send "~."; exit 5 }
+        timeout { send "~."; exit 5 }
     }
 }
 unset password
