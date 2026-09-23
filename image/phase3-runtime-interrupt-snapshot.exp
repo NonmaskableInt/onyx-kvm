@@ -26,11 +26,16 @@ expect {
     timeout { send "~."; exit 3 }
 }
 if {!$logged_in} {
-    send "root\r"
-    expect {
-        -re {Password: *$} {}
-        timeout { send "~."; exit 4 }
+    set password_prompt 0
+    for {set attempt 0} {$attempt < 3 && !$password_prompt} {incr attempt} {
+        send "root\r"
+        expect {
+            -re {Password: *$} { set password_prompt 1 }
+            -re {login: *$} {}
+            timeout { send "~."; exit 4 }
+        }
     }
+    if {!$password_prompt} { send "~."; exit 4 }
     log_user 0
     send -- "$password\r"
     log_user 1

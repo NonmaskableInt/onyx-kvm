@@ -2,6 +2,41 @@
 
 Updated: 2026-09-23
 
+## Stock runtime IRQ ownership captured (2026-09-23)
+
+The read-only stock snapshot booted kernel `5.10.4-tag- #46`, with the expected
+27 modules including `soph_rtos_cmdqu`, `soph_fast_image`, receiver build #30,
+VI, VPSS, codec, and scaler modules. Taint was 4098. No command changed a file,
+module, register, or device state.
+
+Across the fixed two-second interval:
+
+| Hardware IRQ | Linux owner | T0 | T2000 | Delta |
+| ---: | --- | ---: | ---: | ---: |
+| 26 | `cif-irq0` | 1604 | 1604 | 0 |
+| 24 | `a000000.vi` | 11587 | 11952 | 365 |
+| 25 | `CVI_VIP_SCL` | 7208 | 7409 | 201 |
+| 101 | `mailbox` | 0 | 0 | 0 |
+| 22/21/23 | H.265/H.264/SBM | 0/0/0 | 0/0/0 | 0/0/0 |
+
+During the same interval, receiver ECC/CRC/WC remained `1/0/1` with stable
+`yuv422-8`. VI SOF advanced 5331 to 5505 (+174), and pre-FE count advanced
+6326 to 6527 (+201), matching the scaler IRQ delta. All reported width/height
+values were 1920x1080, and every VI CSI dimension/overflow counter remained
+zero. Pre-BE, post, drop, and dump counters remained zero in this snapshot.
+
+This demonstrates that active stock video events are handled through Linux VI
+and scaler IRQs. The RTOS mailbox does not carry a per-frame interrupt stream,
+and the codec IRQs were inactive. `soph_fast_image`/`soph_rtos_cmdqu` may still
+perform boot-time ownership and shared-memory setup, but ongoing mailbox frame
+transport is closed as the explanation. The zero CSI IRQ delta is expected
+because no new receiver error occurred; CleanKVM's CSI IRQ storm corresponds
+to its accumulating protocol errors.
+
+The next matched step is to boot CleanKVM and capture this same inventory while
+the fixed pull-preserved receiver/VI probe is active. Compare VI IRQ, SOF,
+pre-FE, scaler, and CSI error deltas directly. Video remains fail-closed.
+
 ## Stock and CleanKVM video ISRs are byte-identical (2026-09-23)
 
 Offline ELF symbol and section parsing compared the extracted stock modules

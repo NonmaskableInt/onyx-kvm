@@ -3,6 +3,21 @@
 Status: diagnostic modules are present only in a non-autoload quarantine;
 video capture, streaming, and MCP exposure are not admitted.
 
+## Stock runtime interrupt ownership (2026-09-23)
+
+The stock two-second read-only snapshot showed active Linux VI and scaler
+handling without RTOS mailbox activity. VI/ISP IRQ24 increased by 365, scaler
+IRQ25 by 201, SOF by 174, and pre-FE by 201. Mailbox IRQ101, H.264/H.265/SBM
+IRQs, and CIF IRQ26 did not change. Receiver state remained `yuv422-8` at
+ECC/CRC/WC `1/0/1`, so no new CIF error interrupt was expected.
+
+This rejects per-frame transfer or decode through `soph_rtos_cmdqu` as the
+stock behavior observed here. Stock frames reach Linux VI/pre-FE and scaler
+without mailbox interrupts. The two RTOS modules retain possible boot-time
+handoff and shared-memory roles, which must not be confused with CSI packet
+decoding. Collect the matched active CleanKVM IRQ deltas next. Video remains
+fail-closed.
+
 ## ISR equivalence and RTOS ownership boundary (2026-09-23)
 
 Offline comparison found identical machine code in stock and CleanKVM for all
