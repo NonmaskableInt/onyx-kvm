@@ -3,13 +3,39 @@
 Status: diagnostic modules are present only in a non-autoload quarantine;
 video capture, streaming, and MCP exposure are not admitted.
 
+## Receiver binary comparison and revised next step (2026-09-23)
+
+Physical probing is no longer planned. Stock succeeds and CleanKVM fails on
+the same attached hardware and HDMI source, making the image-dependent software
+path the relevant discriminator.
+
+Function-level RISC-V comparison found identical machine code for every core
+receiver operation. The stock-only code is a GPIO361 threaded status interrupt
+and proc diagnostic. The CleanKVM-only code is its device-tree sensor-reset
+helper. The only functional `_cif_ioctl` call difference is that reset helper,
+which the bounded probe deliberately never invokes. Receiver initialization
+must therefore be sought in external boot ordering/state rather than another
+undocumented CSI register mutation.
+
+Audit the source-built RTOS mailbox and fast-image modules for bounded boot-time
+effects. Per-frame mailbox transport is already excluded; boot-time shared
+memory or IRQ handoff remains a hypothesis. Video remains fail-closed.
+
+The two pinned modules now build offline with matching target vermagic, but
+remain unloaded. Mailbox setup maps `0x01900000..0x01900fff` and owns IRQ101.
+Fast-image maps the reserved RTOS memory, waits 200 ms for the init response,
+validates a shared transfer structure, and may allocate three RTOS-addressed
+ION regions. Its stock exit unconditionally stops RTOS ISR ownership and
+enables four IRQ variables even after failed initialization, without complete
+allocation cleanup. A default-off, state-tracked, cleanup-safe diagnostic patch
+is required before a single boot-scoped experiment.
+
 ## Active-snapshot cleanup closure (2026-09-23)
 
 The required CleanKVM reboot completed. Post-boot verification found no probe
 or Sophgo module, no frame, an empty module remainder, and taint zero. No
-diagnostic state remains. Continue with physical clock/D3 measurement; do not
-load the RTOS modules on the basis of the IRQ comparison. Video remains
-fail-closed.
+diagnostic state remains. Continue with the software initialization audit above.
+Video remains fail-closed.
 
 ## Matched active CleanKVM IRQ snapshot (2026-09-23)
 

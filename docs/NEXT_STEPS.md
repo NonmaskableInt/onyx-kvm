@@ -2,6 +2,68 @@
 
 Updated: 2026-09-23
 
+## Physical comparison withdrawn; receiver binary delta narrowed (2026-09-23)
+
+The physical waveform comparison is withdrawn as a next step. The same device,
+bridge, HDMI source, cable, and Mac display path work under the stock image and
+fail under CleanKVM. Continue software attribution rather than treating the
+repeatable image-dependent result as a physical fault.
+
+A RISC-V function-level comparison of the loaded stock build-30 receiver and
+independently built CleanKVM v7 found 72 shared functions. All core hardware
+functions have identical machine-code bodies, including CSI streaming, lane
+selection, lane deskew, settle, clock direction/edge, interrupt status/mask/
+clear, PHY state, and register-base access. The previously established CIF and
+VI ISR bodies are also identical.
+
+Only three shared functions differ materially: probe, exit, and `_cif_ioctl`.
+Stock additionally contains a 72-byte `button_isr` plus proc diagnostic
+open/show/write helpers. Its probe installs a GPIO361 threaded interrupt and
+diagnostic proc entry. CleanKVM instead discovers the device-tree sensor-reset
+GPIO. CleanKVM's only extra receiver function is the 418-byte bounded sensor
+reset helper. Within `_cif_ioctl`, the call graph is otherwise identical; the
+sole functional call difference is stock's direct `gpio_direction_output`
+versus CleanKVM's polarity-aware reset helper. The raw-frame probe explicitly
+does not invoke sensor reset or sensor clock, so that ioctl delta is inactive
+in every failed comparison.
+
+This closes missing receiver ISR and missing core receiver operation as the
+explanation. The remaining credible software boundary is boot-time state and
+initialization order outside `soph_mipi_rx`, especially the independently
+reviewed effects of `soph_rtos_cmdqu` and `soph_fast_image`. Before any load,
+enumerate their exact DT resources, shared-memory ranges, IRQ ownership changes,
+ION allocations, init/exit symmetry, and target log behavior; then construct a
+source-built bounded experiment or reject it. Do not execute stock modules.
+Video remains fail-closed.
+
+The existing verified offline SDK was cloned to disposable Podman volume
+`cleankvm-work-rtos-audit-v1`. With networking disabled, the pinned sources
+built against the prepared CleanKVM kernel and verified RISC-V musl toolchain:
+
+- `soph_rtos_cmdqu.ko`: SHA-256
+  `929ab1671f8edf064412ad92a14f9f9f1dd573012c0861e7eae91b95b02e86ae`,
+  depends on `soph_base`.
+- `soph_fast_image.ko`: SHA-256
+  `da8c40f68c8096e25bc94712b26eb6b4ef3a8f23dd1ed29c142d5a0d5bcb0fd9`,
+  depends on `soph_sys,soph_rtos_cmdqu`.
+
+Both report GPL and target vermagic
+`5.10.4-tag- preempt mod_unload riscv`. They have not been loaded.
+`soph_rtos_cmdqu` maps mailbox `0x01900000..0x01900fff`, initializes its
+hardware spinlock/mailbox context, and requests PLIC IRQ101. `soph_fast_image`
+maps the DT FreeRTOS reserved region, performs a 200 ms init handshake, validates
+the returned transfer configuration, and may allocate ISP/image/encoder ION
+buffers at RTOS-specified physical addresses.
+
+The unmodified fast-image exit is not admissible for a contained diagnostic:
+it unconditionally sends STOP_ISR and calls `enable_irq` for ISP/JPEG/H.264/
+H.265 variables even if the handshake and IRQ discovery never succeeded, and
+its normal remove path does not free every possible ION allocation. Before a
+hardware load, add a default-off diagnostic enable, track successful handoff
+and valid IRQ discovery, bound every wait, and free all allocations on every
+exit path. Build and inspect that patch offline, then run one boot-scoped load
+ahead of the six video modules with reverse cleanup or mandatory reboot.
+
 ## Post-snapshot reboot restores clean baseline (2026-09-23)
 
 After the active interrupt runner lost its serial session, CleanKVM was
@@ -12,10 +74,10 @@ paths were removed or absent, frame absence passed, and kernel taint was zero.
 This closes the cleanup exception without carrying diagnostic state into the
 next experiment.
 
-The matched IRQ evidence now places the divergence before VI pre-FE/scaler and
-outside the RTOS mailbox path. Proceed with the prepared physical clock and
-D3/RX0 comparison rather than admitting `soph_fast_image` or
-`soph_rtos_cmdqu`. Video remains fail-closed.
+The matched IRQ evidence places the divergence before VI pre-FE/scaler and
+outside per-frame RTOS mailbox transport. The binary audit above reopens only
+boot-time RTOS/shared-memory initialization as a bounded software hypothesis.
+Video remains fail-closed.
 
 ## Active CleanKVM interrupt comparison localizes the break (2026-09-23)
 
