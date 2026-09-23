@@ -18,6 +18,7 @@ mkdir -p "$artifact_dir"
         sdk=/work/sdk
         stage=/tmp/cleankvm-package
         kernel="$sdk/linux_5.10/build/sg2002_licheervnano_sd/arch/riscv/boot/Image"
+        kernel_config="$sdk/linux_5.10/build/sg2002_licheervnano_sd/.config"
         dtb="$sdk/linux_5.10/build/sg2002_licheervnano_sd/arch/riscv/boot/dts/cvitek/sg2002_licheervnano_sd.dtb"
         rootfs="$sdk/buildroot/output/images/rootfs.ext4"
         fip="$sdk/install/soc_sg2002_licheervnano_sd/fip.bin"
@@ -25,9 +26,21 @@ mkdir -p "$artifact_dir"
 
         test -n "$mkimage"
         test -f "$kernel"
+        test -f "$kernel_config"
         test -f "$dtb"
         test -f "$rootfs"
         test -f "$fip"
+
+        for symbol in \
+            CONFIG_ARCH_CVITEK \
+            CONFIG_SOC_THEAD \
+            CONFIG_ARCH_CV181X \
+            CONFIG_ARCH_CV181X_ASIC \
+            CONFIG_CVITEK_PINCTRL_CV1835 \
+            CONFIG_COMMON_CLK_CVITEK
+        do
+            grep -qx "$symbol=y" "$kernel_config"
+        done
 
         rm -rf "$stage"
         mkdir -p "$stage"

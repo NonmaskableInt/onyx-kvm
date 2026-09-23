@@ -77,6 +77,12 @@ assert_uboot() {
 }
 
 for setting in \
+    CONFIG_ARCH_CVITEK=y \
+    CONFIG_SOC_THEAD=y \
+    CONFIG_ARCH_CV181X=y \
+    CONFIG_ARCH_CV181X_ASIC=y \
+    CONFIG_CVITEK_PINCTRL_CV1835=y \
+    CONFIG_COMMON_CLK_CVITEK=y \
     CONFIG_MODULES=n \
     CONFIG_CFG80211=n \
     CONFIG_BT=n \

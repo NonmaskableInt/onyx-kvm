@@ -3,6 +3,39 @@
 Status: diagnostic modules are present only in a non-autoload quarantine;
 video capture, streaming, and MCP exposure are not admitted.
 
+## Pre-Linux and stock userspace capture audit (2026-09-23)
+
+Offline FIT extraction and device-tree comparison found identical CIF/VI
+register resources, interrupts, resets, and clocks. The only Linux-tree deltas
+are the intentional sensor-reset GPIO/polarity change, framebuffer/ION reserved
+memory, and USB mode. BL2 instruction bytes are identical after excluding its
+build strings. Monitor instruction bytes are identical; its four data-byte
+differences encode the reserved-memory change. Source attribution of
+second-stage-loader-only register sequences identified USB reset and disabled
+display output, with no stock-only CIF/CSI write. Shared CSI/VIP clock sequences
+are instruction-equivalent.
+
+Stock `libkvm_mmf.so` was inspected as inert data only (SHA-256
+`b4c14aa7ca6311036662ea3f134ae9e958c62ae2a64584168bfea848e30026e7`). Its
+`SAMPLE_PLAT_VI_INIT` and `SAMPLE_COMM_VI_StartMIPI` call sequences match the
+pinned middleware source. There is no extra receiver ioctl: the path registers
+the sensor, enables VI, resets/configures MIPI, releases sensor clock/reset,
+probes the sensor, then creates the pipe, ISP, and channel. The stock LT6911
+probe contains no bridge register table. CleanKVM's raw probe performs the
+receiver, device, pipe, and channel operations, while the omitted stock
+sensor-reset/clock subset was already tested source-exactly in v35 and failed.
+
+This closes missing pre-Linux loader initialization and a hidden stock receiver
+ioctl as explanations. The following built-in kernel comparison found that
+stock enables six SG2002 platform selections absent from CleanKVM v42:
+`ARCH_CVITEK`, `SOC_THEAD`, `ARCH_CV181X`, `ARCH_CV181X_ASIC`,
+`CVITEK_PINCTRL_CV1835`, and `COMMON_CLK_CVITEK`. The modules can still probe
+through generic clock/reset/GPIO support, but the platform boundary is not
+equivalent. The tracked base fragment and Phase 1/Phase 3 validators now require
+these symbols; normalized Phase 3 validation passes. A rebuilt image and the
+bounded raw-frame test are required before this hypothesis can be closed.
+Video remains fail-closed.
+
 ## Stock beta RX0N mux equivalence (2026-09-23)
 
 Offline stock-rootfs inspection found one receiver-adjacent init write outside

@@ -2,6 +2,52 @@
 
 Updated: 2026-09-23
 
+## Pre-Linux and stock capture-path audit closes another software boundary (2026-09-23)
+
+The stock FIT was extracted and its Linux device tree compared with the current
+CleanKVM v42 tree. CIF register ranges, reset IDs, clock IDs and names,
+interrupts, VI resources, and mailbox resources are identical. The differences
+are the intentional sensor-reset polarity/GPIO choice, framebuffer and ION
+reserved-memory sizing, and USB mode. The raw frame probe does not issue sensor
+reset, and reserved-memory and USB differences cannot change upstream CSI packet
+decoding.
+
+Stock and CleanKVM BL2 executable instructions are identical; the 26 differing
+bytes are build timestamp/revision text. Monitor executable instructions are
+also identical; its four differing data bytes encode the known reserved-memory
+address/size change. The remaining second-stage-loader-only writes resolve to
+USB reset and disabled display-output support. No loader instruction unique to
+stock targets the CIF/CSI register range, and the shared CSI/VIP clock setup has
+the same instruction sequence. This closes a missing pre-Linux CSI clock or
+reset write as the current explanation.
+
+Offline disassembly of stock `libkvm_mmf.so` (SHA-256
+`b4c14aa7ca6311036662ea3f134ae9e958c62ae2a64584168bfea848e30026e7`)
+shows that `SAMPLE_PLAT_VI_INIT` follows the pinned middleware source: start the
+sensor callbacks, set and enable the VI device, reset/configure MIPI and release
+the sensor clock/reset, probe the sensor, create/start the VI pipe, create ISP,
+and configure/enable the VI channel. `SAMPLE_COMM_VI_StartMIPI` contains no
+additional receiver ioctl and does not unreset MIPI. Its reset and clock subset
+was already exercised by the source-exact v35 diagnostic without producing a
+frame. The raw probe already performs the same VI-device, MIPI-attribute, pipe,
+and channel operations required before frame acquisition. The stock LT6911
+sensor probe only opens I2C and has no hidden register programming table.
+
+That built-in comparison found a material configuration mismatch. Stock enables
+`ARCH_CVITEK`, `SOC_THEAD`, `ARCH_CV181X`, `ARCH_CV181X_ASIC`,
+`CVITEK_PINCTRL_CV1835`, and `COMMON_CLK_CVITEK`; the v42 kernel contains none
+of them. Generic clock, reset, GPIO, regmap, and CVITEK PHY support remain, so
+the loadable modules can probe, but CleanKVM is not yet one-to-one with stock at
+the platform initialization boundary. The tracked Phase 1 fragment now pins
+all six SG2002 platform selections, and both Phase 1 and Phase 3 validators
+assert them. The Phase 3 normalized configuration passes against the cached
+SDK.
+
+Build and verify a fresh video image from a new disposable volume, confirm the
+six symbols in the generated kernel configuration before packaging, and run the
+same bounded raw-frame test. Do not add the opaque stock library or repeat the
+closed standalone reset/clock sequence. Video remains fail-closed.
+
 ## Stock beta RX0N mux is already present on CleanKVM (2026-09-23)
 
 Offline extraction of stock `/etc/init.d/S02config` found a post-module-load

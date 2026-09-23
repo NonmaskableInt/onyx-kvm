@@ -1,6 +1,19 @@
 # CleanKVM Phase 1 recovery kernel: serial, SD, and wired Ethernet only.
 # Applied after the SG2002 LicheeRV Nano defconfig and checked with olddefconfig.
 
+# Preserve the board's built-in SoC support. These initialize the SG2002
+# platform clock and pin-control providers used by later admitted devices.
+CONFIG_ARCH_CVITEK=y
+CONFIG_SOC_THEAD=y
+CONFIG_ARCH_CV181X=y
+# CONFIG_ARCH_CV180X is not set
+CONFIG_ARCH_CVITEK_CHIP="mars"
+# CONFIG_ARCH_CV181X_PALLADIUM is not set
+# CONFIG_ARCH_CV181X_FPGA is not set
+CONFIG_ARCH_CV181X_ASIC=y
+CONFIG_CVITEK_PINCTRL_CV1835=y
+CONFIG_COMMON_CLK_CVITEK=y
+
 # Expose security-relevant opt-out prompts whose upstream defaults are hidden.
 CONFIG_EXPERT=y
 
