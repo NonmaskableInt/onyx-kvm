@@ -1,0 +1,131 @@
+#!/usr/bin/expect -f
+
+# Repeat the established one-variable receiver timing sweep while preserving
+# the stock MIPI pad pull state. Each point gets a fresh load/probe/unload cycle.
+set timeout 180
+set credential_path [lindex $argv 0]
+set gzip_path [lindex $argv 1]
+set expected_gzip_sha [lindex $argv 2]
+set expected_module_sha [lindex $argv 3]
+
+set fh [open $credential_path r]
+set credential_text [read $fh]
+close $fh
+if {![regexp -line {^password=(.*)$} $credential_text -> password]} {
+    exit 2
+}
+set encoded [exec /usr/bin/base64 -i $gzip_path]
+
+spawn /usr/bin/sudo /usr/bin/cu -l /dev/cu.usbserial-112440 -s 115200
+expect {
+    -re {Connected\.} {}
+    timeout { exit 7 }
+}
+send "\003\r"
+set logged_in 0
+expect {
+    -re {# $} { set logged_in 1 }
+    -re {login: *$} {}
+    timeout { send "~."; exit 3 }
+}
+if {!$logged_in} {
+    send "root\r"
+    expect {
+        -re {Password: *$} {}
+        timeout { send "~."; exit 4 }
+    }
+    log_user 0
+    send -- "$password\r"
+    log_user 1
+    expect {
+        -re {# $} {}
+        timeout { send "~."; exit 5 }
+    }
+}
+unset password
+unset credential_text
+
+proc run_command {command} {
+    send -- "$command\r"
+    expect {
+        -re {# $} {}
+        timeout { send "~."; exit 6 }
+    }
+}
+
+proc run_checked {command marker} {
+    send -- "$command && printf '$marker\\n'\r"
+    expect {
+        -re "\\r\\n${marker}\\r\\n" {}
+        -re {# $} { exit 9 }
+        timeout { send "~."; exit 10 }
+    }
+    expect {
+        -re {# $} {}
+        timeout { send "~."; exit 11 }
+    }
+}
+
+log_user 0
+regsub -all {\s} $encoded {} encoded
+send -- ": > /tmp/soph_mipi_rx.ko.gz.b64\r"
+expect -re {# $}
+set encoded_length [string length $encoded]
+for {set offset 0} {$offset < $encoded_length} {incr offset 384} {
+    set chunk [string range $encoded $offset [expr {$offset + 383}]]
+    send -- "printf %s '$chunk' >> /tmp/soph_mipi_rx.ko.gz.b64\r"
+    expect {
+        -re {# $} {}
+        timeout { log_user 1; send "~."; exit 8 }
+    }
+}
+unset encoded
+log_user 1
+
+set module_dir /usr/lib/cleankvm/video-quarantine
+set frame /run/cleankvm-frame.yuv422p
+run_command {echo CLEANKVM_PHASE3_PAD_PULLS_TIMING_TRANSFER_V1}
+run_command {base64 -d /tmp/soph_mipi_rx.ko.gz.b64 >/tmp/soph_mipi_rx.ko.gz; rm -f /tmp/soph_mipi_rx.ko.gz.b64}
+run_checked "actual=\$(sha256sum /tmp/soph_mipi_rx.ko.gz | awk '{print \$1}'); echo GZIP_SHA256=\$actual; test \"\$actual\" = \"$expected_gzip_sha\"" GZIP_HASH_OK
+run_checked {gzip -dc /tmp/soph_mipi_rx.ko.gz >/tmp/soph_mipi_rx.ko; rm -f /tmp/soph_mipi_rx.ko.gz; chmod 400 /tmp/soph_mipi_rx.ko} GZIP_DECODE_OK
+run_checked "actual=\$(sha256sum /tmp/soph_mipi_rx.ko | awk '{print \$1}'); echo MODULE_SHA256=\$actual; test \"\$actual\" = \"$expected_module_sha\"" MODULE_HASH_OK
+run_command {rm -f /run/cleankvm-frame.yuv422p; test ! -e /dev/mem; echo DEVMEM_ABSENT_RC=$?}
+run_command {printf 'PRE_TAINT='; cat /proc/sys/kernel/tainted; printf 'PRELOADED='; awk '$1 ~ /^soph_/ {printf "%s,", $1}' /proc/modules; echo}
+
+set configs {
+    {baseline_d1_12 0,0,12,0,0 16 0}
+    {d1_10 0,0,10,0,0 16 0}
+    {d1_11 0,0,11,0,0 16 0}
+    {d1_13 0,0,13,0,0 16 0}
+    {settle_20 0,0,12,0,0 20 0}
+    {settle_24 0,0,12,0,0 24 0}
+    {clock_phase_8 0,0,12,0,0 16 8}
+}
+run_command {echo CLEANKVM_PHASE3_PAD_PULLS_TIMING_SWEEP_V1}
+set test 0
+foreach config $configs {
+    incr test
+    lassign $config name phases settle clock_phase
+    run_command "echo TIMING_TEST_${test}_BEGIN NAME=$name PHASES=$phases SETTLE=$settle CLOCK_PHASE=$clock_phase PN=0,0,0,0,0"
+    run_command "insmod $module_dir/soph_sys.ko; echo LOAD_${test}_soph_sys_RC=\$?"
+    run_command "insmod $module_dir/soph_base.ko; echo LOAD_${test}_soph_base_RC=\$?"
+    run_command "insmod /tmp/soph_mipi_rx.ko cif_diagnostic_preserve_pad_pulls=1 lane_phase=$phases csi_ck_phase=$clock_phase hs_settle=$settle; echo LOAD_${test}_soph_mipi_rx_RC=\$?"
+    foreach module {soph_snsr_i2c soph_vi soph_vpss} {
+        run_command "insmod $module_dir/$module.ko; echo LOAD_${test}_${module}_RC=\$?"
+    }
+    run_command "dmesg | grep 'preserved pad PU/PD' | tail -5"
+    run_command "/usr/libexec/cleankvm-raw-frame-probe 0 1080 $settle 0,0,0,0,0 2,4,3,1,0 > /tmp/timing-sweep.log 2>&1; rc=\$?; echo PROBE_${test}_RC=\$rc; grep -E 'CLEANKVM_LANE_PROFILE|CLEANKVM_MIPI_T|Devno EccErr|^ *0 +|Digital:|hs_(hst|idle|sync|err)|VISofCh0Cnt|pxl=|lines=|CVI_VI_GetChnFrame' /tmp/timing-sweep.log || true"
+    run_command "echo TIMING_TEST_${test}_FINAL_MIPI; cat /proc/mipi-rx"
+    run_command "if test -f $frame; then stat -c 'FRAME_BYTES=%s' $frame; sha256sum $frame; else echo FRAME_ABSENT; fi"
+    run_command "rm -f $frame /tmp/timing-sweep.log"
+    foreach module {soph_vpss soph_vi soph_snsr_i2c soph_mipi_rx soph_base soph_sys} {
+        run_command "rmmod $module; echo UNLOAD_${test}_${module}_RC=\$?"
+    }
+    run_command "printf 'TIMING_TEST_${test}_REMAINDER='; awk '\$1 ~ /^soph_/ {printf \"%s,\", \$1}' /proc/modules; echo"
+    run_command "echo TIMING_TEST_${test}_END"
+}
+run_command {rm -f /tmp/soph_mipi_rx.ko /tmp/timing-sweep.log /run/cleankvm-frame.yuv422p; test ! -e /tmp/soph_mipi_rx.ko; echo MODULE_CLEANUP_RC=$?}
+run_command {printf 'FINAL_LOADED='; awk '$1 ~ /^soph_/ {printf "%s,", $1}' /proc/modules; echo; printf 'POST_TAINT='; cat /proc/sys/kernel/tainted; test ! -e /run/cleankvm-frame.yuv422p; echo FINAL_FRAME_ABSENT_RC=$?}
+run_command {echo CLEANKVM_PHASE3_PAD_PULLS_TIMING_SWEEP_END}
+send "~."
+expect eof

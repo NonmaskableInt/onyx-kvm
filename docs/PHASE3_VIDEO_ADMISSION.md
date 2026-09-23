@@ -3,6 +3,40 @@
 Status: diagnostic modules are present only in a non-autoload quarantine;
 video capture, streaming, and MCP exposure are not admitted.
 
+## Pull-preserved settle refinement (2026-09-23)
+
+`image/phase3-pad-pulls-settle-refine.exp` completed the unsampled settle
+values 17, 18, 19, 21, 22, and 23 under the same fixed stock-polarity
+conditions. Final CRC fell from 10997 at settle 17 to 41 at settle 21 and 58
+at settle 22. Over the same transition WC rose from 4453 to 7350/7284, ECC
+still saturated, and decode changed from required `yuv422-8` to raw8/raw10.
+Settle 23 ended with unknown decode; settle 24 had already shown zero SOF.
+
+No point produced a frame. Every load and all 36 reverse unloads passed, no
+module or frame remained, and final taint was unchanged at 4096. This closes
+the bounded pull-preserved timing search: a lower CRC count alone is not a
+valid link when word-count errors worsen and format decoding is wrong. Proceed
+with the documented physical clock and data-pair comparison, beginning with
+D3/RX0 at FPC2 pins 18/19. Video remains fail-closed.
+
+## Pull-preserved timing sweep (2026-09-23)
+
+`image/phase3-pad-pulls-timing-sweep.exp` repeated seven established timing
+points at stock polarity, lanes `2,4,3,1,0`, and preserved pad value `0x48`.
+D1 deskew values 10, 11, 12, and 13 plus clock phase 8 all ended near
+`65536/9605..9960/5026..5183` ECC/CRC/WC and about 198000 to 200000 SOFs.
+They produced no frame.
+
+Settle 20 was materially different: T100 was `2779/85/299`, final was
+`65536/2067/6462`, decode returned to `yuv422-8`, and SOF reached 236821. This
+is a large CRC improvement but not recovery because ECC saturated, WC worsened,
+and no frame completed. Settle 24 held at `1/0/0`, unknown decode, and zero SOF,
+which marks the upper interval as unusable under these conditions.
+
+All transfer, absence, pad-state, reverse-unload, remainder, frame-absence, and
+cleanup gates passed. The refinement above completed that interval without a
+frame. Video remains fail-closed.
+
 ## Pull-preserved 16-state polarity matrix (2026-09-22)
 
 `image/phase3-pad-pulls-matrix.exp` repeated every D0/D1/D2/D3 PN combination

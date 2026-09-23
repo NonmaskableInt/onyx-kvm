@@ -1,6 +1,66 @@
 # Next steps
 
-Updated: 2026-09-22
+Updated: 2026-09-23
+
+## Settle refinement closes the bounded software sweep (2026-09-23)
+
+The fixed-condition refinement sampled settle 17, 18, 19, 21, 22, and 23
+around the earlier settle-20 result. Pads remained `0x48`; polarity, lane map,
+D1 deskew 12, and clock phase 0 remained fixed.
+
+| Settle | T100 ECC/CRC/WC | Final ECC/CRC/WC | Final decode | SOF |
+| ---: | --- | --- | --- | ---: |
+| 17 | `3053/533/225` | `65536/10997/4453` | `yuv422-8` | 184974 |
+| 18 | `3004/326/254` | `65536/6826/4990` | `yuv422-8` | 205648 |
+| 19 | `2864/263/285` | `65536/6182/5696` | `yuv422-8` | 219582 |
+| 20 | `2779/85/299` | `65536/2067/6462` | `yuv422-8` | 236821 |
+| 21 | `2675/3/299` | `65536/41/7350` | raw8 | 256691 |
+| 22 | `2658/3/281` | `65536/58/7284` | raw10 | 255738 |
+| 23 | `876/3/53` | `65536/53/3744` | unknown | 126629 |
+| 24 | `1/0/0` | `1/0/0` | unknown | 0 |
+
+The transition is monotonic through settle 22 for CRC and SOF, but it trades
+CRC for increasing WC and then loses the required YUV format at 21. ECC
+saturates at every active point, and no frame completed. There is no timing
+point in this bounded interval that improves all error classes or meets the
+admission gate.
+
+All 36 unloads returned zero, each remainder was empty, both hashes matched,
+`/dev/mem` was absent, all pad checks showed `0x48`, temporary files were
+removed, and final taint remained 4096. The next experiment is the prepared
+physical stock-versus-CleanKVM differential measurement at FPC2, starting with
+clock and D3/RX0, under the fixed conditions in
+`docs/PHASE3_MIPI_SIGNAL_MEASUREMENT.md`. Video remains fail-closed.
+
+## Pull-preserved timing sweep narrows HS settle (2026-09-23)
+
+The established seven-point, one-variable timing sweep was repeated at stock
+polarity with all MIPI pad words preserved at `0x48`. Fixed settings were lanes
+`2,4,3,1,0`, D1 deskew 12, settle 16, and clock phase 0 except for the named
+variable:
+
+| Point | D1 deskew | Settle | Clock phase | T100 ECC/CRC/WC | Final ECC/CRC/WC | Final decode | SOF |
+| --- | ---: | ---: | ---: | --- | --- | --- | ---: |
+| baseline | 12 | 16 | 0 | `2987/479/226` | `65536/9859/5183` | `yuv422-8` | 198316 |
+| D1 10 | 10 | 16 | 0 | `3018/443/224` | `65536/9818/5030` | `yuv422-8` | 199650 |
+| D1 11 | 11 | 16 | 0 | `3066/452/267` | `65536/9683/5127` | `yuv422-8` | 199521 |
+| D1 13 | 13 | 16 | 0 | `3009/430/243` | `65536/9605/5088` | `yuv422-8` | 200004 |
+| settle 20 | 12 | 20 | 0 | `2779/85/299` | `65536/2067/6462` | `yuv422-8` | 236821 |
+| settle 24 | 12 | 24 | 0 | `1/0/0` | `1/0/0` | unknown | 0 |
+| clock 8 | 12 | 16 | 8 | `2950/405/248` | `65536/9960/5026` | `yuv422-8` | 200339 |
+
+No point completed a frame. D1 deskew 10 through 13 and clock phase 8 were
+equivalent within run variation. Settle 20 cut final CRC errors by roughly 79%
+and raised SOF activity, although ECC still saturated and WC increased. Settle
+24 disabled useful reception entirely. The refinement above completed the
+planned interval and found no admissible point. Video remains fail-closed.
+
+Both transferred hashes matched, `/dev/mem` remained absent, and each point
+verified all ten selected P/N pad words at `0x48`. All 42 unloads returned zero,
+every remainder was empty, temporary files were removed, and final taint stayed
+4096. An initial local result-filter quoting error occurred before the first
+probe; its six loaded modules were immediately reverse-unloaded with all return
+codes zero and an empty remainder before the corrected sweep began.
 
 ## Complete polarity matrix with stock pull-downs active (2026-09-22)
 
