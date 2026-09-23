@@ -3,6 +3,16 @@
 Status: diagnostic modules are present only in a non-autoload quarantine;
 video capture, streaming, and MCP exposure are not admitted.
 
+## Physical signal comparison prepared (2026-09-22)
+
+Retained stock and CleanKVM second-stage loader disassemblies contain identical
+function-3 mux programming for every MIPI RX P/N pin. The official LicheeRV
+Nano schematic maps logical D3 to physical RX0 at FPC2 pins 18/19 and clock to
+RX2 at pins 12/13. `docs/PHASE3_MIPI_SIGNAL_MEASUREMENT.md` records the complete
+five-pair mapping and a fixed-condition differential capture procedure. No
+further software mutation is justified until those physical observations are
+available. Video remains fail-closed.
+
 ## Stock pad-pull preservation test result (2026-09-22)
 
 The default-off diagnostic started with taint zero, no Sophgo modules, and no

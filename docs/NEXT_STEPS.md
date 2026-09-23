@@ -2,6 +2,22 @@
 
 Updated: 2026-09-22
 
+## Physical MIPI comparison prepared (2026-09-22)
+
+Offline disassembly of the retained stock and CleanKVM second-stage loaders
+shows identical read-mask-write sequences that select function 3 on all ten
+MIPI RX pins. This closes pin mux as a remaining discriminator without another
+live write or helper.
+
+The official LicheeRV Nano schematic and the stock lane profile map logical D3,
+the repeatedly unstable lane, to physical MIPI RX0 at camera connector FPC2
+pins 18/19. Clock is RX2 at pins 12/13; D0/D1/D2 are RX4/RX3/RX1 at pins
+6/7, 9/10, and 15/16. The bounded stock-versus-CleanKVM procedure, equipment
+boundary, capture order, and interpretation gate are recorded in
+`docs/PHASE3_MIPI_SIGNAL_MEASUREMENT.md`. Physical capture now requires a
+suitable differential probe or CSI analyzer and safe access to FPC2. Video
+remains fail-closed.
+
 ## Preserving stock MIPI pad pulls does not recover the link (2026-09-22)
 
 The prepared CleanKVM diagnostic passed both on-target hash checks from a
