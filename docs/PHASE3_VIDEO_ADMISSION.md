@@ -3,6 +3,14 @@
 Status: diagnostic modules are present only in a non-autoload quarantine;
 video capture, streaming, and MCP exposure are not admitted.
 
+## Active-snapshot cleanup closure (2026-09-23)
+
+The required CleanKVM reboot completed. Post-boot verification found no probe
+or Sophgo module, no frame, an empty module remainder, and taint zero. No
+diagnostic state remains. Continue with physical clock/D3 measurement; do not
+load the RTOS modules on the basis of the IRQ comparison. Video remains
+fail-closed.
+
 ## Matched active CleanKVM IRQ snapshot (2026-09-23)
 
 At three seconds the pull-preserved CleanKVM condition had 85,004 CIF IRQs,

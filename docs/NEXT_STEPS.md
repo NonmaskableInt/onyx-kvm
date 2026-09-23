@@ -2,6 +2,21 @@
 
 Updated: 2026-09-23
 
+## Post-snapshot reboot restores clean baseline (2026-09-23)
+
+After the active interrupt runner lost its serial session, CleanKVM was
+rebooted. The authenticated post-boot verification found no probe process and
+all six `rmmod` checks reported that the named module was absent. The explicit
+Sophgo module remainder was empty, the diagnostic payload/log/PID and frame
+paths were removed or absent, frame absence passed, and kernel taint was zero.
+This closes the cleanup exception without carrying diagnostic state into the
+next experiment.
+
+The matched IRQ evidence now places the divergence before VI pre-FE/scaler and
+outside the RTOS mailbox path. Proceed with the prepared physical clock and
+D3/RX0 comparison rather than admitting `soph_fast_image` or
+`soph_rtos_cmdqu`. Video remains fail-closed.
+
 ## Active CleanKVM interrupt comparison localizes the break (2026-09-23)
 
 The matched active snapshot used stock polarity, lanes `2,4,3,1,0`, D1 deskew
