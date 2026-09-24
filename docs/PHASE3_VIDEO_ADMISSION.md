@@ -85,6 +85,34 @@ Containment and cleanup verified cleanly:
 - Final `/proc/modules` remainder was empty (`FINAL_LOADED=`), and post-taint
   remained at `4096`.
 
+### Cold-boot verification of baked v48 SD image (`0d4dd05f...`)
+
+The v48 CleanKVM development image (`out/phase3-enforced-pad-pulls-v48/cleankvm-phase1.img`,
+79,692,288 bytes, SHA-256 `0d4dd05f7762740c0f052a1df846e6a2bb5cf628af2591cdda642803b7812208`)
+was assembled with the patched `soph_mipi_rx.ko` (`e93d36dcc9bcc242d882547b8183339278fb5945c387ce5b8bb03ed33a551835`)
+installed directly in `/usr/lib/cleankvm/video-quarantine/` (`rootfs.ext4`
+SHA-256 `27ebe768be65b98a13cbf93bf4a1883b9fd967e94dedacc54d4c3f3d6b34751f`).
+The resolved 31.0 GB card (`/dev/disk4`) was flashed and verified on readback
+(`f7440c736f9ac762008f392ab7742a386fb5b4683352365c8e3f7a4a29e9a412`,
+`embedded_artifacts=verified`).
+
+On cold boot (`image/phase3-v48-quarantine-frame-test.exp`, zero UART upload):
+- `PRE_TAINT=0`, `DEVMEM_ABSENT_RC=0`, `PRELOADED=` (empty), and
+  `QUARANTINE_MIPI_RX_SHA256` matched `e93d36dcc9bcc242d882547b8183339278fb5945c387ce5b8bb03ed33a551835`.
+- Driver probe logged all six pad pairs preserved at `0x48` (`P(0x48->0x48) N(0x48->0x48)`)
+  and all ten MIPI RX pinmux words set to `0x3` (`0x0300116c`: `0x0 -> 0x3`,
+  `0x03001170`: `0x0 -> 0x3`, `0x03001174..1188`: `0x3 -> 0x3`,
+  `0x0300118c`: `0x5 -> 0x3`, `0x03001190`: `0x3 -> 0x3`).
+- Receiver locked all four data lanes in `hs_hst` (`Deskew=done`, `decode=yuv422-8`)
+  with **`EccErr=1, CrcErr=0, HdrErr=0, WcErr=0, fifofull=0`**.
+- VI counters advanced cleanly (`VISofCh0Cnt=107`, `VIPreFECh0Cnt=126`,
+  `VIFPS=60`, `VIDevFPS=49..53`, `VICsiCh0HeightLSCnt=0`, `VICsiCh0WidthLSCnt=0`).
+- `PROBE_RC=0`: captured `1920x1080` `YUV422P` frame (`4,147,200` bytes) at
+  `/run/cleankvm-frame.yuv422p`, SHA-256
+  `501d9d4ed0562d1a425c004c65e1c49ccc67e5a2fbabd382799138fdac5d3c65`.
+- Frame was deleted (`FRAME_CLEANUP_RC=0`), all six modules reverse-unloaded
+  with return code 0, `FINAL_LOADED=` was empty, and `POST_TAINT=4096`.
+
 ## Settle table sweep on SG2002 platform kernel (2026-09-23)
 
 A bounded 9-point sweep across HS settle values (8, 10, 12, 14, 16, 18, 20, 22,

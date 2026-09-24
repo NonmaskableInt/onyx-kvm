@@ -104,7 +104,7 @@ run_command {echo '[PAD_SET]'; dmesg | grep 'set pad PD' | tail -10}
 run_command {echo '[PINMUX_READBACK]'; dmesg | grep 'cif pinmux' | tail -10}
 run_command {echo '[MIPI_RX]'; cat /proc/mipi-rx}
 run_command {echo '[DMESG_CSI]'; dmesg | grep -E "(cif|csi|mipi)" | tail -25}
-run_command {if test -f /run/cleankvm-frame.yuv422p; then stat -c 'FRAME_BYTES=%s' /run/cleankvm-frame.yuv422p; sha256sum /run/cleankvm-frame.yuv422p; else echo FRAME_ABSENT; fi}
+run_command {if test -f /run/cleankvm-frame.yuv422p; then printf 'FRAME_BYTES=%s\n' "$(wc -c </run/cleankvm-frame.yuv422p)"; sha256sum /run/cleankvm-frame.yuv422p; else echo FRAME_ABSENT; fi}
 run_command {rm -f /run/cleankvm-frame.yuv422p}
 foreach module {soph_vpss soph_vi soph_snsr_i2c soph_mipi_rx soph_base soph_sys} {
     run_command "rmmod $module; echo UNLOAD_${module}_RC=\$?"

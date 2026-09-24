@@ -51,21 +51,36 @@ Executed via `image/phase3-enforced-pad-pulls-test.exp` on target:
 - Reverse unload of all 6 modules returned 0, leaving `/proc/modules` empty,
   `/tmp/soph_mipi_rx.ko` deleted, `/dev/mem` absent, and post-taint at 4096.
 
+### Cold-Boot Verification on Flashed v48 Image (`0d4dd05f...`)
+
+The v48 SD image (`out/phase3-enforced-pad-pulls-v48/cleankvm-phase1.img`,
+SHA-256 `0d4dd05f7762740c0f052a1df846e6a2bb5cf628af2591cdda642803b7812208`,
+`rootfs.ext4` SHA-256 `27ebe768be65b98a13cbf93bf4a1883b9fd967e94dedacc54d4c3f3d6b34751f`)
+was flashed to `/dev/disk4`, verified on readback (`embedded_artifacts=verified`),
+and cold-booted on the NanoKVM Lite (`image/phase3-v48-quarantine-frame-test.exp`):
+- Cold-boot `PRE_TAINT=0`, `DEVMEM_ABSENT_RC=0`, `PRELOADED=` (empty).
+- Built-in `/usr/lib/cleankvm/video-quarantine/soph_mipi_rx.ko` verified at
+  SHA-256 `e93d36dcc9bcc242d882547b8183339278fb5945c387ce5b8bb03ed33a551835`
+  (zero UART upload required).
+- All 6 pad pairs initialized at `0x48` (`P(0x48->0x48) N(0x48->0x48)`) and all
+  10 MIPI RX pinmux registers set to `0x3`.
+- Receiver counters: **`EccErr=1, CrcErr=0, HdrErr=0, WcErr=0, fifofull=0`**,
+  `decode=yuv422-8`, all 4 data lanes in `hs_hst`, `Deskew=done`.
+- VI counters: `VISofCh0Cnt=107`, `VIPreFECh0Cnt=126`, `VIFPS=60`,
+  `VICsiCh0HeightLSCnt=0`, `VICsiCh0WidthLSCnt=0`.
+- `PROBE_RC=0`: captured `1920x1080` `YUV422P` frame (`4,147,200` bytes),
+  SHA-256 `501d9d4ed0562d1a425c004c65e1c49ccc67e5a2fbabd382799138fdac5d3c65`.
+- Frame removed (`FRAME_CLEANUP_RC=0`), all 6 modules reverse-unloaded (`RC=0`),
+  `FINAL_LOADED=` empty, and `POST_TAINT=4096`.
+
 ### Immediate Next Steps
 
-1. **Full Image Rebuild**:
-   - Cleanly build a new CleanKVM image (v48) containing `0027` integrated into
-     the rootfs and kernel via `image/build-phase1-rootfs.sh` and
-     `image/assemble-phase1-image.sh`.
-2. **Transition to Rust Control Plane Video Capture**:
-   - Transition from standalone C diagnostic probe to the CleanKVM Rust video
-     capture pipeline (`crates/cleankvm_core`, `crates/cleankvm_media_protocol`,
-     `crates/cleankvm_mcp`).
-   - Implement authenticated MCP video streaming interface while keeping audio
-     fail-closed per repository policy.
-3. **Flashing & Hardware Sanity Check**:
-   - Flash the v48 image to SD card and confirm the default system boots with
-     clean video pipeline readiness.
+1. **Transition to Rust Control Plane Video Capture**:
+   - Implement the privileged video broker and connect it to the CleanKVM Rust
+     control plane (`crates/cleankvm-core`, `crates/cleankvm-media-protocol`,
+     `crates/cleankvm-mcp`, `crates/cleankvmd`).
+   - Expose authenticated `kvm.video.snapshot` over MCP while keeping audio
+     (`kvm.audio.capture`, `kvm.audio.play`) strictly fail-closed.
 
 ## Settle table sweep on SG2002 platform kernel (2026-09-23)
 
