@@ -73,14 +73,18 @@ and cold-booted on the NanoKVM Lite (`image/phase3-v48-quarantine-frame-test.exp
 - Frame removed (`FRAME_CLEANUP_RC=0`), all 6 modules reverse-unloaded (`RC=0`),
   `FINAL_LOADED=` empty, and `POST_TAINT=4096`.
 
-### Immediate Next Steps
+### Rust Control Plane & MCP `kvm.video.snapshot` Integration
 
-1. **Transition to Rust Control Plane Video Capture**:
-   - Implement the privileged video broker and connect it to the CleanKVM Rust
-     control plane (`crates/cleankvm-core`, `crates/cleankvm-media-protocol`,
-     `crates/cleankvm-mcp`, `crates/cleankvmd`).
-   - Expose authenticated `kvm.video.snapshot` over MCP while keeping audio
-     (`kvm.audio.capture`, `kvm.audio.play`) strictly fail-closed.
+1. **`cleankvm-media-protocol`**:
+   - Added `SnapshotFormat::Yuv422p` (`3`), `WireHeader::encode()`, `SnapshotRequest::encode()`/`decode()` (`8` bytes), and `VideoSnapshot` (`42` bytes: `width`, `height`, `format`, `byte_length`, and 32-byte `sha256` digest).
+2. **`cleankvm-mcp`**:
+   - Added `VideoTransport` and `Server::with_video()`.
+   - Exposed `kvm.video.snapshot` in `tools/list` and `tools/call` when `VideoTransport` is attached and the authenticated grant has `Scope::Video` (`kvm:video`).
+   - Updated `kvm.status` to report `videoEnabled: true` when `VideoTransport` is attached and authorized, while keeping `audioCaptureEnabled: false` and `audioOutputEnabled: false` fail-closed.
+3. **`cleankvmd`**:
+   - Added `BrokerVideo` over `/run/cleankvm/video.sock` gated on `/run/cleankvm/video-enabled`.
+4. **Immediate Next Step**:
+   - Implement the standalone privileged `cleankvm-video-broker` binary (serving `/run/cleankvm/video.sock`) to orchestrate bounded frame capture on target and return the 42-byte `VideoSnapshot` wire response.
 
 ## Settle table sweep on SG2002 platform kernel (2026-09-23)
 

@@ -57,7 +57,12 @@ pub enum ValidationError {
     VolumeTooHigh,
     WritableMediaForbidden,
     MediaTooLarge,
+    VideoDisabled,
+    PolicyRejected,
 }
+
+pub const SNAPSHOT_REQUEST_BYTES: usize = 8;
+pub const SNAPSHOT_RESPONSE_BYTES: usize = 42;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct WireHeader {
@@ -66,6 +71,26 @@ pub struct WireHeader {
 }
 
 impl WireHeader {
+    /// Encode a fixed-size wire header with zero flags.
+    #[must_use]
+    pub const fn encode(self) -> [u8; WIRE_HEADER_BYTES] {
+        let len = self.payload_bytes.to_be_bytes();
+        [
+            WIRE_MAGIC[0],
+            WIRE_MAGIC[1],
+            WIRE_MAGIC[2],
+            WIRE_MAGIC[3],
+            WIRE_VERSION,
+            self.operation as u8,
+            0,
+            0,
+            len[0],
+            len[1],
+            len[2],
+            len[3],
+        ]
+    }
+
     /// Parse a complete fixed-size header and reject extensible flags.
     ///
     /// # Errors
@@ -93,9 +118,35 @@ impl WireHeader {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[repr(u8)]
 pub enum SnapshotFormat {
-    Jpeg,
-    Rgb565,
+    Jpeg = 1,
+    Rgb565 = 2,
+    Yuv422p = 3,
+}
+
+impl SnapshotFormat {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Jpeg => "jpeg",
+            Self::Rgb565 => "rgb565",
+            Self::Yuv422p => "yuv422p",
+        }
+    }
+}
+
+impl TryFrom<u8> for SnapshotFormat {
+    type Error = ValidationError;
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        match value {
+            1 => Ok(Self::Jpeg),
+            2 => Ok(Self::Rgb565),
+            3 => Ok(Self::Yuv422p),
+            _ => Err(ValidationError::InvalidDimensions),
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -129,6 +180,120 @@ impl SnapshotRequest {
             format,
             deadline_ms,
         })
+    }
+
+    /// Encode this snapshot request into a fixed 8-byte payload.
+    #[must_use]
+    pub const fn encode(self) -> [u8; SNAPSHOT_REQUEST_BYTES] {
+        let w = self.width.to_be_bytes();
+        let h = self.height.to_be_bytes();
+        let d = self.deadline_ms.to_be_bytes();
+        [w[0], w[1], h[0], h[1], self.format as u8, 0, d[0], d[1]]
+    }
+
+    /// Decode and validate a fixed 8-byte snapshot request payload.
+    ///
+    /// # Errors
+    /// Rejects non-zero reserved bytes, unknown formats, or out-of-range fields.
+    pub fn decode(bytes: [u8; SNAPSHOT_REQUEST_BYTES]) -> Result<Self, ValidationError> {
+        if bytes[5] != 0 {
+            return Err(ValidationError::NonZeroFlags);
+        }
+        let width = u16::from_be_bytes([bytes[0], bytes[1]]);
+        let height = u16::from_be_bytes([bytes[2], bytes[3]]);
+        let format = SnapshotFormat::try_from(bytes[4])?;
+        let deadline_ms = u16::from_be_bytes([bytes[6], bytes[7]]);
+        Self::new(width, height, format, deadline_ms)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct VideoSnapshot {
+    pub width: u16,
+    pub height: u16,
+    pub format: SnapshotFormat,
+    pub byte_length: u32,
+    pub sha256: [u8; 32],
+}
+
+impl VideoSnapshot {
+    /// Validate and construct a bounded snapshot metadata record.
+    ///
+    /// # Errors
+    /// Rejects zero/oversized dimensions or byte lengths exceeding [`MAX_SNAPSHOT_BYTES`].
+    pub fn new(
+        width: u16,
+        height: u16,
+        format: SnapshotFormat,
+        byte_length: u32,
+        sha256: [u8; 32],
+    ) -> Result<Self, ValidationError> {
+        if width == 0 || height == 0 || width > MAX_WIDTH || height > MAX_HEIGHT {
+            return Err(ValidationError::InvalidDimensions);
+        }
+        let len = usize::try_from(byte_length).map_err(|_| ValidationError::InvalidLength)?;
+        if len == 0 || len > MAX_SNAPSHOT_BYTES {
+            return Err(ValidationError::InvalidLength);
+        }
+        Ok(Self {
+            width,
+            height,
+            format,
+            byte_length,
+            sha256,
+        })
+    }
+
+    #[must_use]
+    pub const fn encode(self) -> [u8; SNAPSHOT_RESPONSE_BYTES] {
+        let mut out = [0_u8; SNAPSHOT_RESPONSE_BYTES];
+        let w = self.width.to_be_bytes();
+        let h = self.height.to_be_bytes();
+        let l = self.byte_length.to_be_bytes();
+        out[0] = w[0];
+        out[1] = w[1];
+        out[2] = h[0];
+        out[3] = h[1];
+        out[4] = self.format as u8;
+        out[5] = 0;
+        out[6] = l[0];
+        out[7] = l[1];
+        out[8] = l[2];
+        out[9] = l[3];
+        let mut idx = 0;
+        while idx < 32 {
+            out[10 + idx] = self.sha256[idx];
+            idx += 1;
+        }
+        out
+    }
+
+    /// Decode and validate a fixed 42-byte snapshot response record.
+    ///
+    /// # Errors
+    /// Rejects non-zero flags, invalid dimensions, or invalid byte lengths.
+    pub fn decode(bytes: [u8; SNAPSHOT_RESPONSE_BYTES]) -> Result<Self, ValidationError> {
+        if bytes[5] != 0 {
+            return Err(ValidationError::NonZeroFlags);
+        }
+        let width = u16::from_be_bytes([bytes[0], bytes[1]]);
+        let height = u16::from_be_bytes([bytes[2], bytes[3]]);
+        let format = SnapshotFormat::try_from(bytes[4])?;
+        let byte_length = u32::from_be_bytes([bytes[6], bytes[7], bytes[8], bytes[9]]);
+        let mut sha256 = [0_u8; 32];
+        sha256.copy_from_slice(&bytes[10..42]);
+        Self::new(width, height, format, byte_length, sha256)
+    }
+
+    #[must_use]
+    pub fn sha256_hex(&self) -> String {
+        const HEX: &[u8; 16] = b"0123456789abcdef";
+        let mut text = String::with_capacity(64);
+        for byte in self.sha256 {
+            text.push(char::from(HEX[usize::from(byte >> 4)]));
+            text.push(char::from(HEX[usize::from(byte & 0x0f)]));
+        }
+        text
     }
 }
 
@@ -314,5 +479,25 @@ mod tests {
             Err(ValidationError::WritableMediaForbidden)
         );
         assert!(MediaImage::new(MAX_READ_ONLY_MEDIA_BYTES, true).is_ok());
+    }
+
+    #[test]
+    fn snapshot_wire_roundtrip_and_bounds() {
+        let request = SnapshotRequest::new(1920, 1080, SnapshotFormat::Yuv422p, 2_000)
+            .unwrap_or_else(|error| panic!("valid snapshot request failed: {error:?}"));
+        let encoded = request.encode();
+        assert_eq!(SnapshotRequest::decode(encoded), Ok(request));
+
+        let header = WireHeader {
+            operation: Operation::Snapshot,
+            payload_bytes: 8,
+        };
+        assert_eq!(WireHeader::decode(header.encode()), Ok(header));
+
+        let digest = [0x50_u8; 32];
+        let snapshot = VideoSnapshot::new(1920, 1080, SnapshotFormat::Yuv422p, 4_147_200, digest)
+            .unwrap_or_else(|error| panic!("valid 1080p YUV422P snapshot failed: {error:?}"));
+        assert_eq!(VideoSnapshot::decode(snapshot.encode()), Ok(snapshot));
+        assert_eq!(snapshot.sha256_hex().len(), 64);
     }
 }

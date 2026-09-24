@@ -10,7 +10,11 @@ use std::{
 
 use cleankvm_mcp::{
     Ed25519JwtValidator, HidTransport, HttpAuthError, HttpRequestAuthError, MAX_MESSAGE_BYTES,
-    Server, authenticate_http_request, bearer_challenge, protected_resource_metadata,
+    Server, VideoTransport, authenticate_http_request, bearer_challenge,
+    protected_resource_metadata,
+};
+use cleankvm_media_protocol::{
+    Operation, SNAPSHOT_RESPONSE_BYTES, SnapshotRequest, VideoSnapshot, WireHeader,
 };
 use rustls::{
     ServerConfig, ServerConnection, StreamOwned,
@@ -22,6 +26,8 @@ const MAX_IDENTITY_BYTES: usize = 64 * 1024;
 const TIMEOUT: Duration = Duration::from_secs(10);
 const METADATA_PATH: &str = "/.well-known/oauth-protected-resource";
 const HID_SOCKET: &str = "/run/cleankvm/hid.sock";
+const VIDEO_SOCKET: &str = "/run/cleankvm/video.sock";
+const VIDEO_ENABLED_PATH: &str = "/run/cleankvm/video-enabled";
 
 struct BrokerHid;
 
@@ -49,6 +55,29 @@ impl HidTransport for BrokerHid {
 
     fn send_pointer(&self, report: [u8; 4]) -> io::Result<()> {
         Self::send(2, &report)
+    }
+}
+
+struct BrokerVideo;
+
+impl VideoTransport for BrokerVideo {
+    fn capture_snapshot(&self, request: SnapshotRequest) -> io::Result<VideoSnapshot> {
+        let mut stream = UnixStream::connect(VIDEO_SOCKET)?;
+        let timeout = Duration::from_millis(u64::from(request.deadline_ms));
+        stream.set_read_timeout(Some(timeout))?;
+        stream.set_write_timeout(Some(timeout))?;
+        let payload = request.encode();
+        let payload_bytes =
+            u32::try_from(payload.len()).map_err(|_| invalid("invalid snapshot request length"))?;
+        let header = WireHeader {
+            operation: Operation::Snapshot,
+            payload_bytes,
+        };
+        stream.write_all(&header.encode())?;
+        stream.write_all(&payload)?;
+        let mut response = [0_u8; SNAPSHOT_RESPONSE_BYTES];
+        stream.read_exact(&mut response)?;
+        VideoSnapshot::decode(response).map_err(|_| invalid("invalid video broker response"))
     }
 }
 
@@ -203,11 +232,15 @@ fn handle(
     }
     let grant = claims.as_grant();
     let hid = BrokerHid;
+    let video = BrokerVideo;
     let mut server = if method == Some("initialize") || !*initialized {
         Server::remote(&config.resource, now, grant)
     } else {
         Server::remote_ready_with_hid(&config.resource, now, grant, &hid)
     };
+    if Path::new(VIDEO_ENABLED_PATH).exists() {
+        server = server.with_video(&video);
+    }
     let Some(body) = server.handle_line(&request.body) else {
         return respond(stream, 202, "application/json", b"", None);
     };

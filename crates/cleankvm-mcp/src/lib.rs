@@ -4,6 +4,7 @@ use std::io::{self, BufRead, Write};
 
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use cleankvm_core::{Effect, Grant, Operation, PolicyError, Scope, authorize, authorize_grant};
+use cleankvm_media_protocol::{SnapshotFormat, SnapshotRequest, VideoSnapshot};
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -25,6 +26,15 @@ pub trait HidTransport {
     /// # Errors
     /// Returns an I/O error when the privileged broker rejects or cannot write it.
     fn send_pointer(&self, report: [u8; 4]) -> io::Result<()>;
+}
+
+/// Narrow transport boundary for bounded, read-only video frame snapshots.
+pub trait VideoTransport {
+    /// Request one bounded video frame snapshot from the privileged broker.
+    ///
+    /// # Errors
+    /// Returns an I/O error when the privileged broker rejects or cannot fulfill it.
+    fn capture_snapshot(&self, request: SnapshotRequest) -> io::Result<VideoSnapshot>;
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -317,6 +327,7 @@ pub struct Server<'a> {
     state: State,
     authority: Authority<'a>,
     hid: Option<&'a dyn HidTransport>,
+    video: Option<&'a dyn VideoTransport>,
 }
 
 impl Default for Server<'static> {
@@ -325,6 +336,7 @@ impl Default for Server<'static> {
             state: State::AwaitInitialize,
             authority: Authority::LocalRecovery,
             hid: None,
+            video: None,
         }
     }
 }
@@ -346,6 +358,7 @@ impl<'a> Server<'a> {
                 grant,
             },
             hid: None,
+            video: None,
         }
     }
 
@@ -366,6 +379,7 @@ impl<'a> Server<'a> {
                 grant,
             },
             hid: None,
+            video: None,
         }
     }
 
@@ -385,7 +399,15 @@ impl<'a> Server<'a> {
                 grant,
             },
             hid: Some(hid),
+            video: None,
         }
+    }
+
+    /// Attach the privileged video snapshot transport to this session.
+    #[must_use]
+    pub const fn with_video(mut self, video: &'a dyn VideoTransport) -> Self {
+        self.video = Some(video);
+        self
     }
 
     fn authorize(&self, name: &str) -> Result<Operation, PolicyError> {
@@ -496,6 +518,9 @@ impl<'a> Server<'a> {
         if matches!(name, "kvm.keyboard.send" | "kvm.pointer.send") {
             return self.call_hid_tool(id, name, params.get("arguments"));
         }
+        if name == "kvm.video.snapshot" {
+            return self.call_video_snapshot(id, params.get("arguments"));
+        }
         if name != "kvm.status" {
             return error(id, -32602, "Unknown or disabled tool");
         }
@@ -512,11 +537,12 @@ impl<'a> Server<'a> {
             Authority::LocalRecovery => ("development-recovery", 0),
             Authority::Remote { .. } => ("development-remote", 1),
         };
+        let video_enabled = self.video.is_some() && self.authorize("kvm.video.snapshot").is_ok();
         let status = json!({
             "mode": mode,
             "networkListeners": network_listeners,
             "mutatingOperationsEnabled": false,
-            "videoEnabled": false,
+            "videoEnabled": video_enabled,
             "audioCaptureEnabled": false,
             "audioOutputEnabled": false
         });
@@ -525,6 +551,36 @@ impl<'a> Server<'a> {
             &json!({
                 "content": [{ "type": "text", "text": status.to_string() }],
                 "structuredContent": status,
+                "isError": false
+            }),
+        )
+    }
+
+    fn call_video_snapshot(&self, id: &Value, arguments: Option<&Value>) -> String {
+        let Some(video) = self.video else {
+            return error(id, -32602, "Unknown or disabled tool");
+        };
+        if self.authorize("kvm.video.snapshot").is_err() {
+            return error(id, -32603, "Policy denied video snapshot");
+        }
+        let Some(request) = parse_snapshot_arguments(arguments) else {
+            return error(id, -32602, "Invalid video snapshot arguments");
+        };
+        let Ok(snapshot) = video.capture_snapshot(request) else {
+            return error(id, -32603, "Video broker rejected snapshot");
+        };
+        let result = json!({
+            "width": snapshot.width,
+            "height": snapshot.height,
+            "format": snapshot.format.as_str(),
+            "byteLength": snapshot.byte_length,
+            "sha256": snapshot.sha256_hex(),
+        });
+        success(
+            id,
+            &json!({
+                "content": [{ "type": "text", "text": result.to_string() }],
+                "structuredContent": result,
                 "isError": false
             }),
         )
@@ -616,12 +672,86 @@ impl<'a> Server<'a> {
                 "execution": { "taskSupport": "forbidden" }
             }));
         }
+        if self.video.is_some() && self.authorize("kvm.video.snapshot").is_ok() {
+            tools.push(video_snapshot_tool());
+        }
         if self.hid.is_some() && self.authorize("kvm.keyboard.send").is_ok() {
             tools.push(hid_tool("kvm.keyboard.send", "Send keyboard report", 8));
             tools.push(hid_tool("kvm.pointer.send", "Send pointer report", 4));
         }
         json!({ "tools": tools })
     }
+}
+
+fn parse_snapshot_arguments(arguments: Option<&Value>) -> Option<SnapshotRequest> {
+    let Some(arguments) = arguments else {
+        return SnapshotRequest::new(1920, 1080, SnapshotFormat::Yuv422p, 2_000).ok();
+    };
+    let object = arguments.as_object()?;
+    for key in object.keys() {
+        if !matches!(key.as_str(), "width" | "height" | "format" | "deadlineMs") {
+            return None;
+        }
+    }
+    let width = match object.get("width") {
+        Some(value) => u16::try_from(value.as_u64()?).ok()?,
+        None => 1920,
+    };
+    let height = match object.get("height") {
+        Some(value) => u16::try_from(value.as_u64()?).ok()?,
+        None => 1080,
+    };
+    let format = match object.get("format") {
+        Some(value) => match value.as_str()? {
+            "jpeg" => SnapshotFormat::Jpeg,
+            "rgb565" => SnapshotFormat::Rgb565,
+            "yuv422p" => SnapshotFormat::Yuv422p,
+            _ => return None,
+        },
+        None => SnapshotFormat::Yuv422p,
+    };
+    let deadline_ms = match object.get("deadlineMs") {
+        Some(value) => u16::try_from(value.as_u64()?).ok()?,
+        None => 2_000,
+    };
+    SnapshotRequest::new(width, height, format, deadline_ms).ok()
+}
+
+fn video_snapshot_tool() -> Value {
+    json!({
+        "name": "kvm.video.snapshot",
+        "title": "Capture video frame snapshot",
+        "description": "Capture one bounded video frame snapshot through the privileged video broker",
+        "inputSchema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "properties": {
+                "width": { "type": "integer", "minimum": 1, "maximum": 1920 },
+                "height": { "type": "integer", "minimum": 1, "maximum": 1080 },
+                "format": { "type": "string", "enum": ["jpeg", "rgb565", "yuv422p"] },
+                "deadlineMs": { "type": "integer", "minimum": 100, "maximum": 5000 }
+            },
+            "additionalProperties": false
+        },
+        "outputSchema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "properties": {
+                "width": { "type": "integer", "minimum": 1, "maximum": 1920 },
+                "height": { "type": "integer", "minimum": 1, "maximum": 1080 },
+                "format": { "type": "string", "enum": ["jpeg", "rgb565", "yuv422p"] },
+                "byteLength": { "type": "integer", "minimum": 1, "maximum": 4_194_304 },
+                "sha256": { "type": "string", "minLength": 64, "maxLength": 64 }
+            },
+            "required": ["width", "height", "format", "byteLength", "sha256"],
+            "additionalProperties": false
+        },
+        "annotations": {
+            "readOnlyHint": true, "destructiveHint": false,
+            "idempotentHint": false, "openWorldHint": false
+        },
+        "execution": { "taskSupport": "forbidden" }
+    })
 }
 
 fn hid_tool(name: &str, title: &str, length: usize) -> Value {
@@ -712,7 +842,8 @@ fn discard_line<R: BufRead>(input: &mut R) -> io::Result<()> {
 mod tests {
     use super::{
         BearerTokenValidator, Ed25519JwtValidator, HidTransport, HttpAuthError,
-        HttpRequestAuthError, JwtValidationError, MAX_MESSAGE_BYTES, Server, ValidatedClaims,
+        HttpRequestAuthError, JwtValidationError, MAX_MESSAGE_BYTES, Server, SnapshotFormat,
+        SnapshotRequest, ValidatedClaims, VideoSnapshot, VideoTransport,
         authenticate_http_request, bearer_challenge, extract_bearer, protected_resource_metadata,
         serve, validate_origin,
     };
@@ -1083,5 +1214,86 @@ mod tests {
             validator.validate(&token),
             Err(JwtValidationError::WrongIssuer)
         );
+    }
+
+    struct RecordingVideo {
+        last_request: Cell<Option<SnapshotRequest>>,
+    }
+
+    impl VideoTransport for RecordingVideo {
+        fn capture_snapshot(&self, request: SnapshotRequest) -> io::Result<VideoSnapshot> {
+            self.last_request.set(Some(request));
+            VideoSnapshot::new(
+                request.width,
+                request.height,
+                request.format,
+                4_147_200,
+                [0x5a; 32],
+            )
+            .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "invalid snapshot"))
+        }
+    }
+
+    #[test]
+    fn authorized_video_snapshot_returns_bounded_metadata_and_keeps_audio_disabled() {
+        let scopes = [Scope::Read, Scope::Video];
+        let grant = Grant {
+            audience: "https://kvm.example/mcp",
+            expires_at_unix_seconds: 200,
+            scopes: &scopes,
+            mutation_enabled: false,
+        };
+        let video = RecordingVideo {
+            last_request: Cell::new(None),
+        };
+        let mut server =
+            Server::remote("https://kvm.example/mcp", 100, grant).with_video(&video);
+        initialize(&mut server);
+        let tools = response(
+            &mut server,
+            r#"{"jsonrpc":"2.0","id":20,"method":"tools/list"}"#,
+        );
+        assert_eq!(tools["result"]["tools"].as_array().map(Vec::len), Some(2));
+
+        let status = response(
+            &mut server,
+            r#"{"jsonrpc":"2.0","id":21,"method":"tools/call","params":{"name":"kvm.status","arguments":{}}}"#,
+        );
+        assert_eq!(status["result"]["structuredContent"]["videoEnabled"], true);
+        assert_eq!(
+            status["result"]["structuredContent"]["audioCaptureEnabled"],
+            false
+        );
+        assert_eq!(
+            status["result"]["structuredContent"]["audioOutputEnabled"],
+            false
+        );
+
+        let snap = response(
+            &mut server,
+            r#"{"jsonrpc":"2.0","id":22,"method":"tools/call","params":{"name":"kvm.video.snapshot","arguments":{"width":1920,"height":1080,"format":"yuv422p","deadlineMs":2000}}}"#,
+        );
+        assert_eq!(snap["result"]["structuredContent"]["width"], 1920);
+        assert_eq!(snap["result"]["structuredContent"]["height"], 1080);
+        assert_eq!(snap["result"]["structuredContent"]["format"], "yuv422p");
+        assert_eq!(
+            snap["result"]["structuredContent"]["byteLength"],
+            4_147_200
+        );
+        assert_eq!(
+            snap["result"]["structuredContent"]["sha256"],
+            "5a".repeat(32)
+        );
+        let recorded = video.last_request.get();
+        assert_eq!(
+            recorded.map(|req| req.format),
+            Some(SnapshotFormat::Yuv422p)
+        );
+
+        let invalid = response(
+            &mut server,
+            r#"{"jsonrpc":"2.0","id":23,"method":"tools/call","params":{"name":"kvm.video.snapshot","arguments":{"width":3840}}}"#,
+        );
+        assert_eq!(invalid["error"]["code"], -32602);
     }
 }
