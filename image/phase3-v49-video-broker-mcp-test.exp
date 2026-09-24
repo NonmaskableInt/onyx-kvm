@@ -1,0 +1,58 @@
+#!/usr/bin/expect -f
+
+set timeout 30
+set credential_path [lindex $argv 0]
+set mode [lindex $argv 1]
+set fh [open $credential_path r]
+set credential_text [read $fh]
+close $fh
+if {![regexp -line {^password=(.*)$} $credential_text -> password]} { exit 2 }
+
+spawn /usr/bin/sudo /usr/bin/cu -l /dev/cu.usbserial-112440 -s 115200
+expect {
+    -re {Connected\.} {}
+    timeout { exit 7 }
+}
+send "\r"
+set logged_in 0
+set tries 0
+while {$tries < 12} {
+    set timeout 10
+    expect {
+        -re {# $} { set logged_in 1; break }
+        -re {login: *$} { break }
+        timeout { incr tries; send "\r" }
+    }
+}
+set timeout 30
+if {!$logged_in} {
+    send "root\r"
+    expect { -re {Password: *$} {} timeout { send "~."; exit 4 } }
+    log_user 0
+    send -- "$password\r"
+    log_user 1
+    expect { -re {# $} {} timeout { send "~."; exit 5 } }
+}
+unset password
+unset credential_text
+
+proc run_command {command} {
+    send -- "$command\r"
+    expect {
+        -re {# $} {}
+        timeout { send "~."; exit 6 }
+    }
+}
+
+if {$mode eq "update"} {
+    run_command {/etc/init.d/S50cleankvmd stop 2>/dev/null || true; /etc/init.d/S47cleankvm-video-broker stop 2>/dev/null || true; killall cleankvmd cleankvm-video-broker 2>/dev/null || true; rm -f /run/cleankvm/video.sock /tmp/cleankvmd /tmp/cleankvm-video-broker}
+    run_command {wget -q -O /tmp/cleankvmd http://192.168.2.1:18080/phase2-rust/cleankvmd && test "$(sha256sum /tmp/cleankvmd | awk '{print $1}')" = "98fe72b6bfd80114708a97f9418f513564a5b2fa93100738933c61c436d8af20" && install -m 0755 /tmp/cleankvmd /usr/bin/cleankvmd && rm -f /tmp/cleankvmd && echo CLEANKVMD_UPDATED_OK}
+    run_command {wget -q -O /tmp/cleankvm-video-broker http://192.168.2.1:18080/phase3-rust/cleankvm-video-broker && test "$(sha256sum /tmp/cleankvm-video-broker | awk '{print $1}')" = "bcee855c38024d79ae927b5ada05d59939b26e11ca2ac7457a176ee1041f108d" && install -m 0755 /tmp/cleankvm-video-broker /usr/bin/cleankvm-video-broker && rm -f /tmp/cleankvm-video-broker && echo BROKER_UPDATED_OK}
+    run_command {/etc/init.d/S47cleankvm-video-broker start && /etc/init.d/S50cleankvmd start && sleep 1 && touch /run/cleankvm/video-enabled && printf 'PIDS=%s,%s\n' "$(pidof cleankvm-video-broker)" "$(pidof cleankvmd)"}
+} elseif {$mode eq "enable"} {
+    run_command {touch /run/cleankvm/video-enabled && ls -l /run/cleankvm/video-enabled /run/cleankvm/video.sock}
+} elseif {$mode eq "read"} {
+    run_command {rm -f /run/cleankvm/video-enabled; sync; sha256sum /usr/bin/cleankvmd /usr/bin/cleankvm-video-broker; test ! -e /run/cleankvm-frame.yuv422p; echo FRAME_ABSENT_RC=$?; test ! -e /dev/mem; echo DEVMEM_ABSENT_RC=$?; printf 'FINAL_LOADED='; awk '$1 ~ /^soph_/ {printf "%s,", $1}' /proc/modules; echo; printf 'POST_TAINT='; cat /proc/sys/kernel/tainted}
+}
+send "~."
+expect eof

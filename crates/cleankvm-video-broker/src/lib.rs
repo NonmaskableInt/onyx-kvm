@@ -9,6 +9,7 @@ use core::fmt;
 use sha2::{Digest, Sha256};
 
 pub const FRAME_LEN: usize = WIRE_HEADER_BYTES + SNAPSHOT_REQUEST_BYTES;
+pub const EXPECTED_YUV420P_1080P_BYTES: usize = 1920 * 1080 * 3 / 2;
 pub const EXPECTED_YUV422P_1080P_BYTES: usize = 1920 * 1080 * 2;
 
 #[derive(Debug, Eq, PartialEq)]
@@ -66,12 +67,15 @@ pub fn decode_and_authorize(
     Ok(request)
 }
 
-/// Validate a captured 1920x1080 YUV422P frame buffer and construct its wire response.
+/// Validate a captured 1920x1080 planar YUV frame buffer and construct its wire response.
 ///
 /// # Errors
-/// Rejects buffers whose length does not exactly equal `4,147,200` bytes.
+/// Rejects buffers whose length does not equal `3,110,400` or `4,147,200` bytes.
 pub fn summarize_yuv422p_frame(bytes: &[u8]) -> Result<VideoSnapshot, BrokerError> {
-    if bytes.len() != EXPECTED_YUV422P_1080P_BYTES {
+    if !matches!(
+        bytes.len(),
+        EXPECTED_YUV420P_1080P_BYTES | EXPECTED_YUV422P_1080P_BYTES
+    ) {
         return Err(BrokerError::Validation(ValidationError::InvalidLength));
     }
     let byte_length = u32::try_from(bytes.len())
@@ -140,6 +144,11 @@ mod tests {
         assert_eq!(summary.height, 1080);
         assert_eq!(summary.byte_length, 4_147_200);
         assert_eq!(summary.sha256_hex().len(), 64);
+
+        let two_plane_buffer = vec![0x24_u8; EXPECTED_YUV420P_1080P_BYTES];
+        let two_plane_summary = summarize_yuv422p_frame(&two_plane_buffer)
+            .unwrap_or_else(|error| panic!("valid 2-plane 1080p buffer failed: {error}"));
+        assert_eq!(two_plane_summary.byte_length, 3_110_400);
 
         assert_eq!(
             summarize_yuv422p_frame(&[0_u8; 1024]),

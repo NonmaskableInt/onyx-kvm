@@ -2092,3 +2092,38 @@ All tests executed holding HDMI input, link timings, and lane parameters fixed a
    - In all runs, all six quarantined modules unloaded cleanly with RC=0 (`soph_vpss`, `soph_vi`, `soph_snsr_i2c`,
      `soph_mipi_rx`, `soph_base`, `soph_sys`), leaving `/proc/modules` empty, no frame file created, and kernel taint
      maintained at 4096.
+
+## End-to-end Phase 3 video snapshot admission (v49, 2026-09-24)
+
+Following the MIPI RX pinmux (`0x0300116c..0x03001190 = 0x3`) and pad pull-down
+(`0x03001c30..0x03001c5c = 0x48`) resolution in tracked patch `0027` (verified on
+cold-booted v48 hardware with `EccErr=1, CrcErr=0, HdrErr=0, WcErr=0`,
+`VICsiCh0HeightLSCnt=0`, and `VIPreFECh0Cnt=126`), the privileged Rust video
+broker (`crates/cleankvm-video-broker`) and authenticated HTTPS MCP
+`kvm.video.snapshot` path were integrated into the v49 SD image
+(`out/phase3-video-broker-v49/cleankvm-phase1.img`, `79,692,288` bytes, SHA-256
+`05394aca602c8fa95b72fce290db181c94eb3f1fb3bda2cf0b3e8c7ab48f3251`,
+`rootfs.ext4` SHA-256
+`a16e0ab0455eef8dbd5570135770ae074aa40b272db2dbe40061b428d4e36fd9`,
+`/usr/bin/cleankvmd` SHA-256
+`98fe72b6bfd80114708a97f9418f513564a5b2fa93100738933c61c436d8af20`,
+`/usr/bin/cleankvm-video-broker` SHA-256
+`bcee855c38024d79ae927b5ada05d59939b26e11ca2ac7457a176ee1041f108d`).
+
+### Live Hardware Verification (`192.168.2.97` / `https://cleankvm-recovery:8443/mcp`)
+
+1. **Cold-Boot Fail-Closed Gate (Before `/run/cleankvm/video-enabled`)**:
+   - `PRE_TAINT=0`, `DEVMEM_ABSENT_RC=0`, `PRELOADED=` empty, `VIDEO_DISABLED_BY_DEFAULT_RC=0`.
+   - `/etc/init.d/S47cleankvm-video-broker` created `/run/cleankvm/video.sock` (`0660 root:cleankvm`, `SO_PEERCRED` `UID 900`).
+   - Authenticated HTTPS `tools/list` (`EdDSA` `at+jwt` with `scope="kvm:read kvm:video"`) returned only `kvm.status`.
+   - Authenticated HTTPS `tools/call kvm.status` returned `videoEnabled: false`, `audioCaptureEnabled: false`, `audioOutputEnabled: false`.
+   - Authenticated HTTPS `tools/call kvm.video.snapshot` returned `-32602` (`"Unknown or disabled tool"`).
+
+2. **Admitted Snapshot Capture Gate (With `/run/cleankvm/video-enabled`)**:
+   - Authenticated HTTPS `tools/list` exposed `kvm.status` and `kvm.video.snapshot`.
+   - Authenticated HTTPS `tools/call kvm.status` returned `videoEnabled: true`, `audioCaptureEnabled: false`, `audioOutputEnabled: false` (Phase 3a audio/microphone boundaries remain fail-closed).
+   - Authenticated HTTPS `tools/call kvm.video.snapshot` (both with explicit `{"deadlineMs":5000}` and with omitted `arguments`) succeeded over `/run/cleankvm/video.sock`:
+     - `{"byteLength":3110400,"format":"yuv422p","height":1080,"sha256":"23ed026e237b68bb087a8cfa258435a0265ad24f6007d39c8b74fb063690d848","width":1920}`
+     - `{"byteLength":3110400,"format":"yuv422p","height":1080,"sha256":"8f0bdd7ef6ea7326d39d4570ba0dea1ec0ec304a44b33cd3d2e243541003f204","width":1920}`
+   - Post-capture UART audit confirmed `FRAME_ABSENT_RC=0` (`/run/cleankvm-frame.yuv422p` removed immediately after hashing), `DEVMEM_ABSENT_RC=0`, `FINAL_LOADED=` empty (all 6 quarantine modules reverse-unloaded cleanly), and `POST_TAINT=4096`.
+

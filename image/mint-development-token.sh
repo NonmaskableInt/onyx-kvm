@@ -1,10 +1,10 @@
 #!/bin/sh
 set -eu
 
-issuer_key=${1:?usage: mint-development-token.sh ISSUER_PRIVATE_KEY ISSUER AUDIENCE OUTPUT_FILE [read-only|hid-control]}
-issuer=${2:?usage: mint-development-token.sh ISSUER_PRIVATE_KEY ISSUER AUDIENCE OUTPUT_FILE [read-only|hid-control]}
-audience=${3:?usage: mint-development-token.sh ISSUER_PRIVATE_KEY ISSUER AUDIENCE OUTPUT_FILE [read-only|hid-control]}
-output_file=${4:?usage: mint-development-token.sh ISSUER_PRIVATE_KEY ISSUER AUDIENCE OUTPUT_FILE [read-only|hid-control]}
+issuer_key=${1:?usage: mint-development-token.sh ISSUER_PRIVATE_KEY ISSUER AUDIENCE OUTPUT_FILE [read-only|hid-control|video-snapshot]}
+issuer=${2:?usage: mint-development-token.sh ISSUER_PRIVATE_KEY ISSUER AUDIENCE OUTPUT_FILE [read-only|hid-control|video-snapshot]}
+audience=${3:?usage: mint-development-token.sh ISSUER_PRIVATE_KEY ISSUER AUDIENCE OUTPUT_FILE [read-only|hid-control|video-snapshot]}
+output_file=${4:?usage: mint-development-token.sh ISSUER_PRIVATE_KEY ISSUER AUDIENCE OUTPUT_FILE [read-only|hid-control|video-snapshot]}
 profile=${5:-read-only}
 
 test -f "$issuer_key"
@@ -27,6 +27,10 @@ case "$profile" in
     hid-control)
         scope='kvm:read kvm:control'
         mutation=true
+        ;;
+    video-snapshot)
+        scope='kvm:read kvm:video'
+        mutation=false
         ;;
     *) printf 'unknown development token profile: %s\n' "$profile" >&2; exit 1 ;;
 esac

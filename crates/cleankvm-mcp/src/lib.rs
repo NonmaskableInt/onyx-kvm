@@ -685,7 +685,7 @@ impl<'a> Server<'a> {
 
 fn parse_snapshot_arguments(arguments: Option<&Value>) -> Option<SnapshotRequest> {
     let Some(arguments) = arguments else {
-        return SnapshotRequest::new(1920, 1080, SnapshotFormat::Yuv422p, 2_000).ok();
+        return SnapshotRequest::new(1920, 1080, SnapshotFormat::Yuv422p, 5_000).ok();
     };
     let object = arguments.as_object()?;
     for key in object.keys() {
@@ -712,7 +712,7 @@ fn parse_snapshot_arguments(arguments: Option<&Value>) -> Option<SnapshotRequest
     };
     let deadline_ms = match object.get("deadlineMs") {
         Some(value) => u16::try_from(value.as_u64()?).ok()?,
-        None => 2_000,
+        None => 5_000,
     };
     SnapshotRequest::new(width, height, format, deadline_ms).ok()
 }

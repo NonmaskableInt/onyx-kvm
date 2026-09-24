@@ -63,7 +63,7 @@ struct BrokerVideo;
 impl VideoTransport for BrokerVideo {
     fn capture_snapshot(&self, request: SnapshotRequest) -> io::Result<VideoSnapshot> {
         let mut stream = UnixStream::connect(VIDEO_SOCKET)?;
-        let timeout = Duration::from_millis(u64::from(request.deadline_ms));
+        let timeout = TIMEOUT.max(Duration::from_millis(u64::from(request.deadline_ms)));
         stream.set_read_timeout(Some(timeout))?;
         stream.set_write_timeout(Some(timeout))?;
         let payload = request.encode();

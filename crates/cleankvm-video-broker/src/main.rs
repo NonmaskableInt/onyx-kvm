@@ -1,8 +1,9 @@
 use cleankvm_video_broker::{
-    EXPECTED_YUV422P_1080P_BYTES, FRAME_LEN, decode_and_authorize, summarize_yuv422p_frame,
+    EXPECTED_YUV420P_1080P_BYTES, EXPECTED_YUV422P_1080P_BYTES, FRAME_LEN, decode_and_authorize,
+    summarize_yuv422p_frame,
 };
 use std::env;
-use std::fs::{self, Permissions};
+use std::fs::{self, File, Permissions};
 use std::io::{self, Read, Write};
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::{UnixListener, UnixStream};
@@ -104,7 +105,7 @@ fn serve(mut stream: UnixStream, config: &Config) -> io::Result<()> {
     stream.set_write_timeout(Some(Duration::from_secs(10)))?;
     let mut frame = [0_u8; FRAME_LEN];
     stream.read_exact(&mut frame)?;
-    let enabled = config.enable.is_file();
+    let enabled = File::open(&config.enable).is_ok();
     let _request = decode_and_authorize(&frame, enabled)
         .map_err(|error| io::Error::new(io::ErrorKind::PermissionDenied, error.to_string()))?;
     let snapshot = capture_bounded_frame(config)?;
@@ -155,15 +156,20 @@ fn capture_bounded_frame(
     if !status.success() {
         return Err(io::Error::other("raw frame probe exited with failure"));
     }
-    let metadata = fs::metadata(&config.frame_path)?;
-    if metadata.len() != u64::try_from(EXPECTED_YUV422P_1080P_BYTES).unwrap_or(0) {
+    let file = File::open(&config.frame_path)?;
+    let mut bytes = Vec::with_capacity(EXPECTED_YUV422P_1080P_BYTES);
+    file.take((EXPECTED_YUV422P_1080P_BYTES + 1) as u64)
+        .read_to_end(&mut bytes)?;
+    remove_if_exists(&config.frame_path)?;
+    if !matches!(
+        bytes.len(),
+        EXPECTED_YUV420P_1080P_BYTES | EXPECTED_YUV422P_1080P_BYTES
+    ) {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
-            "captured frame size mismatch",
+            format!("captured frame size mismatch: {} bytes", bytes.len()),
         ));
     }
-    let bytes = fs::read(&config.frame_path)?;
-    remove_if_exists(&config.frame_path)?;
     summarize_yuv422p_frame(&bytes)
         .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error.to_string()))
 }
