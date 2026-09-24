@@ -1,7 +1,89 @@
 # Phase 3 video admission
 
-Status: diagnostic modules are present only in a non-autoload quarantine;
-video capture, streaming, and MCP exposure are not admitted.
+Status: first complete 1920x1080 YUV422P hardware video frame captured and
+verified under CleanKVM with zero `/dev/mem` exposure and clean reverse module
+unload; diagnostic modules remain in non-autoload quarantine while the Rust
+video capture pipeline and MCP exposure are integrated. Audio and microphone
+remain fail-closed.
+
+## First hardware video frame captured: MIPI RX pinmux and pad pull-down resolution (2026-09-23)
+
+Following the settle table sweep on the SG2002 platform kernel (v43), offline
+attribution of the remaining D3 (`PAD_MIPIRX0N`) instability and packet header
+corruption identified two coupled software/hardware boundary conditions:
+
+1. **Physical Lane 0 (`PAD_MIPIRX0N`, `0x0300118c`) Pinmux Conflict**:
+   - In stock userspace (`libkvm_mmf.so`), `lt6911_probe` executes
+     `system("devmem 0x0300118C 32 0x3")` via `/dev/mem` immediately prior to
+     capture, overriding `/etc/init.d/S02config`'s beta-board assignment of
+     function 5 (`CAM_MCLK1`) back to function 3 (`MIPI_RX`).
+   - Because CleanKVM removes `/dev/mem` and never executes vendor binaries or
+     init scripts, `0x0300118c` remained at function 5 (`CAM_MCLK1`), actively
+     driving a camera clock output onto the negative leg of physical lane 0
+     (logical D3). In addition, `PAD_MIPIRX4N` (`0x0300116c`) and
+     `PAD_MIPIRX4P` (`0x03001170`) remained at function 0 (`XGPIOC`) instead of
+     function 3 (`MIPI_RX`).
+   - Driving `CAM_MCLK1` onto `PAD_MIPIRX0N` corrupted the differential pair on
+     D3, flipping bit 0 of the MIPI CSI-2 Data Identifier (shifting `0x1E`
+     `YUV422-8` to `0x1F` `YUV422-10`), saturating the 16-bit ECC error counter
+     at 65,536, and causing `CSIBDG` frame height underflow.
+
+2. **MIPI Pad Pull-Down Enforcement (`0x48`)**:
+   - SG2002 hardware resets the twelve MIPI P/N pad control words (`0x03001c30`
+     through `0x03001c5c`) to `0x48` (`PAD_CTRL_PD` bit 3 set, `PAD_CTRL_PU`
+     bit 2 clear).
+   - Earlier driver code in `_cif_set_attr_mipi` cleared both pull bits
+     (`value &= ~(PAD_CTRL_PU | PAD_CTRL_PD)`), driving the pad words to `0x40`
+     where they persisted across module unloads until reboot.
+
+### Tracked source fix (`0027-cif-enforce-pad-pulls-and-mipi-rx-pinmux.patch`)
+
+Tracked patch `image/patches/0027-cif-enforce-pad-pulls-and-mipi-rx-pinmux.patch`
+implements both fixes directly inside `soph_mipi_rx.ko` (`cif.c`) without
+`/dev/mem` or userspace helpers:
+- During `_init_resource`, saves all ten MIPI RX pinmux registers (`0x0300116c`
+  through `0x03001190`) and configures all ten pads to function `0x3`
+  (`MIPI_RX`), restoring the saved words in `cvi_cif_remove` on module unload.
+- Initializes all six MIPI pad pairs (`0x03001c30` through `0x03001c5c`) and
+  updates `_cif_set_attr_mipi`, `_cif_set_attr_sublvds`, and
+  `_cif_set_attr_hispi` to unconditionally enforce `(v & ~PAD_CTRL_PU) | PAD_CTRL_PD`
+  (`0x48`).
+
+The offline-built module (`out/phase3-pad-pulls-enforced-v47/soph_mipi_rx.ko`)
+has SHA-256 `e93d36dcc9bcc242d882547b8183339278fb5945c387ce5b8bb03ed33a551835`
+(compressed transfer SHA-256
+`4e9e7847e4933bc206dd7fbb356d999f8cd02ffece90adbe4221d51938155dd8`).
+
+### Hardware verification and frame admission result
+
+`image/phase3-enforced-pad-pulls-test.exp` verified both payload hashes on
+target, confirmed `/dev/mem` absent (`DEVMEM_ABSENT_RC=0`), verified pre-load
+module state empty, loaded the six-module allowlist with stock deskew
+(`lane_phase=0,8,8,3,3`, `csi_ck_phase=0`, `hs_settle=8`), and executed
+`/usr/libexec/cleankvm-raw-frame-probe 0 1080 8 0,0,0,0,0 2,4,3,1,0`:
+
+| Metric | Previous Baseline (v43) | Patched Hardware Result (v47 / `0027`) |
+| --- | --- | --- |
+| `PAD_MIPIRX4N..0P` Pinmux (`0x0300116c..1190`) | `0,0,3,3,3,3,3,3,5,3` | All ten set to `0x3` (`MIPI_RX`) |
+| Pad Control (`0x03001c30..1c5c`) | Cleared to `0x40` | All twelve enforced at `0x48` |
+| Digital Lane State (`D0..D3`) | `D3` unstable / `hs_err` | **`D0=hs_hst, D1=hs_hst, D2=hs_hst, D3=hs_hst`** (all 4 locked) |
+| Deskew State | `idle` / incomplete | **`done`** |
+| Decoded Format | `yuv422-10` / `raw10` | **`yuv422-8`** |
+| Receiver Counters (`EccErr / CrcErr / HdrErr / WcErr / fifofull`) | `65536 / 4 / 0 / 1991 / 0` | **`1 / 0 / 0 / 1 / 0`** |
+| VI Frame Counters (`VISofCh0Cnt / VIPreFECh0Cnt`) | `95875 / 0` | **`97 / 125`** (`VIFPS=60`, `VIDevFPS=47`) |
+| Height Underflow (`VICsiCh0HeightLSCnt`) | `1` | **`0`** |
+| Probe Return Code (`PROBE_RC`) | `1` (`0xc00e8040`) | **`0`** |
+| Captured Frame (`/run/cleankvm-frame.yuv422p`) | Absent | **4,147,200 bytes** (`1920x1080` `YUV422P`, format 19) |
+| Frame SHA-256 | n/a | `7c0b2f1de2356e98a842ffe499491a3019a94e81e87ab85b9e60261864809761` |
+
+Containment and cleanup verified cleanly:
+- The captured frame was hashed and removed from `/run`.
+- All six modules reverse-unloaded in order (`soph_vpss`, `soph_vi`,
+  `soph_snsr_i2c`, `soph_mipi_rx`, `soph_base`, `soph_sys`) with return code 0
+  for every module, restoring the saved pinmux words on exit.
+- `/tmp/soph_mipi_rx.ko` was deleted (`MODULE_CLEANUP_RC=0`).
+- Final `/proc/modules` remainder was empty (`FINAL_LOADED=`), and post-taint
+  remained at `4096`.
 
 ## Settle table sweep on SG2002 platform kernel (2026-09-23)
 

@@ -1,0 +1,135 @@
+diff --git a/osdrv/interdrv/v2/cif/chip/mars/cif.c b/osdrv/interdrv/v2/cif/chip/mars/cif.c
+index d9fcad46c..aeedeea73 100644
+--- a/osdrv/interdrv/v2/cif/chip/mars/cif.c
++++ b/osdrv/interdrv/v2/cif/chip/mars/cif.c
+@@ -119,6 +119,14 @@ static void __iomem *cleankvm_rx0n_mux;
+ static u32 cleankvm_rx0n_mux_saved;
+ static bool cleankvm_rx0n_mux_applied;
+ 
++/* CleanKVM permanent MIPI pinmux configuration:
++ * The LT6911UXC uses all five MIPI RX pairs (10 pads from 0x0300116c to 0x03001190).
++ * Function 3 selects MIPI RX mode for all 10 pads. We save the pre-probe state
++ * and restore it on module unload to maintain strict fail-closed cleanliness.
++ */
++static u32 cleankvm_saved_pinmux[10];
++static bool cleankvm_pinmux_applied;
++
+ static int bypass_mac_clk;
+ module_param(bypass_mac_clk, int, 0644);
+ MODULE_PARM_DESC(bypass_mac_clk, "byass mac clk");
+@@ -562,18 +570,14 @@ static int _cif_set_attr_mipi(struct cvi_cif_dev *dev,
+ 
+ 			v0 = ioread32(dev->pad_ctrl + PSD_CTRL_OFFSET(attr->lane_id[i]));
+ 			v1 = ioread32(dev->pad_ctrl + PSD_CTRL_OFFSET(attr->lane_id[i]) + 4);
+-			if (cif_diagnostic_preserve_pad_pulls) {
+-				pr_info("cif: lane_id[%d]=%d preserved pad PU/PD: P=0x%x N=0x%x\n",
+-					i, attr->lane_id[i], v0, v1);
+-			} else {
+-				value = v0 & ~(PAD_CTRL_PU | PAD_CTRL_PD);
+-				iowrite32(value, dev->pad_ctrl + PSD_CTRL_OFFSET(attr->lane_id[i]));
+-				value = v1 & ~(PAD_CTRL_PU | PAD_CTRL_PD);
+-				iowrite32(value, dev->pad_ctrl + PSD_CTRL_OFFSET(attr->lane_id[i]) + 4);
+-				pr_info("cif: lane_id[%d]=%d cleared pad PU/PD: P(0x%x->0x%x) N(0x%x->0x%x)\n",
+-					i, attr->lane_id[i], v0, (u32)(v0 & ~(PAD_CTRL_PU | PAD_CTRL_PD)),
+-					v1, (u32)(v1 & ~(PAD_CTRL_PU | PAD_CTRL_PD)));
+-			}
++			/* Unconditionally enforce stock pad pull-downs (0x48) on every configured lane */
++			value = (v0 & ~PAD_CTRL_PU) | PAD_CTRL_PD;
++			iowrite32(value, dev->pad_ctrl + PSD_CTRL_OFFSET(attr->lane_id[i]));
++			value = (v1 & ~PAD_CTRL_PU) | PAD_CTRL_PD;
++			iowrite32(value, dev->pad_ctrl + PSD_CTRL_OFFSET(attr->lane_id[i]) + 4);
++			pr_info("cif: lane_id[%d]=%d set pad PD: P(0x%x->0x%x) N(0x%x->0x%x)\n",
++				i, attr->lane_id[i], v0, (u32)((v0 & ~PAD_CTRL_PU) | PAD_CTRL_PD),
++				v1, (u32)((v1 & ~PAD_CTRL_PU) | PAD_CTRL_PD));
+ 		}
+ 		tbl &= ~(1<<attr->lane_id[i]);
+ 		j++;
+@@ -801,14 +805,14 @@ static int _cif_set_attr_sublvds(struct cvi_cif_dev *dev,
+ 			u32 v0, v1;
+ 
+ 			v0 = ioread32(dev->pad_ctrl + PSD_CTRL_OFFSET(attr->lane_id[i]));
+-			value = v0 & ~(PAD_CTRL_PU | PAD_CTRL_PD);
++			value = (v0 & ~PAD_CTRL_PU) | PAD_CTRL_PD;
+ 			iowrite32(value, dev->pad_ctrl + PSD_CTRL_OFFSET(attr->lane_id[i]));
+ 			v1 = ioread32(dev->pad_ctrl + PSD_CTRL_OFFSET(attr->lane_id[i]) + 4);
+-			value = v1 & ~(PAD_CTRL_PU | PAD_CTRL_PD);
++			value = (v1 & ~PAD_CTRL_PU) | PAD_CTRL_PD;
+ 			iowrite32(value, dev->pad_ctrl + PSD_CTRL_OFFSET(attr->lane_id[i]) + 4);
+-			pr_info("cif: lane_id[%d]=%d cleared pad PU/PD: P(0x%x->0x%x) N(0x%x->0x%x)\n",
+-				i, attr->lane_id[i], v0, (u32)(v0 & ~(PAD_CTRL_PU | PAD_CTRL_PD)),
+-				v1, (u32)(v1 & ~(PAD_CTRL_PU | PAD_CTRL_PD)));
++			pr_info("cif: lane_id[%d]=%d set pad PD: P(0x%x->0x%x) N(0x%x->0x%x)\n",
++				i, attr->lane_id[i], v0, (u32)((v0 & ~PAD_CTRL_PU) | PAD_CTRL_PD),
++				v1, (u32)((v1 & ~PAD_CTRL_PU) | PAD_CTRL_PD));
+ 		}
+ 		tbl &= ~(1<<attr->lane_id[i]);
+ 		j++;
+@@ -1021,14 +1025,14 @@ static int _cif_set_attr_hispi(struct cvi_cif_dev *dev,
+ 			u32 v0, v1;
+ 
+ 			v0 = ioread32(dev->pad_ctrl + PSD_CTRL_OFFSET(attr->lane_id[i]));
+-			value = v0 & ~(PAD_CTRL_PU | PAD_CTRL_PD);
++			value = (v0 & ~PAD_CTRL_PU) | PAD_CTRL_PD;
+ 			iowrite32(value, dev->pad_ctrl + PSD_CTRL_OFFSET(attr->lane_id[i]));
+ 			v1 = ioread32(dev->pad_ctrl + PSD_CTRL_OFFSET(attr->lane_id[i]) + 4);
+-			value = v1 & ~(PAD_CTRL_PU | PAD_CTRL_PD);
++			value = (v1 & ~PAD_CTRL_PU) | PAD_CTRL_PD;
+ 			iowrite32(value, dev->pad_ctrl + PSD_CTRL_OFFSET(attr->lane_id[i]) + 4);
+-			pr_info("cif: lane_id[%d]=%d cleared pad PU/PD: P(0x%x->0x%x) N(0x%x->0x%x)\n",
+-				i, attr->lane_id[i], v0, (u32)(v0 & ~(PAD_CTRL_PU | PAD_CTRL_PD)),
+-				v1, (u32)(v1 & ~(PAD_CTRL_PU | PAD_CTRL_PD)));
++			pr_info("cif: lane_id[%d]=%d set pad PD: P(0x%x->0x%x) N(0x%x->0x%x)\n",
++				i, attr->lane_id[i], v0, (u32)((v0 & ~PAD_CTRL_PU) | PAD_CTRL_PD),
++				v1, (u32)((v1 & ~PAD_CTRL_PU) | PAD_CTRL_PD));
+ 		}
+ 		tbl &= ~(1<<attr->lane_id[i]);
+ 		j++;
+@@ -2989,6 +2993,28 @@ static int _init_resource(struct platform_device *pdev)
+ 			 "pad-ctrl res-reg: start: 0x%llx, end: 0x%llx.",
+ 			 res->start, res->end);
+ 		dev_info(&pdev->dev, " virt-addr(%p)\n", dev->pad_ctrl);
++		{
++			void __iomem *pinmux = devm_ioremap(&pdev->dev, 0x0300116c, 0x28);
++			if (pinmux) {
++				int k;
++				for (k = 0; k < 10; k++) {
++					cleankvm_saved_pinmux[k] = readl(pinmux + k * 4);
++					writel(0x3, pinmux + k * 4);
++					pr_info("cif pinmux [0x%08x] 0x%08x -> 0x%08x\n",
++						0x0300116c + k * 4, cleankvm_saved_pinmux[k], readl(pinmux + k * 4));
++				}
++				cleankvm_pinmux_applied = true;
++			}
++		}
++		for (i = 0; i < 6; i++) {
++			u32 p = ioread32(dev->pad_ctrl + i * 8);
++			u32 n = ioread32(dev->pad_ctrl + i * 8 + 4);
++			iowrite32((p & ~PAD_CTRL_PU) | PAD_CTRL_PD, dev->pad_ctrl + i * 8);
++			iowrite32((n & ~PAD_CTRL_PU) | PAD_CTRL_PD, dev->pad_ctrl + i * 8 + 4);
++			pr_info("cif: init pad_ctrl lane[%d]: P(0x%x->0x%x) N(0x%x->0x%x)\n",
++				5 - i, p, (u32)((p & ~PAD_CTRL_PU) | PAD_CTRL_PD),
++				n, (u32)((n & ~PAD_CTRL_PU) | PAD_CTRL_PD));
++		}
+ 	}
+ 
+ 	/* Init max mac clock. */
+@@ -3526,6 +3552,19 @@ static int cvi_cif_remove(struct platform_device *pdev)
+ 	}
+ 
+ 	cleankvm_restore_rx0n_mux(&pdev->dev);
++	if (cleankvm_pinmux_applied) {
++		void __iomem *pinmux = ioremap(0x0300116c, 0x28);
++		if (pinmux) {
++			int k;
++			for (k = 0; k < 10; k++) {
++				writel(cleankvm_saved_pinmux[k], pinmux + k * 4);
++				pr_info("cif pinmux restore [0x%08x] -> 0x%08x\n",
++					0x0300116c + k * 4, readl(pinmux + k * 4));
++			}
++			iounmap(pinmux);
++		}
++		cleankvm_pinmux_applied = false;
++	}
+ 
+ 	/* rm cif_cb */
+ 	if (cif_rm_cb())

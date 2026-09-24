@@ -2,6 +2,71 @@
 
 Updated: 2026-09-23
 
+## First hardware video frame captured: MIPI RX pinmux and pad pull-down resolution (2026-09-23)
+
+Offline attribution of the persistent D3 instability and packet header
+corruption uncovered the root-cause mechanisms:
+
+1. **Physical Lane 0 (`PAD_MIPIRX0N`, `0x0300118c`) Pinmux Conflict**:
+   - Stock `libkvm_mmf.so` in `lt6911_probe` invoked `system("devmem 0x0300118C 32 0x3")`
+     via `/dev/mem` right before capture to override `/etc/init.d/S02config`'s
+     `CAM_MCLK1` function 5 assignment back to function 3 (`MIPI_RX`).
+   - CleanKVM enforces zero `/dev/mem` and forbids stock binaries/scripts, leaving
+     `0x0300118c` at function 5, which actively drove an external camera clock onto
+     the negative leg of differential pair D3! Furthermore, `PAD_MIPIRX4N/P`
+     (`0x0300116c`/`0x03001170`) remained at function 0 rather than function 3.
+   - This signal integrity violation flipped bit 0 of the Data Identifier
+     (corrupting `0x1E` `YUV422-8` into `0x1F` `YUV422-10`), saturated ECC errors
+     at 65,536, and caused height underflows.
+
+2. **Pad Pull-Down Clearing**:
+   - SG2002 power-on reset defaults MIPI pad controls (`0x03001c30..0x03001c5c`)
+     to `0x48` (`PAD_CTRL_PD` bit 3 set).
+   - CleanKVM patch `0012` previously cleared pull-down bits to `0x40`, which
+     persisted until reboot.
+   - Enforcing `(v & ~PAD_CTRL_PU) | PAD_CTRL_PD` (`0x48`) permanently restores
+     the hardware pull-down state.
+
+### Tracked Patch 0027
+
+Tracked patch `image/patches/0027-cif-enforce-pad-pulls-and-mipi-rx-pinmux.patch`
+sets all ten MIPI RX pads (`0x0300116c` through `0x03001190`) to function `0x3`
+in `soph_mipi_rx.ko` with clean restoration on unload, and enforces `0x48`
+pull-downs across all twelve pad registers.
+
+### Breakthrough Hardware Results
+
+Executed via `image/phase3-enforced-pad-pulls-test.exp` on target:
+- `PROBE_RC=0`
+- Frame captured: `1920x1080` `YUV422P` (4,147,200 bytes) at `/run/cleankvm-frame.yuv422p`
+- SHA-256: `7c0b2f1de2356e98a842ffe499491a3019a94e81e87ab85b9e60261864809761`
+- `Digital: D0=hs_hst, D1=hs_hst, D2=hs_hst, D3=hs_hst` (all 4 data lanes locked!)
+- `Deskew: done`
+- `EccErr`: 1 (reduced from 65,536 saturation!)
+- `CrcErr`: 0, `HdrErr`: 0, `WcErr`: 1, `fifofull`: 0
+- `decode: yuv422-8`
+- `VIFPS: 60`, `VIDevFPS: 47`
+- `VISofCh0Cnt: 97`, `VIPreFECh0Cnt: 125` (pre-FE admission gate passed!)
+- `VICsiCh0HeightLSCnt: 0` (height underflow eliminated!)
+- Reverse unload of all 6 modules returned 0, leaving `/proc/modules` empty,
+  `/tmp/soph_mipi_rx.ko` deleted, `/dev/mem` absent, and post-taint at 4096.
+
+### Immediate Next Steps
+
+1. **Full Image Rebuild**:
+   - Cleanly build a new CleanKVM image (v48) containing `0027` integrated into
+     the rootfs and kernel via `image/build-phase1-rootfs.sh` and
+     `image/assemble-phase1-image.sh`.
+2. **Transition to Rust Control Plane Video Capture**:
+   - Transition from standalone C diagnostic probe to the CleanKVM Rust video
+     capture pipeline (`crates/cleankvm_core`, `crates/cleankvm_media_protocol`,
+     `crates/cleankvm_mcp`).
+   - Implement authenticated MCP video streaming interface while keeping audio
+     fail-closed per repository policy.
+3. **Flashing & Hardware Sanity Check**:
+   - Flash the v48 image to SD card and confirm the default system boots with
+     clean video pipeline readiness.
+
 ## Settle table sweep on SG2002 platform kernel (2026-09-23)
 
 A bounded 9-point sweep across HS settle values (8, 10, 12, 14, 16, 18, 20, 22,
