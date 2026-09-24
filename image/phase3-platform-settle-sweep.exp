@@ -1,0 +1,88 @@
+#!/usr/bin/expect -f
+
+# Settle table sweep on SG2002 platform kernel (v43).
+# Evaluates HS settle from stock value 8 through 24 with lanes 2,4,3,1,0 and PN 0,0,0,0,0.
+# Each point runs a contained load/probe/unload cycle.
+
+set timeout 300
+set credential_path [lindex $argv 0]
+
+set fh [open $credential_path r]
+set credential_text [read $fh]
+close $fh
+if {![regexp -line {^password=(.*)$} $credential_text -> password]} {
+    exit 2
+}
+
+spawn /usr/bin/sudo /usr/bin/cu -l /dev/cu.usbserial-112440 -s 115200
+expect {
+    -re {Connected\.} {}
+    timeout { exit 7 }
+}
+send "\003\r"
+set logged_in 0
+expect {
+    -re {# $} { set logged_in 1 }
+    -re {login: *$} {}
+    timeout { send "~."; exit 3 }
+}
+if {!$logged_in} {
+    send "root\r"
+    expect {
+        -re {Password: *$} {}
+        timeout { send "~."; exit 4 }
+    }
+    log_user 0
+    send -- "$password\r"
+    log_user 1
+    expect {
+        -re {# $} {}
+        timeout { send "~."; exit 5 }
+    }
+}
+unset password
+unset credential_text
+
+proc run_command {command} {
+    send -- "$command\r"
+    expect {
+        -re {# $} {}
+        timeout { send "~."; exit 6 }
+    }
+}
+
+set module_dir /usr/lib/cleankvm/video-quarantine
+set frame /run/cleankvm-frame.yuv422p
+
+run_command {echo CLEANKVM_PHASE3_PLATFORM_SETTLE_SWEEP_BEGIN}
+run_command {rm -f /run/cleankvm-frame.yuv422p /tmp/settle-sweep.log}
+run_command {test ! -e /dev/mem; echo DEVMEM_ABSENT_RC=$?}
+run_command {printf 'PRE_TAINT='; cat /proc/sys/kernel/tainted; printf 'PRELOADED='; awk '$1 ~ /^soph_/ {printf "%s,", $1}' /proc/modules; echo}
+
+set settles {8 10 12 14 16 18 20 22 24}
+set test 0
+
+foreach settle $settles {
+    incr test
+    run_command "echo SETTLE_SWEEP_${test}_BEGIN SETTLE=$settle LANES=2,4,3,1,0 PN=0,0,0,0,0"
+    foreach mod {soph_sys soph_base soph_mipi_rx soph_snsr_i2c soph_vi soph_vpss} {
+        run_command "insmod $module_dir/$mod.ko; echo LOAD_${test}_${mod}_RC=\$?"
+    }
+    run_command "/usr/libexec/cleankvm-raw-frame-probe 0 1080 $settle 0,0,0,0,0 2,4,3,1,0 > /tmp/settle-sweep.log 2>&1; rc=\$?; echo PROBE_${test}_RC=\$rc"
+    run_command "grep -E 'CLEANKVM_LANE_PROFILE|CLEANKVM_MIPI_T|Devno EccErr|^ *0 +|Digital:|VISofCh0Cnt|VIPreFECh0Cnt|CVI_VI_GetChnFrame' /tmp/settle-sweep.log || true"
+    run_command "echo SETTLE_SWEEP_${test}_FINAL_MIPI; cat /proc/mipi-rx"
+    run_command "if test -f $frame; then stat -c 'FRAME_BYTES=%s' $frame; sha256sum $frame; else echo FRAME_ABSENT; fi"
+    run_command "rm -f $frame /tmp/settle-sweep.log"
+    foreach mod {soph_vpss soph_vi soph_snsr_i2c soph_mipi_rx soph_base soph_sys} {
+        run_command "rmmod $mod; echo UNLOAD_${test}_${mod}_RC=\$?"
+    }
+    run_command "printf 'SETTLE_SWEEP_${test}_REMAINDER='; awk '\$1 ~ /^soph_/ {printf \"%s,\", \$1}' /proc/modules; echo"
+    run_command "echo SETTLE_SWEEP_${test}_END"
+}
+
+run_command {rm -f /tmp/settle-sweep.log /run/cleankvm-frame.yuv422p}
+run_command {printf 'FINAL_LOADED='; awk '$1 ~ /^soph_/ {printf "%s,", $1}' /proc/modules; echo}
+run_command {printf 'POST_TAINT='; cat /proc/sys/kernel/tainted}
+run_command {echo CLEANKVM_PHASE3_PLATFORM_SETTLE_SWEEP_END}
+send "~."
+expect eof

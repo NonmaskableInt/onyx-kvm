@@ -2,6 +2,70 @@
 
 Updated: 2026-09-23
 
+## Settle table sweep on SG2002 platform kernel (2026-09-23)
+
+A bounded 9-point sweep across HS settle values (8, 10, 12, 14, 16, 18, 20, 22,
+24) was executed on the live SG2002 platform kernel (v43). All tests used lanes
+`2,4,3,1,0` and zero PN swaps. Pre-test baseline confirmed `/dev/mem` absent and
+preloaded modules empty. Each point completed a fresh load/probe/unload cycle:
+
+| Settle | T100ms ECC/CRC/WC | Final T5000ms ECC/CRC/WC | Final Decode | SOF Count | Pre-FE Count |
+| ---: | --- | --- | --- | ---: | ---: |
+| 8 (stock) | `5061/0/152` | `65536/4/1991` | `yuv422-10` | 95,875 | 0 |
+| 10 | `5009/0/170` | `65536/1/1950` | `raw10` | 98,823 | 0 |
+| 12 | `5088/0/158` | `65536/2/1929` | `yuv422-10` | 101,209 | 0 |
+| 14 | `5083/11/148` | `65536/119/2047` | `yuv422-8` | 98,805 | 0 |
+| 16 (clean default) | `4745/709/103` | `65536/8952/1445` | `yuv422-8` | 63,840 | 0 |
+| 18 | `5386/165/127` | `65536/1785/1696` | `yuv422-8` | 80,106 | 0 |
+| 20 | `4877/1/164` | `65536/4/1963` | `raw12` | 91,878 | 0 |
+| 22 | `4615/1/116` | `65536/3/2085` | `yuv422-10` | 88,856 | 0 |
+| 24 | `1/0/0` | `1/0/0` | `unknown` | 0 | 0 |
+
+Findings:
+1. Stock uses **settle 8** (`REG_10 = 0x00000208`), not 16.
+2. At stock settle 8 (and 10, 12), CRC errors are minimal (1 to 4), but ECC saturates
+   and decoded packet format shifts from expected `yuv422-8` to `yuv422-10`/`raw10`.
+3. Settle 14, 16, 18 preserve `yuv422-8` decoding, but suffer elevated CRC errors
+   (peaking at 8,952 at settle 16).
+4. Settle 24 completely halts reception (SOF drops to 0).
+5. In all active points, ECC saturates at 65,536, Pre-FE remains at 0, and no frame
+   is admitted.
+
+All 54 loads and reverse unloads returned zero (`UNLOAD_*_RC=0`). Final loaded
+modules remained empty, no lingering video nodes or files remained, and final
+taint was 4096. Video remains fail-closed.
+
+## SG2002 platform kernel support excluded as CSI packet discriminator (2026-09-23)
+
+The rebuilt CleanKVM v43 image was flashed to hardware and booted with all six
+SG2002 platform selections enabled (`ARCH_CVITEK`, `SOC_THEAD`, `ARCH_CV181X`,
+`ARCH_CV181X_ASIC`, `CVITEK_PINCTRL_CV1835`, and `COMMON_CLK_CVITEK`).
+Pre-test verification confirmed `/dev/mem` absent, pre-taint 0, and no preloaded
+modules. All six platform drivers registered cleanly in sysfs (`cvitek,pinctrl-cv181x`,
+`ion-cvitek`, `cvi`, `cvi-reboot`, `gpio-clk`, and reset controller `nr_reset=64`).
+
+The LT6911 bridge status was queried before the probe and confirmed active HDMI
+lock at 1920x1080 (`HDMI_SIGNAL_A3=0x55`, `CSI_VACTIVE=1080`, `CSI_HACTIVE=1920`)
+with zero taint.
+
+The bounded raw-frame probe executed with baseline profile 0 (lanes `2,4,3,1,0`,
+settle 16). Clocks and resets bound with platform IRQs (`irq-30` as `cif-irq0`,
+`irq-31` as `cif-irq1`). During the probe:
+- High-speed clock was active (`CK_HS=1`).
+- Receiver reported `yuv422-8` with ECC 65,536, CRC 9,917, and WC 2,351.
+- VI reported 1920x1080 dimensions with SOF reaching 56,804, but pre-FE count
+  remained 0 and one height-underflow event occurred (`VICsiCh0HeightLSCnt: 1`).
+- `CVI_VI_GetChnFrame` returned `0xc00e8040` (no frame acquired).
+- Reverse module unloading of all six modules succeeded with return code 0 for
+  each module, leaving zero remainder in `/proc/modules`, no residual video device
+  nodes, and post-taint at 4096.
+
+This closes missing SG2002 platform kernel support as the cause of upstream CSI
+packet corruption. The driver infrastructure is now verified one-to-one at the
+platform initialization boundary, yet packet errors persist upstream of the VI
+pre-FE admission gate. Continue investigating boot-time PHY/clock timing and
+LT6911 transmitter/receiver electrical state. Video remains fail-closed.
+
 ## Pre-Linux and stock capture-path audit closes another software boundary (2026-09-23)
 
 The stock FIT was extracted and its Linux device tree compared with the current

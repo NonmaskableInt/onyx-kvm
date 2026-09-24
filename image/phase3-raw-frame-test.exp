@@ -58,7 +58,7 @@ foreach module {soph_sys soph_base soph_mipi_rx soph_snsr_i2c soph_vi soph_vpss}
     run_command "insmod $module_dir/$module.ko; echo LOAD_${module}_RC=\$?"
 }
 run_command {echo '[VIDEO_NODES_AFTER_LOAD]'; for n in /dev/video* /dev/media* /dev/v4l-subdev* /dev/cvi-*; do test -e "$n" && echo "$n"; done}
-run_command "/usr/libexec/cleankvm-raw-frame-probe $frame; echo PROBE_RC=\$?"
+run_command {/usr/libexec/cleankvm-raw-frame-probe 0; echo PROBE_RC=$?}
 run_command {echo '[MIPI_RX_LIVE_STATUS]'; cat /proc/mipi-rx}
 run_command {if test -f /run/cleankvm-frame.yuv422p; then stat -c 'FRAME_MODE=%a FRAME_UID=%u FRAME_GID=%g FRAME_BYTES=%s' /run/cleankvm-frame.yuv422p; sha256sum /run/cleankvm-frame.yuv422p | sed 's/ .*/  FRAME/'; else echo FRAME_ABSENT; fi}
 run_command {rm -f /run/cleankvm-frame.yuv422p; test ! -e /run/cleankvm-frame.yuv422p; echo FRAME_CLEANUP_RC=$?}
