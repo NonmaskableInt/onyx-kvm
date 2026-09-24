@@ -6,6 +6,7 @@ members = [
     "crates/cleankvm-mcp",
     "crates/cleankvm-media-protocol",
     "crates/cleankvm-memtest",
+    "crates/cleankvm-video-broker",
     "crates/cleankvmd",
 ]
 resolver = "2"

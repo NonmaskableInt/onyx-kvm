@@ -113,6 +113,18 @@ On cold boot (`image/phase3-v48-quarantine-frame-test.exp`, zero UART upload):
 - Frame was deleted (`FRAME_CLEANUP_RC=0`), all six modules reverse-unloaded
   with return code 0, `FINAL_LOADED=` was empty, and `POST_TAINT=4096`.
 
+### Remaining Roadmap to End-to-End Video Admission
+
+1. **Implement `cleankvm-video-broker` (`crates/cleankvm-video-broker`) [COMPLETED]**:
+   - Implemented `crates/cleankvm-video-broker` binding `/run/cleankvm/video.sock` (`0660`, `root:cleankvm`, `GID 900`) and enforcing `SO_PEERCRED` (`UID 900` `cleankvm`) and `/run/cleankvm/video-enabled` (`authorize("kvm.video.snapshot", &[Scope::Video], false)`).
+   - Decodes the 12-byte `WireHeader` (`CKM3`, version `1`, `Operation::Snapshot`, `payload_bytes = 8`) + 8-byte `SnapshotRequest`, loads the 6 quarantine modules (`soph_sys` through `soph_vpss`), runs `/usr/libexec/cleankvm-raw-frame-probe 0 1080 8 0,0,0,0,0 2,4,3,1,0`, verifies `4,147,200` bytes, computes the SHA-256 digest in-memory, deletes `/run/cleankvm-frame.yuv422p`, reverse-unloads all 6 modules (`soph_vpss` down to `soph_sys`), and returns the 42-byte `VideoSnapshot` wire response.
+2. **Cross-Compile & Package into the CleanKVM v49 Rootfs [COMPLETED]**:
+   - Built offline static stripped `riscv64gc-unknown-linux-musl` `cleankvm-video-broker` (`out/phase3-rust/cleankvm-video-broker`, SHA-256 `8f6d89831b64d7d455df4bb6a47cb259b9bf3405303d982cf72702cc179eb369`) and updated `cleankvmd` (`out/phase2-rust/cleankvmd`, SHA-256 `b05cd48abad464609a5bcb64849f031e7ddf404e35457ba1e318b1cad5067541`).
+   - Added `/etc/init.d/S47cleankvm-video-broker` (`image/phase3-video-overlay/etc/init.d/S47cleankvm-video-broker`) and assembled `out/phase3-video-broker-v49/cleankvm-phase1.img` (`79,692,288` bytes, SHA-256 `45352ac44f56c734bd200a72deac271ae8293a8d2f32491f2a8285d07edaf1f2`, `rootfs.ext4` SHA-256 `1b3bfbebcc77595eae441d7e77d9dac7b98a655e66af3397a7b5a98397a8a323`, `embedded_artifacts=verified`).
+3. **On-Target End-to-End MCP `kvm.video.snapshot` Verification [NEXT]**:
+   - Flash the updated SD image (`v49`), verify embedded FIP/FIT/rootfs hashes on read-back, and boot on the NanoKVM Lite.
+   - Issue an authenticated MCP `tools/list` and `tools/call` (`kvm.video.snapshot`) with an Ed25519-signed `kvm:read kvm:video` JWT, verifying `videoEnabled: true`, `audioCaptureEnabled: false`, `audioOutputEnabled: false`, `byteLength: 4147200`, valid 64-char `sha256`, empty `/proc/modules` post-call, and `/dev/mem` absent.
+
 ## Settle table sweep on SG2002 platform kernel (2026-09-23)
 
 A bounded 9-point sweep across HS settle values (8, 10, 12, 14, 16, 18, 20, 22,

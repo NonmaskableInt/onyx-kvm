@@ -125,14 +125,14 @@ fi
         fi
         make -C buildroot cvitek_SG200X_musl_riscv64_defconfig \
             BR2_TOOLCHAIN_EXTERNAL_PATH=/work/sdk/host-tools/gcc/riscv64-linux-musl-x86_64 \
-            "BR2_STRIP_EXCLUDE_FILES=cleankvmd cleankvm-memtest cleankvm-hid-broker"
+            "BR2_STRIP_EXCLUDE_FILES=cleankvmd cleankvm-memtest cleankvm-hid-broker cleankvm-video-broker"
         # The vendor Buildroot/BusyBox combination does not reliably preserve
         # GNU make jobserver descriptors through its nested configuration
         # makes. A single job is slower but deterministic and fail-closed.
         make -C buildroot -j1 \
             BR2_DL_DIR=/downloads \
             BR2_TOOLCHAIN_EXTERNAL_PATH=/work/sdk/host-tools/gcc/riscv64-linux-musl-x86_64 \
-            "BR2_STRIP_EXCLUDE_FILES=cleankvmd cleankvm-memtest cleankvm-hid-broker"
+            "BR2_STRIP_EXCLUDE_FILES=cleankvmd cleankvm-memtest cleankvm-hid-broker cleankvm-video-broker"
         # Incremental Buildroot finalization may retain the prior target-tree
         # mode even though the filesystem device table correctly applies 0500.
         # Normalize both views so the pre-image audit cannot disagree with the
@@ -145,6 +145,7 @@ fi
         fi
         hid_broker=
         video_modules=
+        video_broker=
         if [ "$CLEANKVM_CONFIG_PROFILE" = phase2-hid ] || \
            [ "$CLEANKVM_CONFIG_PROFILE" = phase3-discovery ] || \
            [ "$CLEANKVM_CONFIG_PROFILE" = phase3-video-foundation ] || \
@@ -153,6 +154,9 @@ fi
         fi
         if [ "$CLEANKVM_CONFIG_PROFILE" = phase3-video-foundation ]; then
             video_modules="$CLEANKVM_VIDEO_MODULE_DIR"
+            if [ -f /repo/out/phase3-rust/cleankvm-video-broker ]; then
+                video_broker=/repo/out/phase3-rust/cleankvm-video-broker
+            fi
         fi
         /repo/image/audit-rootfs.sh /work/sdk/buildroot/output/target \
             /repo/out/phase2-rust/cleankvmd \
@@ -164,7 +168,8 @@ fi
             "$CLEANKVM_RAW_FRAME_PROBE" \
             "$CLEANKVM_AUDIO_CAPTURE_PROBE" \
             "$CLEANKVM_EDID_PROGRAMMER" \
-            "$CLEANKVM_LT_BACKUP"
+            "$CLEANKVM_LT_BACKUP" \
+            "$video_broker"
         if [ -n "$CLEANKVM_IDENTITY_SOURCE" ]; then
             debugfs=/work/sdk/buildroot/output/host/sbin/debugfs
             root_image=/work/sdk/buildroot/output/images/rootfs.ext4

@@ -6,6 +6,37 @@ artifact_dir=${CLEANKVM_RUST_ARTIFACT_DIR:-"$repo_root/out/phase2-rust"}
 binary="$repo_root/target/riscv64gc-unknown-linux-musl/release/cleankvmd"
 
 mkdir -p "$artifact_dir"
+temp_bin=$(mktemp -d)
+trap 'rm -rf "$temp_bin"' EXIT HUP INT TERM
+
+if ! command -v riscv64-linux-musl-gcc >/dev/null 2>&1 && \
+   test -z "${CC_riscv64gc_unknown_linux_musl:-}"; then
+    engine=${CONTAINER_ENGINE:-podman}
+    builder=${CLEANKVM_BUILDER_TAG:-localhost/cleankvm-builder:ubuntu-22.04-amd64}
+    cat >"$temp_bin/riscv64-linux-musl-gcc" <<EOF
+#!/bin/sh
+exec "$engine" run --rm --arch amd64 --network none \\
+    -v cleankvm-host-tools:/host-tools:ro \\
+    -v "$repo_root:$repo_root:rw" \\
+    -v "$HOME/.cargo:$HOME/.cargo:ro" \\
+    -w "\$(pwd)" \\
+    "$builder" \\
+    /host-tools/repo/gcc/riscv64-linux-musl-x86_64/bin/riscv64-unknown-linux-musl-gcc "\$@"
+EOF
+    cat >"$temp_bin/riscv64-linux-musl-ar" <<EOF
+#!/bin/sh
+exec "$engine" run --rm --arch amd64 --network none \\
+    -v cleankvm-host-tools:/host-tools:ro \\
+    -v "$repo_root:$repo_root:rw" \\
+    -v "$HOME/.cargo:$HOME/.cargo:ro" \\
+    -w "\$(pwd)" \\
+    "$builder" \\
+    /host-tools/repo/gcc/riscv64-linux-musl-x86_64/bin/riscv64-unknown-linux-musl-ar "\$@"
+EOF
+    chmod 0755 "$temp_bin/riscv64-linux-musl-gcc" "$temp_bin/riscv64-linux-musl-ar"
+    export CC_riscv64gc_unknown_linux_musl="$temp_bin/riscv64-linux-musl-gcc"
+    export AR_riscv64gc_unknown_linux_musl="$temp_bin/riscv64-linux-musl-ar"
+fi
 
 cd "$repo_root"
 cargo rustc --release --target riscv64gc-unknown-linux-musl \

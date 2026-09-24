@@ -1,8 +1,9 @@
 #!/bin/sh
 set -eu
 
-sdk_dir=${1:?usage: apply-phase3-video-foundation.sh SDK_DIRECTORY}
+sdk_dir=${1:?usage: apply-phase3-video-foundation.sh SDK_DIRECTORY [MODULE_DIR] [VIDEO_BROKER_BINARY]}
 module_dir=${2:-}
+video_broker_binary=${3:-}
 repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 kernel_defconfig="$sdk_dir/build/boards/sg200x/sg2002_licheervnano_sd/linux/sg2002_licheervnano_sd_defconfig"
 marker='# CleanKVM Phase 3 video-foundation generated configuration'
@@ -33,6 +34,13 @@ if test -n "$module_dir"; then
     (cd "$module_dir" && sha256sum -c SHA256SUMS)
     cp "$repo_root/image/lock-root-password.sh" "$sdk_dir/cleankvm/lock-root-password.sh"
     chmod 0755 "$sdk_dir/cleankvm/lock-root-password.sh"
+fi
+
+if test -n "$video_broker_binary"; then
+    test -f "$video_broker_binary"
+    overlay_dir="$sdk_dir/cleankvm/phase1-overlay"
+    cp -a "$repo_root/image/phase3-video-overlay/." "$overlay_dir/"
+    install -m 0755 "$video_broker_binary" "$overlay_dir/usr/bin/cleankvm-video-broker"
 fi
 
 printf '%s\n' 'Phase-3 video-foundation profile applied'

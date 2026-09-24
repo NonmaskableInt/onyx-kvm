@@ -76,6 +76,16 @@ name = "cleankvm-memtest"
 version = "0.1.0"
 
 [[package]]
+name = "cleankvm-video-broker"
+version = "0.1.0"
+dependencies = [
+ "cleankvm-core",
+ "cleankvm-media-protocol",
+ "rustix",
+ "sha2",
+]
+
+[[package]]
 name = "cleankvmd"
 version = "0.1.0"
 dependencies = [

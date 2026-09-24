@@ -13,6 +13,7 @@ expected_raw_frame_probe=${8:-}
 expected_audio_capture_probe=${9:-}
 expected_edid_programmer=${10:-}
 expected_lt_backup=${11:-}
+expected_video_broker=${12:-}
 test -d "$rootfs" || {
     printf 'not a root filesystem directory: %s\n' "$rootfs" >&2
     exit 1
@@ -23,7 +24,7 @@ for path in \
     usr/sbin/dnsmasq usr/sbin/udhcpd usr/sbin/wpa_supplicant \
     usr/bin/mender usr/bin/mosh usr/bin/rauc usr/bin/swupdate \
     usr/bin/ffmpeg usr/bin/gst-launch-1.0 usr/bin/arecord usr/bin/aplay \
-    usr/bin/cleankvm-hid-hold-test usr/bin/cleankvm-video-broker \
+    usr/bin/cleankvm-hid-hold-test \
     usr/bin/cleankvm-media-broker usr/bin/cleankvm-audio-capture-broker \
     usr/bin/cleankvm-audio-playback-broker
 do
@@ -32,6 +33,11 @@ do
         exit 1
     fi
 done
+
+if test -z "$expected_video_broker" && test -e "$rootfs/usr/bin/cleankvm-video-broker"; then
+    printf '%s\n' 'prohibited Phase-1 executable: /usr/bin/cleankvm-video-broker' >&2
+    exit 1
+fi
 
 test -f "$rootfs/etc/network/interfaces" || {
     printf '%s\n' 'missing wired network configuration' >&2
@@ -189,6 +195,28 @@ if test -n "$expected_lt_backup"; then
     cmp "$expected_lt_backup" "$installed_probe"
     test "$(stat -c %a "$installed_probe")" = 500
     ! find "$rootfs/etc/init.d" -type f -exec grep -l 'cleankvm-lt6911uxc-flash-backup' '{}' + | grep -q .
+fi
+
+if test -n "$expected_video_broker"; then
+    test -s "$rootfs/usr/bin/cleankvm-video-broker" || {
+        printf '%s\n' 'missing or empty /usr/bin/cleankvm-video-broker' >&2
+        exit 1
+    }
+    cmp "$expected_video_broker" "$rootfs/usr/bin/cleankvm-video-broker" || {
+        printf '%s\n' 'installed video broker does not match the verified build' >&2
+        exit 1
+    }
+    case "$(file "$rootfs/usr/bin/cleankvm-video-broker")" in
+        *"ELF 64-bit"*"RISC-V"*"statically linked"*"stripped"*) ;;
+        *) printf '%s\n' 'installed video broker is not a static stripped RISC-V ELF' >&2; exit 1 ;;
+    esac
+    test -x "$rootfs/etc/init.d/S47cleankvm-video-broker"
+    cmp "$repo_root/image/phase3-video-overlay/etc/init.d/S47cleankvm-video-broker" \
+        "$rootfs/etc/init.d/S47cleankvm-video-broker" || {
+        printf '%s\n' 'installed video broker init script does not match source overlay' >&2
+        exit 1
+    }
+    test ! -e "$rootfs/run/cleankvm/video-enabled"
 fi
 
 printf '%s\n' 'Phase-1 root filesystem audit passed'
