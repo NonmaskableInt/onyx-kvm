@@ -14,6 +14,7 @@ expected_audio_capture_probe=${9:-}
 expected_edid_programmer=${10:-}
 expected_lt_backup=${11:-}
 expected_video_broker=${12:-}
+expected_audio_playback_probe=${13:-}
 test -d "$rootfs" || {
     printf 'not a root filesystem directory: %s\n' "$rootfs" >&2
     exit 1
@@ -179,6 +180,13 @@ if test -n "$expected_audio_capture_probe"; then
     test -f "$installed_probe"
     cmp "$expected_audio_capture_probe" "$installed_probe"
     ! find "$rootfs/etc/init.d" -type f -exec grep -l 'cleankvm-audio-capture-probe' '{}' + | grep -q .
+fi
+
+if test -n "$expected_audio_playback_probe"; then
+    installed_probe="$rootfs/usr/libexec/cleankvm-audio-playback-probe"
+    test -f "$installed_probe"
+    cmp "$expected_audio_playback_probe" "$installed_probe"
+    ! find "$rootfs/etc/init.d" -type f -exec grep -l 'cleankvm-audio-playback-probe' '{}' + | grep -q .
 fi
 
 if test -n "$expected_edid_programmer"; then

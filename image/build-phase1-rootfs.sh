@@ -14,6 +14,7 @@ config_profile=${CLEANKVM_CONFIG_PROFILE:-phase1}
 video_module_dir=${CLEANKVM_VIDEO_MODULE_DIR:-$repo_root/out/phase3-video-modules-v1}
 raw_frame_probe=${CLEANKVM_RAW_FRAME_PROBE:-}
 audio_capture_probe=${CLEANKVM_AUDIO_CAPTURE_PROBE:-}
+audio_playback_probe=${CLEANKVM_AUDIO_PLAYBACK_PROBE:-}
 edid_programmer=${CLEANKVM_EDID_PROGRAMMER:-}
 lt_backup=${CLEANKVM_LT_BACKUP:-}
 identity_source=
@@ -30,6 +31,10 @@ fi
 if test -n "$audio_capture_probe"; then
     test -f "$audio_capture_probe"
     set -- "$@" -v "$audio_capture_probe:/audio-capture-probe:ro"
+fi
+if test -n "$audio_playback_probe"; then
+    test -f "$audio_playback_probe"
+    set -- "$@" -v "$audio_playback_probe:/audio-playback-probe:ro"
 fi
 if test -n "$edid_programmer"; then
     test -f "$edid_programmer"
@@ -64,6 +69,7 @@ fi
     -e CLEANKVM_VIDEO_MODULE_DIR=/video-modules \
     -e CLEANKVM_RAW_FRAME_PROBE="${raw_frame_probe:+/raw-frame-probe}" \
     -e CLEANKVM_AUDIO_CAPTURE_PROBE="${audio_capture_probe:+/audio-capture-probe}" \
+    -e CLEANKVM_AUDIO_PLAYBACK_PROBE="${audio_playback_probe:+/audio-playback-probe}" \
     -e CLEANKVM_EDID_PROGRAMMER="${edid_programmer:+/edid-programmer}" \
     -e CLEANKVM_LT_BACKUP="${lt_backup:+/lt-backup}" \
     -v "$video_module_dir:/video-modules:ro" \
@@ -96,6 +102,7 @@ fi
         for optional_path in \
             usr/libexec/cleankvm-raw-frame-probe \
             usr/libexec/cleankvm-audio-capture-probe \
+            usr/libexec/cleankvm-audio-playback-probe \
             usr/libexec/cleankvm-lt6911uxc-edid-programmer \
             usr/libexec/cleankvm-lt6911uxc-flash-backup
         do
@@ -105,6 +112,7 @@ fi
         sed -i \
             -e "\\|^/usr/libexec/cleankvm-raw-frame-probe f |d" \
             -e "\\|^/usr/libexec/cleankvm-audio-capture-probe f |d" \
+            -e "\\|^/usr/libexec/cleankvm-audio-playback-probe f |d" \
             -e "\\|^/usr/libexec/cleankvm-lt6911uxc-edid-programmer f |d" \
             -e "\\|^/usr/libexec/cleankvm-lt6911uxc-flash-backup f |d" \
             cleankvm/phase1-devices.txt
@@ -137,6 +145,14 @@ fi
             grep -qF "/usr/libexec/cleankvm-audio-capture-probe f 0500 0 0" \
                 cleankvm/phase1-devices.txt || \
                 printf "%s\n" "/usr/libexec/cleankvm-audio-capture-probe f 0500 0 0 - - - - -" \
+                    >> cleankvm/phase1-devices.txt
+        fi
+        if [ -n "$CLEANKVM_AUDIO_PLAYBACK_PROBE" ]; then
+            install -D -m 0500 "$CLEANKVM_AUDIO_PLAYBACK_PROBE" \
+                cleankvm/phase1-overlay/usr/libexec/cleankvm-audio-playback-probe
+            grep -qF "/usr/libexec/cleankvm-audio-playback-probe f 0500 0 0" \
+                cleankvm/phase1-devices.txt || \
+                printf "%s\n" "/usr/libexec/cleankvm-audio-playback-probe f 0500 0 0 - - - - -" \
                     >> cleankvm/phase1-devices.txt
         fi
         if [ -n "$CLEANKVM_EDID_PROGRAMMER" ]; then
@@ -204,7 +220,8 @@ fi
             "$CLEANKVM_AUDIO_CAPTURE_PROBE" \
             "$CLEANKVM_EDID_PROGRAMMER" \
             "$CLEANKVM_LT_BACKUP" \
-            "$video_broker"
+            "$video_broker" \
+            "$CLEANKVM_AUDIO_PLAYBACK_PROBE"
         if [ -n "$CLEANKVM_IDENTITY_SOURCE" ]; then
             debugfs=/work/sdk/buildroot/output/host/sbin/debugfs
             root_image=/work/sdk/buildroot/output/images/rootfs.ext4
@@ -245,6 +262,15 @@ fi
             printf "%s\n" "$probe_stat" | grep -q "Mode: *0500"
             printf "%s\n" "$probe_stat" | grep -q "User: *0 *Group: *0"
             printf "%s\n" "finished ext4 audio capture probe ownership audit passed"
+        fi
+        if [ -n "$CLEANKVM_AUDIO_PLAYBACK_PROBE" ]; then
+            debugfs=/work/sdk/buildroot/output/host/sbin/debugfs
+            root_image=/work/sdk/buildroot/output/images/rootfs.ext4
+            probe_stat=$($debugfs -R "stat /usr/libexec/cleankvm-audio-playback-probe" \
+                "$root_image" 2>/dev/null)
+            printf "%s\n" "$probe_stat" | grep -q "Mode: *0500"
+            printf "%s\n" "$probe_stat" | grep -q "User: *0 *Group: *0"
+            printf "%s\n" "finished ext4 audio playback probe ownership audit passed"
         fi
         if [ -n "$CLEANKVM_EDID_PROGRAMMER" ]; then
             debugfs=/work/sdk/buildroot/output/host/sbin/debugfs

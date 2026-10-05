@@ -178,3 +178,38 @@ physical capture path only as evidence; it does not enable background capture,
 network retrieval, MCP/web audio tools, playback, HDMI audio, or UAC. Stage C
 playback remains a separate boundary and must first establish amplifier/mute
 routing and a safe inactive state.
+
+## Stage C routing attribution and v52 candidate
+
+The exact compiled v51/v52 device tree enables the internal SG2002 DAC but
+contains neither `mute-gpio-l` nor `mute-gpio-r`. The inherited QFN description
+defines only right-channel mute on GPIO E2, and the LicheeRV Nano board DTS
+explicitly deletes it. Consequently, the pinned DAC driver's `muteAmp()` has no
+valid external GPIO on this board. Its reliable shutdown boundary is internal:
+the `DAC Playback MUTE` control plus clearing DAC and I2S receive enable during
+PCM stop/close.
+
+Official Sipeed hardware documentation identifies an onboard PA capable of
+driving a speaker below 1 W. The official schematic identifies it as AW8010A
+U11 with hardware-biased enable, confirming there is no software amplifier
+shutdown line to recover through the current DT. Stage C must therefore remain
+short and conservative and must restore the internal mute before PCM close.
+
+A separate root-only probe implements that bounded test. It selects card 1,
+device 0; asserts both internal mute channels; selects the inverted ALSA
+volume's lowest nonzero DAC setting; emits a one-second, 1 kHz mono S16LE tone
+at 16 kHz with peak amplitude 512 (1.56% of full scale); drains; reasserts mute;
+closes the PCM; and zeroizes its locked 32,000-byte buffer. A four-second alarm
+bounds driver stalls, and every cleanup path attempts safe mute. The probe is a
+static stripped RISC-V ELF (SHA-256
+`b9b6d69a9d30d056fc9642117ea2708f273565262a53377074d7a7f9d7b0c256`),
+installed root-only (`0500`) and absent from init.
+
+The separately verified v52 image is
+`out/phase3a-playback-v52/cleankvm-phase1.img` (79,692,288 bytes, SHA-256
+`46e3116e5e011f1173ed7b40bb985d791f55caef0fd8d293d0f25b10d2c2e545`).
+Its FIT (`1b504a2c...`), rootfs (`e1d6707c...`), and FIP (`6e6d3b5c...`)
+passed embedded-artifact verification. The next bounded operation is SD
+flash/read-back followed by cold-boot, probe self-test, one tone, and post-test
+mute/PCM/file/taint verification. No playback broker or network operation is
+present.

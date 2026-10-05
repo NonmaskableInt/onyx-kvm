@@ -100,6 +100,16 @@ and both audio gates stayed absent. Stage B passes. The next audio step is the
 separately bounded Stage C output-routing investigation; no playback is yet
 admitted.
 
+Stage C source and schematic attribution is complete. The board deletes its
+only inherited amplifier-mute GPIO, while the populated AW8010A PA is
+hardware-enabled; safe software shutdown is therefore the SG2002 DAC's internal
+mute plus DAC/I2S-off state. A root-only, non-autostarting probe now applies the
+lowest nonzero DAC gain and a 1.56%-full-scale, one-second 1 kHz tone, then
+drains, re-mutes, closes, and zeroizes. The verified v52 test image is
+`out/phase3a-playback-v52/cleankvm-phase1.img` (79,692,288 bytes, SHA-256
+`46e3116e5e011f1173ed7b40bb985d791f55caef0fd8d293d0f25b10d2c2e545`).
+Flash/read-back and the single bounded hardware playback proof are next.
+
 ## First hardware video frame captured: MIPI RX pinmux and pad pull-down resolution (2026-09-23)
 
 Offline attribution of the persistent D3 instability and packet header
