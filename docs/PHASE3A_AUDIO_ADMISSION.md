@@ -139,10 +139,16 @@ broker, startup script, and quarantine-module directory from both overlay and
 incremental target before restoring only explicitly selected artifacts. The
 corrected v51 rootfs audit and audio-probe ownership audit passed.
 
-The next authorized hardware operation is limited to Stage B capture metrics:
-verify embedded artifacts after flashing, establish a cold-boot baseline with
-no video modules and both audio gates absent, invoke the probe once locally as
-root, verify the one-second bound and structural metrics, then confirm no
-process retains a sound device. No raw PCM export, audio playback, HDMI-audio
-work, UAC exposure, MCP audio tool, or web audio control is admitted by this
-image.
+The v51 image was flashed to the sole external removable target (`/dev/disk4`,
+USB, 30,992,760,832 bytes) and safely ejected after exact-span read-back. macOS
+FAT bookkeeping changed the whole-span hash to
+`8b934bf8d6b11af1c1541a96db80622b7ad3ce2837526a78046f7dff9837bbed`,
+but embedded FIT, rootfs, and FIP verification passed against the audited v51
+artifacts.
+
+The remaining authorized hardware operation is limited to Stage B capture
+metrics: establish a cold-boot baseline with no video modules and both audio
+gates absent, invoke the probe once locally as root, verify the one-second bound
+and structural metrics, then confirm no process retains a sound device. No raw
+PCM export, audio playback, HDMI-audio work, UAC exposure, MCP audio tool, or
+web audio control is admitted by this image.

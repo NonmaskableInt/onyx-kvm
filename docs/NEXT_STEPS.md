@@ -80,7 +80,12 @@ passed offline verification. A profile-transition hardening change removes all
 optional probes, video modules, and video startup artifacts from reusable
 overlay and target trees before selectively restoring only requested content;
 the v51 audio rootfs therefore contains no inherited video broker or quarantine
-modules. The next bounded step is flash/read-back verification followed by a
+modules. The image was flashed to the sole external physical removable target,
+`/dev/disk4` (USB, 30,992,760,832 bytes, prior `CLEANKVM` layout). Exactly the
+79,692,288-byte image span was read back. Its whole-span SHA-256 changed to
+`8b934bf8d6b11af1c1541a96db80622b7ad3ce2837526a78046f7dff9837bbed`
+after macOS FAT bookkeeping, while the embedded FIP, FIT, and rootfs all matched
+the audited v51 inputs. The card was safely ejected. The next bounded step is a
 cold-boot fail-closed baseline and the root-only, one-second microphone metrics
 probe. Audio output remains disabled and is not part of this test.
 
