@@ -17,8 +17,11 @@ length does not match the requested format. Offline tests must pass before the
 next image is packaged. Workspace tests and strict lints now pass. Offline
 static RISC-V artifacts were rebuilt (current web-enabled `cleankvmd`
 `ecf337a8d6aa...`; video
-broker `84074a5851cc...`); next-image packaging and hardware verification remain
-pending.
+broker `84074a5851cc...`). The independently rebuilt v50 image is now packaged
+at `out/phase3-web-video-v50/cleankvm-phase1.img` (79,692,288 bytes, SHA-256
+`e57f5b480e0bf4da02350a88ebb8928cf34997ab1c273845c83e3e7732718fe8`).
+Its FIP, FIT, and rootfs passed embedded-artifact verification; SD-card read-back
+and cold-boot hardware verification remain pending.
 
 The first human web shell is now embedded in the same TLS daemon. It uses the
 existing MCP authorization and policy path, keeps a pasted development token
@@ -27,6 +30,15 @@ requests bounded YUV420P snapshot metadata. Static resources are same-origin
 and all responses carry no-store, strict CSP, frame-denial, no-referrer,
 no-sniff, and browser permission-denial headers. Pixel delivery, HID controls,
 and production enrollment remain intentionally gated.
+
+## Immediate bounded hardware step
+
+Resolve the currently inserted removable-media identity, flash only the verified
+v50 image above, and verify embedded FIP/FIT/rootfs hashes from card read-back.
+On cold boot, first prove video, microphone, and speaker gates remain disabled;
+then explicitly admit video and verify that MCP and the web shell both report a
+1920x1080 YUV420P snapshot of exactly 3,110,400 bytes with matching digest.
+Microphone and speaker must remain disabled throughout this video test.
 
 ## First hardware video frame captured: MIPI RX pinmux and pad pull-down resolution (2026-09-23)
 

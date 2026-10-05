@@ -6,6 +6,7 @@ engine=${CONTAINER_ENGINE:-podman}
 builder=${CLEANKVM_BUILDER_TAG:-localhost/cleankvm-builder:ubuntu-22.04-amd64}
 work_volume=${CLEANKVM_WORK_VOLUME:-cleankvm-work-v5}
 download_volume=${CLEANKVM_DOWNLOAD_VOLUME:-cleankvm-buildroot-dl-v2}
+host_tools_volume=${CLEANKVM_HOST_TOOLS_VOLUME:-cleankvm-host-tools}
 incremental=${CLEANKVM_INCREMENTAL_ROOTFS:-0}
 credential_hash_file=${CLEANKVM_RECOVERY_PASSWORD_HASH_FILE:-}
 identity_dir=${CLEANKVM_IDENTITY_DIR:-}
@@ -51,6 +52,7 @@ fi
 "$engine" run --rm --arch amd64 --network none \
     -v "$work_volume:/work:rw" \
     -v "$download_volume:/downloads:ro" \
+    -v "$host_tools_volume:/host-tools:ro" \
     -v "$repo_root:/repo:ro" \
     "$@" \
     -w /work/sdk \
@@ -67,6 +69,10 @@ fi
     -v "$video_module_dir:/video-modules:ro" \
     "$builder" bash -lc '
         set -e
+        if [ ! -e /work/sdk/host-tools ]; then
+            ln -s /host-tools/repo /work/sdk/host-tools
+        fi
+        test "$(readlink -f /work/sdk/host-tools)" = /host-tools/repo
         cd /
         sha256sum -c /downloads/SHA256SUMS
         cd /work/sdk

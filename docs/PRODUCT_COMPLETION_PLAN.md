@@ -18,8 +18,8 @@ admission boundaries. A working video path does not enable audio or HID.
 
 ## Phase 1: close the admitted video snapshot contract
 
-Status: implementation and offline RISC-V builds complete; target-image
-packaging and verification pending.
+Status: implementation, offline RISC-V builds, and v50 image packaging complete;
+target hardware verification pending.
 
 1. Represent planar YUV420 and planar YUV422 as distinct wire formats.
 2. Make the broker require the captured byte length to match the requested
@@ -37,11 +37,20 @@ Offline artifacts produced after the correction:
   `ecf337a8d6aaeb4fd1439ea8b7af531943e527dbde8dfe97869a1fdd1d501aaa`
 - `cleankvm-video-broker`: SHA-256
   `84074a5851cc1c8d2942203bb06a36d4f7ec895ed4ae93c1126c800749e14e51`
+- verified v50 SD image: `out/phase3-web-video-v50/cleankvm-phase1.img`,
+  79,692,288 bytes, SHA-256
+  `e57f5b480e0bf4da02350a88ebb8928cf34997ab1c273845c83e3e7732718fe8`
+- v50 embedded artifacts: `boot.sd`
+  `ec4d60fe34cde9bdf5aa94366589a2353fde7330864b7b5f9618ea125ed73d38`,
+  `rootfs.ext4`
+  `311cf493b5aebf6242b20e179d6d01be72af12ed0a5a2b03d761957bcab2a9a8`,
+  and `fip.bin`
+  `6e6d3b5c7a58c1a585bf1ea456c76bd7c91cfd33c76dfc67bd33b31cf86cd301`.
 
 ## Phase 2: human web console
 
-Status: first authenticated development shell implemented and built; target
-packaging and verification pending.
+Status: first authenticated development shell implemented, built, and packaged
+in the verified v50 image; target hardware verification pending.
 
 1. Serve a small static application from the existing TLS daemon; do not add a
    second network service.
@@ -110,9 +119,9 @@ privacy, cleanup, authorization, timeout, and cold-boot fail-closed tests.
 
 ## Immediate execution order
 
-1. Land and test the YUV format contract correction.
-2. Build/package and verify it on target hardware.
-3. Implement the authenticated web shell and read-only status/snapshot flow.
+1. Flash v50 and verify its embedded artifacts from SD-card read-back.
+2. Repeat cold-boot fail-closed and admitted YUV420P MCP snapshot tests.
+3. Verify the authenticated web shell status and snapshot-metadata flow.
 4. Execute the already prepared Phase 3a local microphone proof.
 5. Implement audio brokers and expose them through MCP and the web console only
    after the hardware evidence passes.
