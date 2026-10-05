@@ -1,6 +1,32 @@
 # Next steps
 
-Updated: 2026-09-23
+Updated: 2026-10-05
+
+## Product completion plan
+
+The ordered path from the admitted video breakthrough to a complete product is
+tracked in `docs/PRODUCT_COMPLETION_PLAN.md`. The final image includes an
+authenticated human web console and MCP, with separately admitted video, HID,
+microphone capture, and audio output.
+
+The first follow-up closes a discovered protocol mismatch: the v49 MCP capture
+returned 3,110,400 bytes, which is 1920x1080 planar YUV420, while labeling the
+result `yuv422p`. The protocol and broker now represent `yuv420p` separately,
+default MCP snapshots to it, and reject a captured buffer whose exact byte
+length does not match the requested format. Offline tests must pass before the
+next image is packaged. Workspace tests and strict lints now pass. Offline
+static RISC-V artifacts were rebuilt (current web-enabled `cleankvmd`
+`ecf337a8d6aa...`; video
+broker `84074a5851cc...`); next-image packaging and hardware verification remain
+pending.
+
+The first human web shell is now embedded in the same TLS daemon. It uses the
+existing MCP authorization and policy path, keeps a pasted development token
+only in memory, displays independent video/HID/microphone/speaker state, and
+requests bounded YUV420P snapshot metadata. Static resources are same-origin
+and all responses carry no-store, strict CSP, frame-denial, no-referrer,
+no-sniff, and browser permission-denial headers. Pixel delivery, HID controls,
+and production enrollment remain intentionally gated.
 
 ## First hardware video frame captured: MIPI RX pinmux and pad pull-down resolution (2026-09-23)
 

@@ -123,6 +123,7 @@ pub enum SnapshotFormat {
     Jpeg = 1,
     Rgb565 = 2,
     Yuv422p = 3,
+    Yuv420p = 4,
 }
 
 impl SnapshotFormat {
@@ -132,6 +133,7 @@ impl SnapshotFormat {
             Self::Jpeg => "jpeg",
             Self::Rgb565 => "rgb565",
             Self::Yuv422p => "yuv422p",
+            Self::Yuv420p => "yuv420p",
         }
     }
 }
@@ -144,6 +146,7 @@ impl TryFrom<u8> for SnapshotFormat {
             1 => Ok(Self::Jpeg),
             2 => Ok(Self::Rgb565),
             3 => Ok(Self::Yuv422p),
+            4 => Ok(Self::Yuv420p),
             _ => Err(ValidationError::InvalidDimensions),
         }
     }
@@ -483,7 +486,7 @@ mod tests {
 
     #[test]
     fn snapshot_wire_roundtrip_and_bounds() {
-        let request = SnapshotRequest::new(1920, 1080, SnapshotFormat::Yuv422p, 2_000)
+        let request = SnapshotRequest::new(1920, 1080, SnapshotFormat::Yuv420p, 2_000)
             .unwrap_or_else(|error| panic!("valid snapshot request failed: {error:?}"));
         let encoded = request.encode();
         assert_eq!(SnapshotRequest::decode(encoded), Ok(request));
@@ -499,5 +502,9 @@ mod tests {
             .unwrap_or_else(|error| panic!("valid 1080p YUV422P snapshot failed: {error:?}"));
         assert_eq!(VideoSnapshot::decode(snapshot.encode()), Ok(snapshot));
         assert_eq!(snapshot.sha256_hex().len(), 64);
+
+        let yuv420 = VideoSnapshot::new(1920, 1080, SnapshotFormat::Yuv420p, 3_110_400, digest)
+            .unwrap_or_else(|error| panic!("valid 1080p YUV420P snapshot failed: {error:?}"));
+        assert_eq!(VideoSnapshot::decode(yuv420.encode()), Ok(yuv420));
     }
 }

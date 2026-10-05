@@ -685,7 +685,7 @@ impl<'a> Server<'a> {
 
 fn parse_snapshot_arguments(arguments: Option<&Value>) -> Option<SnapshotRequest> {
     let Some(arguments) = arguments else {
-        return SnapshotRequest::new(1920, 1080, SnapshotFormat::Yuv422p, 5_000).ok();
+        return SnapshotRequest::new(1920, 1080, SnapshotFormat::Yuv420p, 5_000).ok();
     };
     let object = arguments.as_object()?;
     for key in object.keys() {
@@ -706,9 +706,10 @@ fn parse_snapshot_arguments(arguments: Option<&Value>) -> Option<SnapshotRequest
             "jpeg" => SnapshotFormat::Jpeg,
             "rgb565" => SnapshotFormat::Rgb565,
             "yuv422p" => SnapshotFormat::Yuv422p,
+            "yuv420p" => SnapshotFormat::Yuv420p,
             _ => return None,
         },
-        None => SnapshotFormat::Yuv422p,
+        None => SnapshotFormat::Yuv420p,
     };
     let deadline_ms = match object.get("deadlineMs") {
         Some(value) => u16::try_from(value.as_u64()?).ok()?,
@@ -728,7 +729,7 @@ fn video_snapshot_tool() -> Value {
             "properties": {
                 "width": { "type": "integer", "minimum": 1, "maximum": 1920 },
                 "height": { "type": "integer", "minimum": 1, "maximum": 1080 },
-                "format": { "type": "string", "enum": ["jpeg", "rgb565", "yuv422p"] },
+                "format": { "type": "string", "enum": ["yuv420p", "yuv422p"] },
                 "deadlineMs": { "type": "integer", "minimum": 100, "maximum": 5000 }
             },
             "additionalProperties": false
@@ -739,7 +740,7 @@ fn video_snapshot_tool() -> Value {
             "properties": {
                 "width": { "type": "integer", "minimum": 1, "maximum": 1920 },
                 "height": { "type": "integer", "minimum": 1, "maximum": 1080 },
-                "format": { "type": "string", "enum": ["jpeg", "rgb565", "yuv422p"] },
+                "format": { "type": "string", "enum": ["yuv420p", "yuv422p"] },
                 "byteLength": { "type": "integer", "minimum": 1, "maximum": 4_194_304 },
                 "sha256": { "type": "string", "minLength": 64, "maxLength": 64 }
             },
@@ -843,9 +844,8 @@ mod tests {
     use super::{
         BearerTokenValidator, Ed25519JwtValidator, HidTransport, HttpAuthError,
         HttpRequestAuthError, JwtValidationError, MAX_MESSAGE_BYTES, Server, SnapshotFormat,
-        SnapshotRequest, ValidatedClaims, VideoSnapshot, VideoTransport,
-        authenticate_http_request, bearer_challenge, extract_bearer, protected_resource_metadata,
-        serve, validate_origin,
+        SnapshotRequest, ValidatedClaims, VideoSnapshot, VideoTransport, authenticate_http_request,
+        bearer_challenge, extract_bearer, protected_resource_metadata, serve, validate_origin,
     };
     use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
     use cleankvm_core::{Grant, Scope};
@@ -1223,11 +1223,21 @@ mod tests {
     impl VideoTransport for RecordingVideo {
         fn capture_snapshot(&self, request: SnapshotRequest) -> io::Result<VideoSnapshot> {
             self.last_request.set(Some(request));
+            let byte_length = match request.format {
+                SnapshotFormat::Yuv420p => 3_110_400,
+                SnapshotFormat::Yuv422p => 4_147_200,
+                SnapshotFormat::Jpeg | SnapshotFormat::Rgb565 => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        "unsupported snapshot format",
+                    ));
+                }
+            };
             VideoSnapshot::new(
                 request.width,
                 request.height,
                 request.format,
-                4_147_200,
+                byte_length,
                 [0x5a; 32],
             )
             .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "invalid snapshot"))
@@ -1246,8 +1256,7 @@ mod tests {
         let video = RecordingVideo {
             last_request: Cell::new(None),
         };
-        let mut server =
-            Server::remote("https://kvm.example/mcp", 100, grant).with_video(&video);
+        let mut server = Server::remote("https://kvm.example/mcp", 100, grant).with_video(&video);
         initialize(&mut server);
         let tools = response(
             &mut server,
@@ -1276,10 +1285,7 @@ mod tests {
         assert_eq!(snap["result"]["structuredContent"]["width"], 1920);
         assert_eq!(snap["result"]["structuredContent"]["height"], 1080);
         assert_eq!(snap["result"]["structuredContent"]["format"], "yuv422p");
-        assert_eq!(
-            snap["result"]["structuredContent"]["byteLength"],
-            4_147_200
-        );
+        assert_eq!(snap["result"]["structuredContent"]["byteLength"], 4_147_200);
         assert_eq!(
             snap["result"]["structuredContent"]["sha256"],
             "5a".repeat(32)
@@ -1288,6 +1294,23 @@ mod tests {
         assert_eq!(
             recorded.map(|req| req.format),
             Some(SnapshotFormat::Yuv422p)
+        );
+
+        let default_snapshot = response(
+            &mut server,
+            r#"{"jsonrpc":"2.0","id":24,"method":"tools/call","params":{"name":"kvm.video.snapshot"}}"#,
+        );
+        assert_eq!(
+            default_snapshot["result"]["structuredContent"]["format"],
+            "yuv420p"
+        );
+        assert_eq!(
+            default_snapshot["result"]["structuredContent"]["byteLength"],
+            3_110_400
+        );
+        assert_eq!(
+            video.last_request.get().map(|request| request.format),
+            Some(SnapshotFormat::Yuv420p)
         );
 
         let invalid = response(

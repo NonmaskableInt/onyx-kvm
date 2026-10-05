@@ -2127,3 +2127,13 @@ broker (`crates/cleankvm-video-broker`) and authenticated HTTPS MCP
      - `{"byteLength":3110400,"format":"yuv422p","height":1080,"sha256":"8f0bdd7ef6ea7326d39d4570ba0dea1ec0ec304a44b33cd3d2e243541003f204","width":1920}`
    - Post-capture UART audit confirmed `FRAME_ABSENT_RC=0` (`/run/cleankvm-frame.yuv422p` removed immediately after hashing), `DEVMEM_ABSENT_RC=0`, `FINAL_LOADED=` empty (all 6 quarantine modules reverse-unloaded cleanly), and `POST_TAINT=4096`.
 
+### Snapshot pixel-format contract correction (2026-10-05)
+
+The live v49 broker returned 3,110,400-byte frames but labeled them `yuv422p`.
+That length is exactly 1920x1080 planar YUV420; planar YUV422 is 4,147,200
+bytes. This did not invalidate the MIPI/VI hardware admission, frame hashes, or
+cleanup evidence, but it was an incorrect public protocol label. The media
+protocol now has a distinct `yuv420p` value, MCP defaults to that observed
+format, and the broker fails closed unless captured length exactly matches the
+requested format. The correction requires offline rebuild and target
+verification before inclusion in the next image.

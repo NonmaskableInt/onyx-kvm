@@ -1,6 +1,7 @@
 use std::io;
 
 mod https;
+mod web;
 
 fn main() -> io::Result<()> {
     if https::serve_from_environment()? {

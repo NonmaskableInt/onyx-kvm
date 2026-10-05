@@ -1,6 +1,5 @@
 use cleankvm_video_broker::{
-    EXPECTED_YUV420P_1080P_BYTES, EXPECTED_YUV422P_1080P_BYTES, FRAME_LEN, decode_and_authorize,
-    summarize_yuv422p_frame,
+    EXPECTED_YUV422P_1080P_BYTES, FRAME_LEN, decode_and_authorize, summarize_frame,
 };
 use std::env;
 use std::fs::{self, File, Permissions};
@@ -106,9 +105,9 @@ fn serve(mut stream: UnixStream, config: &Config) -> io::Result<()> {
     let mut frame = [0_u8; FRAME_LEN];
     stream.read_exact(&mut frame)?;
     let enabled = File::open(&config.enable).is_ok();
-    let _request = decode_and_authorize(&frame, enabled)
+    let request = decode_and_authorize(&frame, enabled)
         .map_err(|error| io::Error::new(io::ErrorKind::PermissionDenied, error.to_string()))?;
-    let snapshot = capture_bounded_frame(config)?;
+    let snapshot = capture_bounded_frame(config, request.format)?;
     stream.write_all(&snapshot.encode())?;
     stream.flush()
 }
@@ -135,6 +134,7 @@ fn authenticate_peer(_stream: &UnixStream) -> io::Result<()> {
 
 fn capture_bounded_frame(
     config: &Config,
+    format: cleankvm_media_protocol::SnapshotFormat,
 ) -> io::Result<cleankvm_media_protocol::VideoSnapshot> {
     if Path::new(DEVMEM_PATH).exists() {
         return Err(io::Error::new(
@@ -161,16 +161,7 @@ fn capture_bounded_frame(
     file.take((EXPECTED_YUV422P_1080P_BYTES + 1) as u64)
         .read_to_end(&mut bytes)?;
     remove_if_exists(&config.frame_path)?;
-    if !matches!(
-        bytes.len(),
-        EXPECTED_YUV420P_1080P_BYTES | EXPECTED_YUV422P_1080P_BYTES
-    ) {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            format!("captured frame size mismatch: {} bytes", bytes.len()),
-        ));
-    }
-    summarize_yuv422p_frame(&bytes)
+    summarize_frame(&bytes, format)
         .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error.to_string()))
 }
 

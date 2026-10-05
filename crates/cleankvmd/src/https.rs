@@ -21,6 +21,8 @@ use rustls::{
     pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer},
 };
 
+use crate::web::{APP_CSS, APP_JS, INDEX_HTML};
+
 const MAX_HEADER_BYTES: usize = 16 * 1024;
 const MAX_IDENTITY_BYTES: usize = 64 * 1024;
 const TIMEOUT: Duration = Duration::from_secs(10);
@@ -198,6 +200,14 @@ fn handle(
             protected_resource_metadata(&config.resource, &config.authorization_server).to_string();
         return respond(stream, 200, "application/json", body.as_bytes(), None);
     }
+    if request.method == "GET" {
+        return match request.path.as_str() {
+            "/" => respond(stream, 200, "text/html; charset=utf-8", INDEX_HTML, None),
+            "/app.css" => respond(stream, 200, "text/css; charset=utf-8", APP_CSS, None),
+            "/app.js" => respond(stream, 200, "text/javascript; charset=utf-8", APP_JS, None),
+            _ => respond(stream, 404, "text/plain", b"not found", None),
+        };
+    }
     if request.method != "POST" || request.path != "/mcp" {
         return respond(stream, 404, "text/plain", b"not found", None);
     }
@@ -355,7 +365,21 @@ fn respond<W: Write>(
     };
     write!(
         stream,
-        "HTTP/1.1 {status} {reason}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n",
+        concat!(
+            "HTTP/1.1 {} {}\r\n",
+            "Content-Type: {}\r\n",
+            "Content-Length: {}\r\n",
+            "Cache-Control: no-store\r\n",
+            "Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'\r\n",
+            "Permissions-Policy: camera=(), geolocation=(), microphone=()\r\n",
+            "Referrer-Policy: no-referrer\r\n",
+            "X-Content-Type-Options: nosniff\r\n",
+            "X-Frame-Options: DENY\r\n",
+            "Connection: close\r\n"
+        ),
+        status,
+        reason,
+        content_type,
         body.len()
     )?;
     if let Some(challenge) = challenge {
@@ -368,7 +392,7 @@ fn respond<W: Write>(
 
 #[cfg(test)]
 mod tests {
-    use super::{MAX_HEADER_BYTES, read_request};
+    use super::{MAX_HEADER_BYTES, read_request, respond};
     use std::io::Cursor;
 
     #[test]
@@ -390,5 +414,17 @@ mod tests {
     fn rejects_transfer_encoding() {
         let input = b"POST /mcp HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n";
         assert!(read_request(&mut Cursor::new(input)).is_err());
+    }
+
+    #[test]
+    fn responses_apply_browser_security_headers() {
+        let mut output = Vec::new();
+        respond(&mut output, 200, "text/html", b"ok", None)
+            .unwrap_or_else(|error| panic!("response failed: {error}"));
+        let text = String::from_utf8(output).unwrap_or_default();
+        assert!(text.contains("Cache-Control: no-store\r\n"));
+        assert!(text.contains("Content-Security-Policy: default-src 'none';"));
+        assert!(text.contains("Permissions-Policy: camera=(), geolocation=(), microphone=()"));
+        assert!(text.contains("X-Frame-Options: DENY\r\n"));
     }
 }
