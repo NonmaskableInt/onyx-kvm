@@ -18,8 +18,8 @@ admission boundaries. A working video path does not enable audio or HID.
 
 ## Phase 1: close the admitted video snapshot contract
 
-Status: implementation, offline RISC-V builds, and v50 image packaging complete;
-target hardware verification pending.
+Status: complete, including v50 SD read-back, cold-boot fail-closed checks, and
+an authenticated 1920x1080 YUV420P MCP snapshot with exact length and digest.
 
 1. Represent planar YUV420 and planar YUV422 as distinct wire formats.
 2. Make the broker require the captured byte length to match the requested
@@ -49,8 +49,10 @@ Offline artifacts produced after the correction:
 
 ## Phase 2: human web console
 
-Status: first authenticated development shell implemented, built, and packaged
-in the verified v50 image; target hardware verification pending.
+Status: first authenticated development shell implemented, built, packaged,
+and served successfully from v50. Direct HTTPS and authorization-negative tests
+pass. Managed-browser use remains blocked on trusted certificate enrollment;
+the certificate warning will not be bypassed.
 
 1. Serve a small static application from the existing TLS daemon; do not add a
    second network service.
@@ -83,8 +85,9 @@ HID operations without gaining a broader grant than an equivalent MCP client.
 
 ## Phase 3: audio and microphone (Phase 3a)
 
-Status: enumeration passed; local bounded capture probe is built but its
-hardware admission is incomplete.
+Status: enumeration passed; the current bounded-capture candidate v51 is built
+and offline-verified, but its flash/read-back and hardware capture admission are
+incomplete.
 
 1. Run the existing root-only one-second microphone metrics probe under fresh
    explicit local authorization. Confirm capture stops, DMA and file
@@ -119,9 +122,12 @@ privacy, cleanup, authorization, timeout, and cold-boot fail-closed tests.
 
 ## Immediate execution order
 
-1. Flash v50 and verify its embedded artifacts from SD-card read-back.
-2. Repeat cold-boot fail-closed and admitted YUV420P MCP snapshot tests.
-3. Verify the authenticated web shell status and snapshot-metadata flow.
-4. Execute the already prepared Phase 3a local microphone proof.
+1. Flash v51 and verify its embedded artifacts from SD-card read-back.
+2. Verify its cold-boot fail-closed state and execute the single bounded local
+   microphone metrics proof.
+3. Enroll browser trust and verify the authenticated web shell status and
+   snapshot-metadata flow without bypassing TLS warnings.
+4. Establish playback routing and run a separately authorized bounded output
+   proof.
 5. Implement audio brokers and expose them through MCP and the web console only
    after the hardware evidence passes.

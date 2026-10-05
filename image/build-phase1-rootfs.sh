@@ -87,6 +87,35 @@ fi
         esac
         source build/cvisetup.sh
         defconfig sg2002_licheervnano_sd
+        # The SDK work volume is deliberately reusable, but Buildroot overlays
+        # are additive. Remove every optional artifact from both the source
+        # overlay and an incremental target before installing the artifacts
+        # selected for this build. This prevents a profile transition (for
+        # example, video to audio enumeration) from silently inheriting a
+        # previously admitted component.
+        for optional_path in \
+            usr/libexec/cleankvm-raw-frame-probe \
+            usr/libexec/cleankvm-audio-capture-probe \
+            usr/libexec/cleankvm-lt6911uxc-edid-programmer \
+            usr/libexec/cleankvm-lt6911uxc-flash-backup
+        do
+            rm -f "cleankvm/phase1-overlay/$optional_path"
+            rm -f "buildroot/output/target/$optional_path"
+        done
+        sed -i \
+            -e "\\|^/usr/libexec/cleankvm-raw-frame-probe f |d" \
+            -e "\\|^/usr/libexec/cleankvm-audio-capture-probe f |d" \
+            -e "\\|^/usr/libexec/cleankvm-lt6911uxc-edid-programmer f |d" \
+            -e "\\|^/usr/libexec/cleankvm-lt6911uxc-flash-backup f |d" \
+            cleankvm/phase1-devices.txt
+        if [ "$CLEANKVM_CONFIG_PROFILE" != phase3-video-foundation ]; then
+            rm -f cleankvm/phase1-overlay/usr/bin/cleankvm-video-broker
+            rm -f cleankvm/phase1-overlay/etc/init.d/S47cleankvm-video-broker
+            rm -rf cleankvm/phase1-overlay/usr/lib/cleankvm/video-quarantine
+            rm -f buildroot/output/target/usr/bin/cleankvm-video-broker
+            rm -f buildroot/output/target/etc/init.d/S47cleankvm-video-broker
+            rm -rf buildroot/output/target/usr/lib/cleankvm/video-quarantine
+        fi
         # Incremental profile changes must not carry generated device nodes from
         # an earlier audio image into a non-audio filesystem. These nodes are
         # not owned by an overlay or device table and otherwise survive in the

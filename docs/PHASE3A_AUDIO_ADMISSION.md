@@ -1,6 +1,6 @@
 # Phase 3a audio and microphone admission
 
-Updated: 2026-09-12
+Updated: 2026-10-05
 
 ## Security decision
 
@@ -120,3 +120,29 @@ All offline rootfs, ownership, FIT, and embedded-artifact audits passed. Its
 31 GB card read-back verified every embedded artifact before safe ejection;
 macOS FAT bookkeeping produced whole read-back hash
 `3f4d216e0067c554fcb9880be08973704451f45d489aa2624b4d5b4831fbd78b`.
+
+## Current v51 hardware-capture candidate
+
+The Stage B proof has been rebuilt on the current authenticated web/MCP and HID
+foundation as `out/phase3a-web-capture-v51/cleankvm-phase1.img` (79,692,288
+bytes, SHA-256
+`f7725d253b1739eca6c077bb632b54207cf3261badb5c17640c3eb0559e123a7`).
+The embedded FIT, rootfs, and FIP hashes are respectively `1b504a2c...`,
+`9295c98e...`, and `6e6d3b5c...`; all passed offline verification. The installed
+root-only capture probe matches the previously audited binary (SHA-256
+`55f10830fa0589c75d597f328a94b40a5105f64124d019b50254dab68c34c652`).
+
+The reusable SDK workspace initially retained the Phase 3 video broker from an
+earlier overlay. The rootfs audit failed closed and no image was accepted.
+`image/build-phase1-rootfs.sh` now removes every optional probe plus video
+broker, startup script, and quarantine-module directory from both overlay and
+incremental target before restoring only explicitly selected artifacts. The
+corrected v51 rootfs audit and audio-probe ownership audit passed.
+
+The next authorized hardware operation is limited to Stage B capture metrics:
+verify embedded artifacts after flashing, establish a cold-boot baseline with
+no video modules and both audio gates absent, invoke the probe once locally as
+root, verify the one-second bound and structural metrics, then confirm no
+process retains a sound device. No raw PCM export, audio playback, HDMI-audio
+work, UAC exposure, MCP audio tool, or web audio control is admitted by this
+image.

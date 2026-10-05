@@ -9,7 +9,7 @@ tracked in `docs/PRODUCT_COMPLETION_PLAN.md`. The final image includes an
 authenticated human web console and MCP, with separately admitted video, HID,
 microphone capture, and audio output.
 
-The first follow-up closes a discovered protocol mismatch: the v49 MCP capture
+The first follow-up closed a discovered protocol mismatch: the v49 MCP capture
 returned 3,110,400 bytes, which is 1920x1080 planar YUV420, while labeling the
 result `yuv422p`. The protocol and broker now represent `yuv420p` separately,
 default MCP snapshots to it, and reject a captured buffer whose exact byte
@@ -20,8 +20,9 @@ static RISC-V artifacts were rebuilt (current web-enabled `cleankvmd`
 broker `84074a5851cc...`). The independently rebuilt v50 image is now packaged
 at `out/phase3-web-video-v50/cleankvm-phase1.img` (79,692,288 bytes, SHA-256
 `e57f5b480e0bf4da02350a88ebb8928cf34997ab1c273845c83e3e7732718fe8`).
-Its FIP, FIT, and rootfs passed embedded-artifact verification; SD-card read-back
-and cold-boot hardware verification remain pending.
+Its FIP, FIT, and rootfs passed embedded-artifact verification, SD-card
+read-back, cold-boot fail-closed verification, and an admitted YUV420P MCP
+snapshot test.
 
 The first human web shell is now embedded in the same TLS daemon. It uses the
 existing MCP authorization and policy path, keeps a pasted development token
@@ -65,9 +66,23 @@ The broker reported `isError: false` and returned the corrected `yuv420p` format
 Afterward the video gate was removed. The captured frame was absent, `/dev/mem`
 remained absent, no `soph_*` module remained loaded, post-taint was the expected
 4096, and microphone and speaker gates remained disabled. The next bounded step
-is browser-side authenticated snapshot-metadata verification, followed by the
-separate Phase 3a microphone proof; neither audio boundary is admitted by this
-video result.
+was browser-side authenticated snapshot-metadata verification. The application
+and JavaScript resources passed direct HTTPS checks, but the managed browser
+correctly refused the development certificate (`ERR_CERT_AUTHORITY_INVALID`),
+and policy forbids bypassing that warning. Certificate trust/enrollment is now
+a release prerequisite rather than a reason to weaken TLS.
+
+The separate Phase 3a microphone image is now prepared at
+`out/phase3a-web-capture-v51/cleankvm-phase1.img` (79,692,288 bytes, SHA-256
+`f7725d253b1739eca6c077bb632b54207cf3261badb5c17640c3eb0559e123a7`).
+Its FIT (`1b504a2c...`), rootfs (`9295c98e...`), and FIP (`6e6d3b5c...`)
+passed offline verification. A profile-transition hardening change removes all
+optional probes, video modules, and video startup artifacts from reusable
+overlay and target trees before selectively restoring only requested content;
+the v51 audio rootfs therefore contains no inherited video broker or quarantine
+modules. The next bounded step is flash/read-back verification followed by a
+cold-boot fail-closed baseline and the root-only, one-second microphone metrics
+probe. Audio output remains disabled and is not part of this test.
 
 ## First hardware video frame captured: MIPI RX pinmux and pad pull-down resolution (2026-09-23)
 
