@@ -1,0 +1,45 @@
+#!/usr/bin/expect -f
+set timeout 30
+set credential_path [lindex $argv 0]
+set action [lindex $argv 1]
+if {$action ne "enable" && $action ne "disable"} { exit 2 }
+set fh [open $credential_path r]
+set credential_text [read $fh]
+close $fh
+if {![regexp -line {^password=(.*)$} $credential_text -> password]} { exit 3 }
+
+spawn /usr/bin/sudo /usr/bin/cu -l /dev/cu.usbserial-112440 -s 115200
+expect { -re {Connected\.} {} timeout { exit 7 } }
+send "\003\r"
+set logged_in 0
+expect {
+    -re {# } { set logged_in 1 }
+    -re {login: *$} {}
+    timeout { send "~."; exit 4 }
+}
+if {!$logged_in} {
+    send "root\r"
+    expect { -re {Password: *$} {} timeout { send "~."; exit 5 } }
+    log_user 0
+    send -- "$password\r"
+    expect { -re {# } {} timeout { log_user 1; send "~."; exit 6 } }
+}
+unset password
+unset credential_text
+log_user 1
+set send_slow {1 .01}
+send "\003\025"
+send -s "stty -echo\r"
+after 1000
+if {$action eq "enable"} {
+    set command {touch /run/cleankvm/video-enabled; test -f /run/cleankvm/video-enabled; echo VIDEO_GATE_ENABLE_RC=$?}
+} else {
+    set command {rm -f /run/cleankvm/video-enabled; test ! -e /run/cleankvm/video-enabled; echo VIDEO_GATE_DISABLE_RC=$?; test ! -e /run/cleankvm-frame.yuv422p; echo FRAME_ABSENT_RC=$?; test ! -e /dev/mem; echo DEVMEM_ABSENT_RC=$?; printf 'FINAL_MODULES='; awk '$1 ~ /^soph_/ {printf "%s,", $1}' /proc/modules; echo; printf 'POST_TAINT='; cat /proc/sys/kernel/tainted; test ! -e /run/cleankvm/audio-capture-enabled; echo MICROPHONE_DISABLED_RC=$?; test ! -e /run/cleankvm/audio-output-enabled; echo SPEAKER_DISABLED_RC=$?}
+}
+send "\025"
+send -s -- "$command; echo __CLEANKVM_GATE_DONE__\r"
+expect { -re {__CLEANKVM_GATE_DONE__} {} timeout { send "~."; exit 8 } }
+send -s "stty echo\r"
+after 500
+send "\r~."
+expect eof

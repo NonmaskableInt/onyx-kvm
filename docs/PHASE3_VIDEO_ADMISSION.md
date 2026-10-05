@@ -2137,3 +2137,28 @@ protocol now has a distinct `yuv420p` value, MCP defaults to that observed
 format, and the broker fails closed unless captured length exactly matches the
 requested format. The correction requires offline rebuild and target
 verification before inclusion in the next image.
+# v50 corrected-format image and live admission verification (2026-10-05)
+
+The independently rebuilt v50 image
+`out/phase3-web-video-v50/cleankvm-phase1.img` (79,692,288 bytes, SHA-256
+`e57f5b480e0bf4da02350a88ebb8928cf34997ab1c273845c83e3e7732718fe8`)
+was written to the uniquely resolved 31.0 GB removable `/dev/disk4`. Exact-span
+read-back SHA-256 was
+`23d3406dc13793790f587023f78896bf4a9db4909948e5bc25dc16bb7cb9e7a2`;
+macOS FAT bookkeeping accounted for the whole-span difference, while the
+embedded FIP, FIT, and rootfs matched their audited inputs.
+
+Cold boot passed fail-closed admission: taint 0, no preloaded `soph_*` modules,
+no `/dev/mem`, no video/microphone/speaker gates, and no ALSA control node.
+Installed daemon and broker hashes matched the packaged v50 artifacts. With a
+five-minute EdDSA `at+jwt` grant scoped to `kvm:read kvm:video`, `tools/list`
+exposed only `kvm.status` before the video gate existed. Opening only the video
+gate exposed `kvm.video.snapshot`; a bounded 1920x1080 YUV420P request succeeded
+with exact byte length 3,110,400 and SHA-256
+`64e3d95b05308ee66ee47305c1ba0fd16727ec21297e961c1006142ebbb33927`.
+
+The post-capture cleanup check removed the gate and confirmed the frame absent,
+`/dev/mem` absent, no remaining `soph_*` modules, expected taint 4096, and both
+audio gates still disabled. This admits the corrected bounded YUV420P MCP
+snapshot path on v50; it does not admit continuous video, microphone capture,
+or speaker output.

@@ -33,12 +33,41 @@ and production enrollment remain intentionally gated.
 
 ## Immediate bounded hardware step
 
-Resolve the currently inserted removable-media identity, flash only the verified
-v50 image above, and verify embedded FIP/FIT/rootfs hashes from card read-back.
-On cold boot, first prove video, microphone, and speaker gates remain disabled;
-then explicitly admit video and verify that MCP and the web shell both report a
-1920x1080 YUV420P snapshot of exactly 3,110,400 bytes with matching digest.
-Microphone and speaker must remain disabled throughout this video test.
+The v50 flash and cold-boot baseline are complete. The resolver selected exactly
+one external removable target, `/dev/disk4` (USB, 30,992,760,832 bytes, prior
+`CLEANKVM` label). Exactly 79,692,288 bytes were written. The same span read back
+with SHA-256
+`23d3406dc13793790f587023f78896bf4a9db4909948e5bc25dc16bb7cb9e7a2`;
+macOS FAT bookkeeping changed the whole-span hash, while embedded FIP, FIT, and
+rootfs artifacts all matched the audited v50 inputs. The card was safely
+ejected.
+
+Cold boot passed the fail-closed baseline over authenticated UART: kernel taint
+`0`, no preloaded `soph_*` modules, `/dev/mem` absent, video gate absent,
+microphone gate absent, speaker gate absent, and `/dev/snd/controlC0` absent.
+Both Rust services were running. Installed `cleankvmd` and video-broker hashes
+matched `ecf337a8d6aa...` and `84074a5851cc...` respectively. DHCP assigned
+`eth0=192.168.2.98/24`.
+
+The TLS web shell returned HTTP 200 at `https://cleankvm-recovery:8443/` using
+the provisioned certificate, with no-store, strict CSP, permission denial,
+no-referrer, no-sniff, and frame-denial headers. `/app.js` returned 200; an MCP
+`tools/list` request without a bearer grant returned 401. No media gate was
+enabled during these checks.
+
+The first admitted v50 MCP snapshot is also complete. Before admission,
+authenticated `tools/list` exposed only `kvm.status`. Opening only
+`/run/cleankvm/video-enabled` added `kvm.video.snapshot`; a bounded request for
+1920x1080 `yuv420p` returned exactly 3,110,400 bytes with SHA-256
+`64e3d95b05308ee66ee47305c1ba0fd16727ec21297e961c1006142ebbb33927`.
+The broker reported `isError: false` and returned the corrected `yuv420p` format.
+
+Afterward the video gate was removed. The captured frame was absent, `/dev/mem`
+remained absent, no `soph_*` module remained loaded, post-taint was the expected
+4096, and microphone and speaker gates remained disabled. The next bounded step
+is browser-side authenticated snapshot-metadata verification, followed by the
+separate Phase 3a microphone proof; neither audio boundary is admitted by this
+video result.
 
 ## First hardware video frame captured: MIPI RX pinmux and pad pull-down resolution (2026-09-23)
 
