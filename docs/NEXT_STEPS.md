@@ -89,6 +89,17 @@ the audited v51 inputs. The card was safely ejected. The next bounded step is a
 cold-boot fail-closed baseline and the root-only, one-second microphone metrics
 probe. Audio output remains disabled and is not part of this test.
 
+The v51 cold boot and Stage B probe are now complete. The device acquired
+`192.168.2.99`; taint was `0`, `/dev/mem` was absent, loadable-module support was
+kernel-disabled, every media/audio gate was absent, sound nodes were root-only,
+and no PCM was open. The audited probe captured exactly 16,000 mono S16LE frames
+(32,000 bytes at 16 kHz) in about 1.01 seconds and returned metrics only:
+peak 32,767, mean absolute 10,990, RMS 13,098, clipped 0, zeros 0. Post-capture,
+no PCM descriptor, probe process, or audio output file remained; taint stayed 0
+and both audio gates stayed absent. Stage B passes. The next audio step is the
+separately bounded Stage C output-routing investigation; no playback is yet
+admitted.
+
 ## First hardware video frame captured: MIPI RX pinmux and pad pull-down resolution (2026-09-23)
 
 Offline attribution of the persistent D3 instability and packet header

@@ -85,9 +85,10 @@ HID operations without gaining a broader grant than an equivalent MCP client.
 
 ## Phase 3: audio and microphone (Phase 3a)
 
-Status: enumeration passed; the current bounded-capture candidate v51 is built,
-offline-verified, flashed, and verified from SD-card read-back. Its cold-boot
-and hardware capture admission remain incomplete.
+Status: enumeration and the bounded local microphone proof pass on v51. The
+capture returned exactly one second of metrics-only PCM and left no open PCM,
+process, output file, gate, or taint. Playback routing and both network-facing
+audio brokers remain unadmitted.
 
 1. Run the existing root-only one-second microphone metrics probe under fresh
    explicit local authorization. Confirm capture stops, DMA and file
@@ -122,11 +123,9 @@ privacy, cleanup, authorization, timeout, and cold-boot fail-closed tests.
 
 ## Immediate execution order
 
-1. Verify v51's cold-boot fail-closed state and execute the single bounded local
-   microphone metrics proof.
+1. Establish playback routing and safe mute state, then run a separately
+   authorized bounded output proof.
 2. Enroll browser trust and verify the authenticated web shell status and
    snapshot-metadata flow without bypassing TLS warnings.
-3. Establish playback routing and run a separately authorized bounded output
-   proof.
-4. Implement audio brokers and expose them through MCP and the web console only
+3. Implement audio brokers and expose them through MCP and the web console only
    after the hardware evidence passes.

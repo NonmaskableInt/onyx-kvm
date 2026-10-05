@@ -152,3 +152,29 @@ gates absent, invoke the probe once locally as root, verify the one-second bound
 and structural metrics, then confirm no process retains a sound device. No raw
 PCM export, audio playback, HDMI-audio work, UAC exposure, MCP audio tool, or
 web audio control is admitted by this image.
+
+## Stage B v51 hardware result
+
+The flashed v51 image cold-booted at `192.168.2.99` with kernel taint `0`,
+`/dev/mem` absent, loadable-module support disabled at the kernel boundary,
+video/microphone/speaker gates absent, no media nodes, no UAC function, and no
+process holding a sound-device descriptor. The ADC and DAC enumerated as
+`cv182xaadc` card 0 and `cv182xadac` card 1; all five sound nodes were owned by
+root with mode `0600`. The installed capture probe matched the audited SHA-256
+`55f10830fa0589c75d597f328a94b40a5105f64124d019b50254dab68c34c652`,
+and its internal zeroization/math self-test passed.
+
+One explicitly authorized local capture completed successfully in about 1.01
+seconds with `CAPTURE_RC=0`: 16,000 mono S16LE frames, 32,000 bytes, 16 kHz,
+peak absolute sample 32,767, mean absolute sample 10,990, integer RMS 13,098,
+zero clipped samples, and zero zero-valued samples. No raw sample was written or
+sent. After return, the PCM status endpoint was unavailable (closed), a complete
+process-FD scan found no sound-device handle, no probe process remained, and no
+audio/PCM/WAV output file existed under `/run` or `/tmp`. Kernel taint remained
+`0`; both audio gates remained absent.
+
+Stage B therefore passes its bounded local microphone proof. This admits the
+physical capture path only as evidence; it does not enable background capture,
+network retrieval, MCP/web audio tools, playback, HDMI audio, or UAC. Stage C
+playback remains a separate boundary and must first establish amplifier/mute
+routing and a safe inactive state.
