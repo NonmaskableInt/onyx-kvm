@@ -147,6 +147,16 @@ embedded-artifact verification. Next: flash/read back v53, cold-boot with both
 gates absent, verify sockets and broker identities, then exercise capture and
 playback independently over authenticated MCP with cleanup checks between them.
 
+The v53 flash/read-back is complete on the uniquely resolved external physical
+31 GB CleanKVM card (`/dev/disk4`). Exactly 79,692,288 bytes were written. The
+same span read back with SHA-256
+`f63715da2d13333479370b90cfcfc1e0d8e69e4f00cfa80e9d37bf4249aea238`;
+embedded FIP, FIT, and rootfs matched the audited v53 artifacts. All card
+partitions were unmounted; macOS did not acknowledge the optional physical
+eject request. Next: insert the card, cold boot, verify both audio gates absent
+and both broker sockets present, then run the independent authenticated MCP
+capture and playback acceptance checks.
+
 ## First hardware video frame captured: MIPI RX pinmux and pad pull-down resolution (2026-09-23)
 
 Offline attribution of the persistent D3 instability and packet header

@@ -274,3 +274,11 @@ FIT and FIP remain `1b504a2c...` and `6e6d3b5c...`. Hardware/network admission
 is still pending, so Stage D remains fail-closed until v53 read-back, cold-boot,
 negative gate tests, independent authenticated operations, and post-operation
 PCM/process/file/gate checks pass.
+
+The v53 candidate was flashed to the uniquely resolved 30,992,760,832-byte
+external physical CleanKVM card. Exactly 79,692,288 bytes were written and read
+back. macOS FAT bookkeeping changed the whole-span SHA-256 to
+`f63715da2d13333479370b90cfcfc1e0d8e69e4f00cfa80e9d37bf4249aea238`,
+while the embedded FIT, rootfs, and FIP all matched the audited inputs. All
+partitions were unmounted after verification. Cold-boot and independent MCP
+audio admission remain pending.
