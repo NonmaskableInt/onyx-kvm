@@ -275,14 +275,92 @@ Over the network at `https://cleankvm-recovery:8443`:
 - Negative authorization calls (`kvm.video.snapshot`, `kvm.audio.capture`,
   `kvm.audio.play`, `kvm.keyboard.send`) failed closed as disabled or policy-denied.
 
-Next bounded steps:
-Exercise each capability independently one at a time over authenticated MCP with
-cleanup and fail-closed invariant verification between steps:
-1. Video snapshot (`kvm.video.snapshot` with scoped grant and runtime video gate)
-2. HID keyboard and pointer (`kvm.keyboard.send` / `kvm.pointer.send` with mutation grant)
-3. Audio capture (`kvm.audio.capture` with scoped grant and runtime capture gate)
-4. Audio output (`kvm.audio.play` with mutation grant and runtime output gate)
+### Complete product capability admission matrix (v55 on target)
 
+All four capabilities have been independently exercised, verified, and confirmed
+fail-closed on target (`192.168.2.104`):
+
+1. **Capability 1: Video snapshot (`kvm.video.snapshot`)**:
+   - Resolved probe mismatch: replaced an unadmitted early probe in the rootfs with
+     the verified Patch 0008 probe `151287655f54f42f34b5c70ea73d27c58a48e2c54bc1f94374d5eee40846be45`
+     (`out/phase3-raw-frame-probe-v46/cleankvm-raw-frame-probe`).
+   - Confirmed LT6911 bridge lock: `HDMI_SIGNAL_A3=0x55`, `CSI_VACTIVE=1080`,
+     `CSI_HACTIVE=1920`.
+   - Enabled `/run/cleankvm/video-enabled` and authenticated with a scoped
+     `kvm:video` development token.
+   - MCP `tools/list` exposed `kvm.video.snapshot`; calling `kvm.video.snapshot`
+     captured live 1920x1080 planar YUV420P frame (3,110,400 bytes, SHA-256
+     `0f41e6389208cd2597532340d4d5732c5e25ad76897908e16c7b31ee191abe9f`,
+     `isError: false`). Repeated capture yielded byte-identical digest.
+   - Post-cleanup verification: gate removed, `/dev/mem` absent, all 6 `soph_*`
+     modules unloaded (`SOPH_MODULES=` empty), temporary frame file unlinked,
+     post-taint 4096 (expected from module load/unload cycle), calling
+     `kvm.video.snapshot` failed closed (`-32602`).
+
+2. **Capability 2: HID controls (`kvm.keyboard.send` / `kvm.pointer.send`)**:
+   - Device nodes verified: `/dev/hidg0` (keyboard) and `/dev/hidg1` (pointer)
+     present with `0600 root:root` permissions.
+   - Enabled `/run/cleankvm/hid-enabled` and authenticated with a mutation-enabled
+     `kvm:control` development token.
+   - MCP `tools/list` exposed `kvm.keyboard.send` and `kvm.pointer.send`.
+   - Calling `kvm.keyboard.send` with 8-byte report `[0,0,0,0,0,0,0,0]` returned
+     `accepted: true`.
+   - Calling `kvm.pointer.send` with 4-byte report `[0,0,0,0]` returned
+     `accepted: true`.
+   - Negative validation: malformed 7-byte keyboard report and 5-byte pointer report
+     rejected with `-32602`.
+   - Post-cleanup verification: gate removed, calling `kvm.keyboard.send` failed
+     closed with `-32603 ("HID broker rejected report")`.
+
+3. **Capability 3: Audio capture (`kvm.audio.capture`)**:
+   - Enabled `/run/cleankvm/audio-capture-enabled` and authenticated with a scoped
+     `kvm:audio-capture` development token.
+   - MCP `tools/list` exposed `kvm.audio.capture`.
+   - Calling `kvm.audio.capture` completed in 1,010 ms, capturing exactly 16,000
+     frames / 32,000 bytes at 16 kHz mono S16LE. Returned aggregate metrics only
+     (`peakAbsolute: 32530, meanAbsolute: 2549, rms: 5711, clippedSamples: 0, zeroSamples: 4`),
+     with zero raw PCM leaked over the boundary.
+   - Negative validation: passing unexpected arguments rejected with `-32602`.
+   - Post-cleanup verification: gate removed, zero sound descriptors held
+     (`SOUND_FDS=` empty), calling `kvm.audio.capture` failed closed with `-32602`.
+
+4. **Capability 4: Audio output (`kvm.audio.play`)**:
+   - Enabled `/run/cleankvm/audio-output-enabled` and authenticated with a mutation-enabled
+     `kvm:audio-output` development token.
+   - `kvm.status` reported `audioOutputEnabled: true`; `tools/list` exposed
+     `kvm.audio.play`.
+   - Calling `kvm.audio.play` with `{}` played exactly 16,000 mono S16LE frames /
+     32,000 bytes at 16 kHz, using the admitted 1 kHz tone at peak 512 and lowest
+     nonzero DAC setting, completing in 1,000 ms (`isError: false`).
+   - Negative validation: passing extra arguments rejected with `-32602`.
+   - Post-cleanup verification: gate removed, `kvm.status` reported
+     `audioOutputEnabled: false`, `tools/list` omitted `kvm.audio.play`, calling
+     `kvm.audio.play` failed closed with `-32602`, and zero sound descriptors remained
+     (`SOUND_FDS=` empty).
+
+5. **Target final invariant audit**:
+   - Executed `cleanup-all`: all four capability gates absent (`RC=0`), `/dev/mem`
+     absent (`RC=0`), no vendor modules loaded (`SOPH_MODULES=` empty), kernel
+     taint `4096`, and zero sound descriptors open across all processes (`SOUND_FDS=` empty).
+   - Updated `image/build-phase1-rootfs.sh` to ensure `CLEANKVM_RAW_FRAME_PROBE`,
+     `CLEANKVM_AUDIO_CAPTURE_PROBE`, and `CLEANKVM_AUDIO_PLAYBACK_PROBE` default to
+     verified build outputs for `product` and media profiles.
+   - Added `image/product-gate.exp` and `image/product-exec.exp` with clean `cu`
+     disconnect sequences and prompt-aware login.
+
+## Next steps
+
+1. **Human Web Console Verification**:
+   - Establish trusted client TLS enrollment for the device identity certificate
+     to allow web browsers to access `https://cleankvm-recovery:8443` without
+     bypassing security warnings.
+   - Verify web console UI rendering: capability indicator strip, snapshot
+     metadata, and authenticated control flows.
+2. **Release Image Packaging (v56)**:
+   - Assemble `out/product-v56` incorporating the rootfs build probe defaults.
+   - Verify image assembly, FIP/FIT/rootfs digests, and offline audits.
+   - Flash to removable target, perform read-back hash verification, and run
+     cold-boot acceptance.
 
 ## First hardware video frame captured: MIPI RX pinmux and pad pull-down resolution (2026-09-23)
 

@@ -1,0 +1,55 @@
+#!/usr/bin/expect -f
+set timeout 30
+if {$argc < 2} {
+    puts stderr "usage: product-exec.exp CREDENTIAL_PATH COMMAND"
+    exit 1
+}
+set credential_path [lindex $argv 0]
+set command [lindex $argv 1]
+
+set fh [open $credential_path r]
+set credential_text [read $fh]
+close $fh
+if {![regexp -line {^password=(.*)$} $credential_text -> password]} { exit 2 }
+
+spawn /usr/bin/sudo /usr/bin/cu -l /dev/cu.usbserial-112440 -s 115200
+expect { -re {Connected\.} {} timeout { exit 7 } }
+after 300
+send "\r"
+set logged_in 0
+set tries 0
+while {$tries < 6} {
+    set timeout 2
+    expect {
+        -re {# } { set logged_in 1; break }
+        -re {login: *$} { break }
+        timeout { incr tries; send "\r" }
+    }
+}
+set timeout 30
+if {!$logged_in} {
+    send "root\r"
+    expect { -re {Password: *$} {} timeout { exit 4 } }
+    set send_slow {1 .02}
+    log_user 0
+    send -s -- "$password\r"
+    expect { -re {# } {} timeout { log_user 1; exit 5 } }
+}
+
+unset password
+unset credential_text
+log_user 1
+send "stty -echo\r"
+after 200
+send -- "$command; echo __CLEANKVM_EXEC_DONE__\r"
+expect { -re {__CLEANKVM_EXEC_DONE__} {} timeout { exit 6 } }
+send "stty echo\r"
+after 100
+send "\r\r"
+after 200
+send "~.\r"
+expect { -re {Disconnected\.} {} timeout {} }
+catch close
+catch wait
+exit 0
+

@@ -12,9 +12,37 @@ credential_hash_file=${CLEANKVM_RECOVERY_PASSWORD_HASH_FILE:-}
 identity_dir=${CLEANKVM_IDENTITY_DIR:-}
 config_profile=${CLEANKVM_CONFIG_PROFILE:-phase1}
 video_module_dir=${CLEANKVM_VIDEO_MODULE_DIR:-$repo_root/out/phase3-video-modules-v1}
-raw_frame_probe=${CLEANKVM_RAW_FRAME_PROBE:-}
-audio_capture_probe=${CLEANKVM_AUDIO_CAPTURE_PROBE:-}
-audio_playback_probe=${CLEANKVM_AUDIO_PLAYBACK_PROBE:-}
+
+default_raw_frame_probe=
+if test -f "$repo_root/out/phase3-raw-frame-probe-v46/cleankvm-raw-frame-probe"; then
+    case "$config_profile" in
+        phase3-video-foundation|product)
+            default_raw_frame_probe=$repo_root/out/phase3-raw-frame-probe-v46/cleankvm-raw-frame-probe
+            ;;
+    esac
+fi
+raw_frame_probe=${CLEANKVM_RAW_FRAME_PROBE:-$default_raw_frame_probe}
+
+default_audio_capture_probe=
+if test -f "$repo_root/out/phase3a-capture-probe-v1/cleankvm-audio-capture-probe"; then
+    case "$config_profile" in
+        phase3a-audio-enumeration|product)
+            default_audio_capture_probe=$repo_root/out/phase3a-capture-probe-v1/cleankvm-audio-capture-probe
+            ;;
+    esac
+fi
+audio_capture_probe=${CLEANKVM_AUDIO_CAPTURE_PROBE:-$default_audio_capture_probe}
+
+default_audio_playback_probe=
+if test -f "$repo_root/out/phase3a-playback-probe-v1/cleankvm-audio-playback-probe"; then
+    case "$config_profile" in
+        phase3a-audio-enumeration|product)
+            default_audio_playback_probe=$repo_root/out/phase3a-playback-probe-v1/cleankvm-audio-playback-probe
+            ;;
+    esac
+fi
+audio_playback_probe=${CLEANKVM_AUDIO_PLAYBACK_PROBE:-$default_audio_playback_probe}
+
 edid_programmer=${CLEANKVM_EDID_PROGRAMMER:-}
 lt_backup=${CLEANKVM_LT_BACKUP:-}
 identity_source=
