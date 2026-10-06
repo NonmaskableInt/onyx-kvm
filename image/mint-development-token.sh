@@ -1,10 +1,10 @@
 #!/bin/sh
 set -eu
 
-issuer_key=${1:?usage: mint-development-token.sh ISSUER_PRIVATE_KEY ISSUER AUDIENCE OUTPUT_FILE [read-only|hid-control|video-snapshot]}
-issuer=${2:?usage: mint-development-token.sh ISSUER_PRIVATE_KEY ISSUER AUDIENCE OUTPUT_FILE [read-only|hid-control|video-snapshot]}
-audience=${3:?usage: mint-development-token.sh ISSUER_PRIVATE_KEY ISSUER AUDIENCE OUTPUT_FILE [read-only|hid-control|video-snapshot]}
-output_file=${4:?usage: mint-development-token.sh ISSUER_PRIVATE_KEY ISSUER AUDIENCE OUTPUT_FILE [read-only|hid-control|video-snapshot]}
+issuer_key=${1:?usage: mint-development-token.sh ISSUER_PRIVATE_KEY ISSUER AUDIENCE OUTPUT_FILE [read-only|hid-control|video-snapshot|audio-capture|audio-output]}
+issuer=${2:?usage: mint-development-token.sh ISSUER_PRIVATE_KEY ISSUER AUDIENCE OUTPUT_FILE [read-only|hid-control|video-snapshot|audio-capture|audio-output]}
+audience=${3:?usage: mint-development-token.sh ISSUER_PRIVATE_KEY ISSUER AUDIENCE OUTPUT_FILE [read-only|hid-control|video-snapshot|audio-capture|audio-output]}
+output_file=${4:?usage: mint-development-token.sh ISSUER_PRIVATE_KEY ISSUER AUDIENCE OUTPUT_FILE [read-only|hid-control|video-snapshot|audio-capture|audio-output]}
 profile=${5:-read-only}
 
 test -f "$issuer_key"
@@ -31,6 +31,14 @@ case "$profile" in
     video-snapshot)
         scope='kvm:read kvm:video'
         mutation=false
+        ;;
+    audio-capture)
+        scope='kvm:read kvm:audio-capture'
+        mutation=false
+        ;;
+    audio-output)
+        scope='kvm:read kvm:audio-output'
+        mutation=true
         ;;
     *) printf 'unknown development token profile: %s\n' "$profile" >&2; exit 1 ;;
 esac

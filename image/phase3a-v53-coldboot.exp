@@ -1,0 +1,31 @@
+#!/usr/bin/expect -f
+set timeout 45
+set credential_path [lindex $argv 0]
+set fh [open $credential_path r]
+set credential_text [read $fh]
+close $fh
+if {![regexp -line {^password=(.*)$} $credential_text -> password]} { exit 2 }
+
+spawn /usr/bin/sudo /usr/bin/cu -l /dev/cu.usbserial-112440 -s 115200
+expect { -re {Connected\.} {} timeout { exit 7 } }
+send "\003\r"
+after 2500
+set send_slow {1 .02}
+send -s "root\r"
+after 1500
+log_user 0
+send -s -- "$password\r"
+unset password
+unset credential_text
+after 3500
+log_user 1
+set send_slow {1 .003}
+send -s "stty -echo\r"
+after 300
+send -s {echo CLEANKVM_V53_COLD_BOOT_BEGIN; printf 'UPTIME='; cut -d' ' -f1 /proc/uptime; printf 'TAINT='; cat /proc/sys/kernel/tainted; printf 'IPV4='; ip -4 -o addr show scope global | awk '{print $2 "=" $4 ","}'; echo; printf 'DAEMON_SHA256='; sha256sum /usr/bin/cleankvmd | cut -d' ' -f1; printf 'CAPTURE_BROKER_SHA256='; sha256sum /usr/bin/cleankvm-audio-capture-broker | cut -d' ' -f1; printf 'PLAYBACK_BROKER_SHA256='; sha256sum /usr/bin/cleankvm-audio-playback-broker | cut -d' ' -f1; test -S /run/cleankvm/audio-capture.sock; echo CAPTURE_SOCKET_RC=$?; test -S /run/cleankvm/audio-output.sock; echo OUTPUT_SOCKET_RC=$?; test ! -e /run/cleankvm/audio-capture-enabled; echo CAPTURE_GATE_ABSENT_RC=$?; test ! -e /run/cleankvm/audio-output-enabled; echo OUTPUT_GATE_ABSENT_RC=$?; test ! -e /dev/mem; echo DEVMEM_ABSENT_RC=$?; printf 'SOUND_FDS='; for p in /proc/[0-9]*/fd/*; do t=$(readlink "$p" 2>/dev/null || true); case "$t" in /dev/snd/*) printf '%s,' "$p";; esac; done; echo; echo CLEANKVM_V53_COLD_BOOT_END}
+send "\r"
+after 6000
+send -s "stty echo\r"
+after 300
+send "\r~."
+expect eof

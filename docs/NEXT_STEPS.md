@@ -157,6 +157,25 @@ eject request. Next: insert the card, cold boot, verify both audio gates absent
 and both broker sockets present, then run the independent authenticated MCP
 capture and playback acceptance checks.
 
+The v53 Stage D hardware/MCP acceptance passed at `192.168.2.101`. Cold boot
+and final cleanup both showed taint `0`, `/dev/mem` absent, both broker sockets
+present, both gates absent, and no process holding a `/dev/snd` descriptor. The
+installed daemon and broker hashes exactly matched the audited RISC-V outputs.
+With only the capture gate present, an independently scoped token exposed only
+`kvm.status` and `kvm.audio.capture`; capture returned exactly 16,000 mono S16LE
+frames (32,000 bytes at 16 kHz) in 1,010 ms and aggregate metrics only. With
+capture removed and only output enabled, a mutation-enabled output grant
+exposed only `kvm.status` and `kvm.audio.play`; the fixed 1 kHz/peak-512 tone
+completed in 1,005 ms. Both gates were then removed; status reported both audio
+capabilities false and a capture call failed closed as an unknown/disabled
+tool. Stage D passes.
+
+One diagnostic initially reconnected to an already-authenticated UART shell
+and sent login material as shell input. No network service received it, but the
+development recovery credential must be treated as disclosed and rotated in
+the next packaged image. Remaining product work is the combined video+audio
+release profile, trusted browser enrollment, and the full release matrix.
+
 ## First hardware video frame captured: MIPI RX pinmux and pad pull-down resolution (2026-09-23)
 
 Offline attribution of the persistent D3 instability and packet header

@@ -282,3 +282,31 @@ back. macOS FAT bookkeeping changed the whole-span SHA-256 to
 while the embedded FIT, rootfs, and FIP all matched the audited inputs. All
 partitions were unmounted after verification. Cold-boot and independent MCP
 audio admission remain pending.
+
+## Stage D v53 hardware result
+
+v53 cold-booted at `192.168.2.101`. Initial and final UART snapshots both
+reported kernel taint `0`, `/dev/mem` absent, capture/output broker sockets
+present, capture/output gate files absent, and no process file descriptor
+referencing `/dev/snd`. The installed SHA-256 values exactly matched the
+audited `cleankvmd`, capture-broker, and playback-broker artifacts.
+
+The default authenticated MCP view exposed only `kvm.status` and reported both
+audio directions disabled. Enabling only capture with a dedicated
+`kvm:audio-capture` grant exposed `kvm.audio.capture`; one request completed in
+1,010 ms and returned exactly 16,000 frames/32,000 bytes of mono S16LE shape
+metadata plus aggregate values (peak 32,767, mean absolute 3,119, RMS 6,553,
+zero clipped samples, two zero samples). No PCM was returned.
+
+The capture gate was removed before the output gate was created. A separate
+`kvm:audio-output`, mutation-enabled grant exposed `kvm.audio.play`; its fixed
+one-second tone completed in 1,005 ms with 16,000 frames/32,000 bytes, 1 kHz,
+and peak 512. After both gates were removed, MCP status again reported both
+directions disabled and a capture request returned `Unknown or disabled tool`.
+Final taint remained zero and `SOUND_FDS` was empty. Stage D passes.
+
+During UART automation debugging, a reconnect found a residual authenticated
+physical-console shell and login material was consequently interpreted as
+shell input. It was not sent over the network, but the development recovery
+credential is conservatively considered disclosed and must be rotated before
+the next image is accepted.
