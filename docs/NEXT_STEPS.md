@@ -243,8 +243,46 @@ bytes were written; the same image span read back with SHA-256
 `aef8d7463b610a62db1b32545cccfbb3ddfb1e1b3631486c3db02b1f730288f6`.
 macOS FAT bookkeeping changed the whole-span digest, while the embedded FIP,
 FIT, and rootfs matched the audited v55 artifacts. The card was safely
-ejected. Next: cold-boot v55 and repeat the baseline with the corrected
-prompt-aware harness.
+ejected.
+
+The v55 cold boot and network-side baseline passed completely at
+`192.168.2.104`. The prompt-aware harness (`image/product-coldboot-baseline.exp`)
+verified physical-console state without leaking credentials:
+- Kernel taint: `0`
+- `/dev/mem`: absent (`DEVMEM_ABSENT_RC=0`)
+- Vendor modules: none loaded (`SOPH_MODULES=` empty)
+- Admission gates: all fail-closed (`video-enabled`, `hid-enabled`,
+  `audio-capture-enabled`, `audio-output-enabled` all absent, RC=0)
+- Broker sockets: all four present (`/run/cleankvm/hid.sock`,
+  `/run/cleankvm/video.sock`, `/run/cleankvm/audio-capture.sock`,
+  `/run/cleankvm/audio-output.sock`, RC=0)
+- Running services: all five active (PIDs for `cleankvmd`, `cleankvm-hid-broker`,
+  `cleankvm-video-broker`, `cleankvm-audio-capture-broker`, and
+  `cleankvm-audio-playback-broker`)
+- Open sound descriptors: zero (`SOUND_FDS=` empty)
+
+Over the network at `https://cleankvm-recovery:8443`:
+- HTTPS identity verification succeeded against the provisioned certificate.
+- Root `/` returned 200 with no-store, strict CSP, browser permission denial,
+  no-referrer, no-sniff, and frame-denial headers, serving the embedded web shell.
+- Unauthenticated `/mcp` POST returned 401 with `WWW-Authenticate` Bearer challenge.
+- A freshly minted five-minute read-only token completed MCP `initialize` (200)
+  and `notifications/initialized` (202).
+- Authenticated `tools/list` exposed only `kvm.status`.
+- Authenticated `kvm.status` reported `videoEnabled: false`, `audioCaptureEnabled: false`,
+  `audioOutputEnabled: false`, `mutatingOperationsEnabled: false`, and
+  `networkListeners: 1`.
+- Negative authorization calls (`kvm.video.snapshot`, `kvm.audio.capture`,
+  `kvm.audio.play`, `kvm.keyboard.send`) failed closed as disabled or policy-denied.
+
+Next bounded steps:
+Exercise each capability independently one at a time over authenticated MCP with
+cleanup and fail-closed invariant verification between steps:
+1. Video snapshot (`kvm.video.snapshot` with scoped grant and runtime video gate)
+2. HID keyboard and pointer (`kvm.keyboard.send` / `kvm.pointer.send` with mutation grant)
+3. Audio capture (`kvm.audio.capture` with scoped grant and runtime capture gate)
+4. Audio output (`kvm.audio.play` with mutation grant and runtime output gate)
+
 
 ## First hardware video frame captured: MIPI RX pinmux and pad pull-down resolution (2026-09-23)
 
