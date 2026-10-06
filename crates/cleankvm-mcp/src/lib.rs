@@ -4,7 +4,10 @@ use std::io::{self, BufRead, Write};
 
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use cleankvm_core::{Effect, Grant, Operation, PolicyError, Scope, authorize, authorize_grant};
-use cleankvm_media_protocol::{SnapshotFormat, SnapshotRequest, VideoSnapshot};
+use cleankvm_media_protocol::{
+    CaptureMetrics, PcmFormat, PcmShape, PlaybackReceipt, SnapshotFormat, SnapshotRequest,
+    VideoSnapshot,
+};
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -35,6 +38,24 @@ pub trait VideoTransport {
     /// # Errors
     /// Returns an I/O error when the privileged broker rejects or cannot fulfill it.
     fn capture_snapshot(&self, request: SnapshotRequest) -> io::Result<VideoSnapshot>;
+}
+
+/// Narrow transport boundary for metrics-only microphone capture.
+pub trait AudioCaptureTransport {
+    /// Capture one admitted PCM interval and return aggregate metrics only.
+    ///
+    /// # Errors
+    /// Returns an I/O error when the privileged broker rejects or cannot complete capture.
+    fn capture_metrics(&self, shape: PcmShape) -> io::Result<CaptureMetrics>;
+}
+
+/// Narrow transport boundary for the admitted conservative playback tone.
+pub trait AudioOutputTransport {
+    /// Play one admitted bounded tone and return its completion receipt.
+    ///
+    /// # Errors
+    /// Returns an I/O error when the privileged broker rejects or cannot complete playback.
+    fn play_bounded_tone(&self, shape: PcmShape) -> io::Result<PlaybackReceipt>;
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -328,6 +349,8 @@ pub struct Server<'a> {
     authority: Authority<'a>,
     hid: Option<&'a dyn HidTransport>,
     video: Option<&'a dyn VideoTransport>,
+    audio_capture: Option<&'a dyn AudioCaptureTransport>,
+    audio_output: Option<&'a dyn AudioOutputTransport>,
 }
 
 impl Default for Server<'static> {
@@ -337,6 +360,8 @@ impl Default for Server<'static> {
             authority: Authority::LocalRecovery,
             hid: None,
             video: None,
+            audio_capture: None,
+            audio_output: None,
         }
     }
 }
@@ -359,6 +384,8 @@ impl<'a> Server<'a> {
             },
             hid: None,
             video: None,
+            audio_capture: None,
+            audio_output: None,
         }
     }
 
@@ -380,6 +407,8 @@ impl<'a> Server<'a> {
             },
             hid: None,
             video: None,
+            audio_capture: None,
+            audio_output: None,
         }
     }
 
@@ -400,6 +429,8 @@ impl<'a> Server<'a> {
             },
             hid: Some(hid),
             video: None,
+            audio_capture: None,
+            audio_output: None,
         }
     }
 
@@ -407,6 +438,20 @@ impl<'a> Server<'a> {
     #[must_use]
     pub const fn with_video(mut self, video: &'a dyn VideoTransport) -> Self {
         self.video = Some(video);
+        self
+    }
+
+    /// Attach the independently gated microphone-capture transport.
+    #[must_use]
+    pub const fn with_audio_capture(mut self, audio: &'a dyn AudioCaptureTransport) -> Self {
+        self.audio_capture = Some(audio);
+        self
+    }
+
+    /// Attach the independently gated audio-output transport.
+    #[must_use]
+    pub const fn with_audio_output(mut self, audio: &'a dyn AudioOutputTransport) -> Self {
+        self.audio_output = Some(audio);
         self
     }
 
@@ -521,6 +566,9 @@ impl<'a> Server<'a> {
         if name == "kvm.video.snapshot" {
             return self.call_video_snapshot(id, params.get("arguments"));
         }
+        if matches!(name, "kvm.audio.capture" | "kvm.audio.play") {
+            return self.call_audio_tool(id, name, params.get("arguments"));
+        }
         if name != "kvm.status" {
             return error(id, -32602, "Unknown or disabled tool");
         }
@@ -538,19 +586,78 @@ impl<'a> Server<'a> {
             Authority::Remote { .. } => ("development-remote", 1),
         };
         let video_enabled = self.video.is_some() && self.authorize("kvm.video.snapshot").is_ok();
+        let audio_capture_enabled =
+            self.audio_capture.is_some() && self.authorize("kvm.audio.capture").is_ok();
+        let audio_output_enabled =
+            self.audio_output.is_some() && self.authorize("kvm.audio.play").is_ok();
         let status = json!({
             "mode": mode,
             "networkListeners": network_listeners,
             "mutatingOperationsEnabled": false,
             "videoEnabled": video_enabled,
-            "audioCaptureEnabled": false,
-            "audioOutputEnabled": false
+            "audioCaptureEnabled": audio_capture_enabled,
+            "audioOutputEnabled": audio_output_enabled
         });
         success(
             id,
             &json!({
                 "content": [{ "type": "text", "text": status.to_string() }],
                 "structuredContent": status,
+                "isError": false
+            }),
+        )
+    }
+
+    fn call_audio_tool(&self, id: &Value, name: &str, arguments: Option<&Value>) -> String {
+        let arguments_are_empty =
+            arguments.is_none_or(|value| value.as_object().is_some_and(serde_json::Map::is_empty));
+        if !arguments_are_empty {
+            return error(id, -32602, "Audio operation accepts no arguments");
+        }
+        if self.authorize(name).is_err() {
+            return error(id, -32603, "Policy denied audio operation");
+        }
+        let Ok(shape) = PcmShape::new(PcmFormat::Signed16LittleEndian, 16_000, 1, 1_000) else {
+            return error(id, -32603, "Internal audio shape rejected");
+        };
+        let result = match name {
+            "kvm.audio.capture" => {
+                let Some(audio) = self.audio_capture else {
+                    return error(id, -32602, "Unknown or disabled tool");
+                };
+                let Ok(metrics) = audio.capture_metrics(shape) else {
+                    return error(id, -32603, "Audio capture broker rejected request");
+                };
+                json!({
+                    "frames": metrics.frames, "byteLength": metrics.bytes,
+                    "sampleRateHz": 16000, "channels": 1, "format": "s16le",
+                    "peakAbsolute": metrics.peak_absolute,
+                    "meanAbsolute": metrics.mean_absolute, "rms": metrics.rms,
+                    "clippedSamples": metrics.clipped_samples,
+                    "zeroSamples": metrics.zero_samples, "elapsedMs": metrics.elapsed_ms
+                })
+            }
+            "kvm.audio.play" => {
+                let Some(audio) = self.audio_output else {
+                    return error(id, -32602, "Unknown or disabled tool");
+                };
+                let Ok(receipt) = audio.play_bounded_tone(shape) else {
+                    return error(id, -32603, "Audio output broker rejected request");
+                };
+                json!({
+                    "frames": receipt.frames, "byteLength": receipt.bytes,
+                    "sampleRateHz": 16000, "channels": 1, "format": "s16le",
+                    "toneHz": receipt.tone_hz, "peak": receipt.peak,
+                    "elapsedMs": receipt.elapsed_ms, "completed": true
+                })
+            }
+            _ => return error(id, -32602, "Unknown or disabled tool"),
+        };
+        success(
+            id,
+            &json!({
+                "content": [{ "type": "text", "text": result.to_string() }],
+                "structuredContent": result,
                 "isError": false
             }),
         )
@@ -679,8 +786,44 @@ impl<'a> Server<'a> {
             tools.push(hid_tool("kvm.keyboard.send", "Send keyboard report", 8));
             tools.push(hid_tool("kvm.pointer.send", "Send pointer report", 4));
         }
+        if self.audio_capture.is_some() && self.authorize("kvm.audio.capture").is_ok() {
+            tools.push(audio_tool(
+                "kvm.audio.capture",
+                "Capture microphone metrics",
+                true,
+            ));
+        }
+        if self.audio_output.is_some() && self.authorize("kvm.audio.play").is_ok() {
+            tools.push(audio_tool(
+                "kvm.audio.play",
+                "Play bounded test tone",
+                false,
+            ));
+        }
         json!({ "tools": tools })
     }
+}
+
+fn audio_tool(name: &str, title: &str, read_only: bool) -> Value {
+    json!({
+        "name": name,
+        "title": title,
+        "description": if read_only {
+            "Capture one second of admitted microphone PCM and return aggregate metrics only"
+        } else {
+            "Play the admitted one-second low-amplitude diagnostic tone and restore safe mute"
+        },
+        "inputSchema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object", "additionalProperties": false
+        },
+        "outputSchema": { "$schema": "https://json-schema.org/draft/2020-12/schema", "type": "object" },
+        "annotations": {
+            "readOnlyHint": read_only, "destructiveHint": false,
+            "idempotentHint": false, "openWorldHint": false
+        },
+        "execution": { "taskSupport": "forbidden" }
+    })
 }
 
 fn parse_snapshot_arguments(arguments: Option<&Value>) -> Option<SnapshotRequest> {
@@ -842,9 +985,10 @@ fn discard_line<R: BufRead>(input: &mut R) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::{
-        BearerTokenValidator, Ed25519JwtValidator, HidTransport, HttpAuthError,
-        HttpRequestAuthError, JwtValidationError, MAX_MESSAGE_BYTES, Server, SnapshotFormat,
-        SnapshotRequest, ValidatedClaims, VideoSnapshot, VideoTransport, authenticate_http_request,
+        AudioCaptureTransport, AudioOutputTransport, BearerTokenValidator, CaptureMetrics,
+        Ed25519JwtValidator, HidTransport, HttpAuthError, HttpRequestAuthError, JwtValidationError,
+        MAX_MESSAGE_BYTES, PcmShape, PlaybackReceipt, Server, SnapshotFormat, SnapshotRequest,
+        ValidatedClaims, VideoSnapshot, VideoTransport, authenticate_http_request,
         bearer_challenge, extract_bearer, protected_resource_metadata, serve, validate_origin,
     };
     use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
@@ -1318,5 +1462,85 @@ mod tests {
             r#"{"jsonrpc":"2.0","id":23,"method":"tools/call","params":{"name":"kvm.video.snapshot","arguments":{"width":3840}}}"#,
         );
         assert_eq!(invalid["error"]["code"], -32602);
+    }
+
+    struct RecordingAudio;
+
+    impl AudioCaptureTransport for RecordingAudio {
+        fn capture_metrics(&self, shape: PcmShape) -> io::Result<CaptureMetrics> {
+            assert_eq!(shape.sample_rate_hz, 16_000);
+            Ok(CaptureMetrics {
+                frames: 16_000,
+                bytes: 32_000,
+                peak_absolute: 512,
+                mean_absolute: 128,
+                rms: 180,
+                clipped_samples: 0,
+                zero_samples: 1,
+                elapsed_ms: 1_010,
+            })
+        }
+    }
+
+    impl AudioOutputTransport for RecordingAudio {
+        fn play_bounded_tone(&self, shape: PcmShape) -> io::Result<PlaybackReceipt> {
+            assert_eq!(shape.duration_ms, 1_000);
+            Ok(PlaybackReceipt {
+                frames: 16_000,
+                bytes: 32_000,
+                tone_hz: 1_000,
+                peak: 512,
+                elapsed_ms: 1_005,
+            })
+        }
+    }
+
+    #[test]
+    fn independently_scoped_audio_tools_return_bounded_results() {
+        let audio = RecordingAudio;
+        let capture_scopes = [Scope::Read, Scope::AudioCapture];
+        let capture_grant = Grant {
+            audience: "https://kvm.example/mcp",
+            expires_at_unix_seconds: 200,
+            scopes: &capture_scopes,
+            mutation_enabled: false,
+        };
+        let mut capture = Server::remote_ready("https://kvm.example/mcp", 100, capture_grant)
+            .with_audio_capture(&audio)
+            .with_audio_output(&audio);
+        let status = response(
+            &mut capture,
+            r#"{"jsonrpc":"2.0","id":30,"method":"tools/call","params":{"name":"kvm.status","arguments":{}}}"#,
+        );
+        assert_eq!(
+            status["result"]["structuredContent"]["audioCaptureEnabled"],
+            true
+        );
+        assert_eq!(
+            status["result"]["structuredContent"]["audioOutputEnabled"],
+            false
+        );
+        let result = response(
+            &mut capture,
+            r#"{"jsonrpc":"2.0","id":31,"method":"tools/call","params":{"name":"kvm.audio.capture","arguments":{}}}"#,
+        );
+        assert_eq!(result["result"]["structuredContent"]["byteLength"], 32_000);
+        assert_eq!(result["result"]["structuredContent"]["rms"], 180);
+
+        let output_scopes = [Scope::Read, Scope::AudioOutput];
+        let output_grant = Grant {
+            audience: "https://kvm.example/mcp",
+            expires_at_unix_seconds: 200,
+            scopes: &output_scopes,
+            mutation_enabled: true,
+        };
+        let mut output = Server::remote_ready("https://kvm.example/mcp", 100, output_grant)
+            .with_audio_output(&audio);
+        let result = response(
+            &mut output,
+            r#"{"jsonrpc":"2.0","id":32,"method":"tools/call","params":{"name":"kvm.audio.play","arguments":{}}}"#,
+        );
+        assert_eq!(result["result"]["structuredContent"]["toneHz"], 1_000);
+        assert_eq!(result["result"]["structuredContent"]["completed"], true);
     }
 }

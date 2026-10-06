@@ -93,6 +93,18 @@ fi
         esac
         source build/cvisetup.sh
         defconfig sg2002_licheervnano_sd
+        # Reinstall every selected Rust artifact on every build. The SDK work
+        # volume is reusable, so relying on a prior apply step can otherwise
+        # retain a stale executable even when its source and verified output
+        # have changed.
+        install -m 0755 /repo/out/phase2-rust/cleankvmd \
+            cleankvm/phase1-overlay/usr/bin/cleankvmd
+        install -m 0755 /repo/out/phase2-rust/cleankvm-memtest \
+            cleankvm/phase1-overlay/usr/bin/cleankvm-memtest
+        if [ "$CLEANKVM_CONFIG_PROFILE" != phase1 ]; then
+            install -m 0755 /repo/out/phase2-rust/cleankvm-hid-broker \
+                cleankvm/phase1-overlay/usr/bin/cleankvm-hid-broker
+        fi
         # The SDK work volume is deliberately reusable, but Buildroot overlays
         # are additive. Remove every optional artifact from both the source
         # overlay and an incremental target before installing the artifacts
@@ -130,6 +142,21 @@ fi
         # Buildroot target tree even when CONFIG_SOUND is disabled.
         if [ "$CLEANKVM_CONFIG_PROFILE" != phase3a-audio-enumeration ]; then
             rm -rf buildroot/output/target/dev/snd
+            rm -f cleankvm/phase1-overlay/usr/bin/cleankvm-audio-capture-broker
+            rm -f cleankvm/phase1-overlay/usr/bin/cleankvm-audio-playback-broker
+            rm -f cleankvm/phase1-overlay/etc/init.d/S47cleankvm-audio-capture-broker
+            rm -f cleankvm/phase1-overlay/etc/init.d/S48cleankvm-audio-playback-broker
+            rm -f buildroot/output/target/usr/bin/cleankvm-audio-capture-broker
+            rm -f buildroot/output/target/usr/bin/cleankvm-audio-playback-broker
+            rm -f buildroot/output/target/etc/init.d/S47cleankvm-audio-capture-broker
+            rm -f buildroot/output/target/etc/init.d/S48cleankvm-audio-playback-broker
+        elif [ -f /repo/out/phase3a-rust/cleankvm-audio-capture-broker ] && \
+             [ -f /repo/out/phase3a-rust/cleankvm-audio-playback-broker ]; then
+            cp -a /repo/image/phase3a-audio-overlay/. cleankvm/phase1-overlay/
+            install -m 0755 /repo/out/phase3a-rust/cleankvm-audio-capture-broker \
+                cleankvm/phase1-overlay/usr/bin/cleankvm-audio-capture-broker
+            install -m 0755 /repo/out/phase3a-rust/cleankvm-audio-playback-broker \
+                cleankvm/phase1-overlay/usr/bin/cleankvm-audio-playback-broker
         fi
         if [ -n "$CLEANKVM_RAW_FRAME_PROBE" ]; then
             install -D -m 0500 "$CLEANKVM_RAW_FRAME_PROBE" \
@@ -176,14 +203,14 @@ fi
         fi
         make -C buildroot cvitek_SG200X_musl_riscv64_defconfig \
             BR2_TOOLCHAIN_EXTERNAL_PATH=/work/sdk/host-tools/gcc/riscv64-linux-musl-x86_64 \
-            "BR2_STRIP_EXCLUDE_FILES=cleankvmd cleankvm-memtest cleankvm-hid-broker cleankvm-video-broker"
+            "BR2_STRIP_EXCLUDE_FILES=cleankvmd cleankvm-memtest cleankvm-hid-broker cleankvm-video-broker cleankvm-audio-capture-broker cleankvm-audio-playback-broker"
         # The vendor Buildroot/BusyBox combination does not reliably preserve
         # GNU make jobserver descriptors through its nested configuration
         # makes. A single job is slower but deterministic and fail-closed.
         make -C buildroot -j1 \
             BR2_DL_DIR=/downloads \
             BR2_TOOLCHAIN_EXTERNAL_PATH=/work/sdk/host-tools/gcc/riscv64-linux-musl-x86_64 \
-            "BR2_STRIP_EXCLUDE_FILES=cleankvmd cleankvm-memtest cleankvm-hid-broker cleankvm-video-broker"
+            "BR2_STRIP_EXCLUDE_FILES=cleankvmd cleankvm-memtest cleankvm-hid-broker cleankvm-video-broker cleankvm-audio-capture-broker cleankvm-audio-playback-broker"
         # Incremental Buildroot finalization may retain the prior target-tree
         # mode even though the filesystem device table correctly applies 0500.
         # Normalize both views so the pre-image audit cannot disagree with the
@@ -197,6 +224,8 @@ fi
         hid_broker=
         video_modules=
         video_broker=
+        audio_capture_broker=
+        audio_playback_broker=
         if [ "$CLEANKVM_CONFIG_PROFILE" = phase2-hid ] || \
            [ "$CLEANKVM_CONFIG_PROFILE" = phase3-discovery ] || \
            [ "$CLEANKVM_CONFIG_PROFILE" = phase3-video-foundation ] || \
@@ -208,6 +237,10 @@ fi
             if [ -f /repo/out/phase3-rust/cleankvm-video-broker ]; then
                 video_broker=/repo/out/phase3-rust/cleankvm-video-broker
             fi
+        fi
+        if [ "$CLEANKVM_CONFIG_PROFILE" = phase3a-audio-enumeration ]; then
+            audio_capture_broker=/repo/out/phase3a-rust/cleankvm-audio-capture-broker
+            audio_playback_broker=/repo/out/phase3a-rust/cleankvm-audio-playback-broker
         fi
         /repo/image/audit-rootfs.sh /work/sdk/buildroot/output/target \
             /repo/out/phase2-rust/cleankvmd \
@@ -221,7 +254,9 @@ fi
             "$CLEANKVM_EDID_PROGRAMMER" \
             "$CLEANKVM_LT_BACKUP" \
             "$video_broker" \
-            "$CLEANKVM_AUDIO_PLAYBACK_PROBE"
+            "$CLEANKVM_AUDIO_PLAYBACK_PROBE" \
+            "$audio_capture_broker" \
+            "$audio_playback_broker"
         if [ -n "$CLEANKVM_IDENTITY_SOURCE" ]; then
             debugfs=/work/sdk/buildroot/output/host/sbin/debugfs
             root_image=/work/sdk/buildroot/output/images/rootfs.ext4

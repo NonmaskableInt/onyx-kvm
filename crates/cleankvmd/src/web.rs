@@ -25,6 +25,12 @@ pub const INDEX_HTML: &[u8] = br#"<!doctype html>
       <pre id="snapshot-result">No snapshot captured.</pre>
       <p class="notice">This development checkpoint returns authenticated frame metadata. Browser frame pixels and continuous streaming remain gated.</p>
     </section>
+    <section aria-labelledby="audio-title">
+      <h2 id="audio-title">Audio</h2>
+      <div class="row"><button id="capture-audio" disabled>Measure microphone for one second</button><button id="play-audio" disabled>Play quiet test tone</button></div>
+      <pre id="audio-result">No audio operation completed.</pre>
+      <p class="notice">Microphone capture returns aggregate levels only. Output is a fixed, low-amplitude one-second tone; each direction has its own physical gate and authorization scope.</p>
+    </section>
   </main>
   <script src="/app.js" defer></script>
 </body>
@@ -61,14 +67,36 @@ async function connect() {
   byId('mic').textContent = state.audioCaptureEnabled ? 'Enabled' : 'Disabled';
   byId('speaker').textContent = state.audioOutputEnabled ? 'Enabled' : 'Disabled';
   byId('snapshot').disabled = !state.videoEnabled;
+  byId('capture-audio').disabled = !state.audioCaptureEnabled;
+  byId('play-audio').disabled = !state.audioOutputEnabled;
   byId('message').textContent = 'Authenticated';
 }
 async function snapshot() {
   const result = await mcp('tools/call', {name:'kvm.video.snapshot',arguments:{format:'yuv420p',deadlineMs:5000}});
   byId('snapshot-result').textContent = JSON.stringify(result.structuredContent, null, 2);
 }
+async function captureAudio() {
+  byId('mic').textContent = 'Active';
+  try {
+    const result = await mcp('tools/call', {name:'kvm.audio.capture',arguments:{}});
+    byId('audio-result').textContent = JSON.stringify(result.structuredContent, null, 2);
+  } finally {
+    byId('mic').textContent = 'Enabled';
+  }
+}
+async function playAudio() {
+  byId('speaker').textContent = 'Active';
+  try {
+    const result = await mcp('tools/call', {name:'kvm.audio.play',arguments:{}});
+    byId('audio-result').textContent = JSON.stringify(result.structuredContent, null, 2);
+  } finally {
+    byId('speaker').textContent = 'Enabled';
+  }
+}
 function run(action) { action().catch((error) => { byId('message').textContent = error.message; }); }
 byId('connect').addEventListener('click', () => run(connect));
 byId('snapshot').addEventListener('click', () => run(snapshot));
+byId('capture-audio').addEventListener('click', () => run(captureAudio));
+byId('play-audio').addEventListener('click', () => run(playAudio));
 window.addEventListener('pagehide', () => { token = ''; });
 ";

@@ -127,6 +127,26 @@ remained 0. The next implementation step is separate privileged capture and
 playback brokers with separate Unix sockets, gates, scopes, leases, and MCP/web
 controls; neither broker may autoadmit its capability.
 
+The separate audio service implementation and its v53 candidate are now
+complete offline. `cleankvm-audio-capture-broker` and
+`cleankvm-audio-playback-broker` use distinct root-owned Unix sockets, distinct
+runtime gate files, UID-900 peer checks, serialized one-client operation, and
+the admitted mono S16LE/16 kHz/one-second shape. Capture returns aggregate
+metrics only; playback is limited to the proven 1 kHz/peak-512 diagnostic tone.
+MCP exposes `kvm.audio.capture` and `kvm.audio.play` only when the matching gate,
+transport, scope, and (for playback) mutation grant are all present. The web
+console uses those same MCP paths and visibly marks an operation active.
+
+The full workspace test suite and strict Clippy pass. Static RISC-V SHA-256
+values are `f25e3095...` (`cleankvmd`), `4276c86b...` (capture broker), and
+`140e955e...` (playback broker). The independently assembled v53 image is
+`out/phase3a-audio-brokers-v53/cleankvm-phase1.img` (79,692,288 bytes, SHA-256
+`1df82c71aeaee33f4dc53583218f980554383f75c737e4c4e4d43add594605d0`).
+Its FIT (`1b504a2c...`), rootfs (`31243d5b...`), and FIP (`6e6d3b5c...`) passed
+embedded-artifact verification. Next: flash/read back v53, cold-boot with both
+gates absent, verify sockets and broker identities, then exercise capture and
+playback independently over authenticated MCP with cleanup checks between them.
+
 ## First hardware video frame captured: MIPI RX pinmux and pad pull-down resolution (2026-09-23)
 
 Offline attribution of the persistent D3 instability and packet header

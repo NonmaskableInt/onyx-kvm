@@ -9,12 +9,13 @@ use std::{
 };
 
 use cleankvm_mcp::{
-    Ed25519JwtValidator, HidTransport, HttpAuthError, HttpRequestAuthError, MAX_MESSAGE_BYTES,
-    Server, VideoTransport, authenticate_http_request, bearer_challenge,
-    protected_resource_metadata,
+    AudioCaptureTransport, AudioOutputTransport, Ed25519JwtValidator, HidTransport, HttpAuthError,
+    HttpRequestAuthError, MAX_MESSAGE_BYTES, Server, VideoTransport, authenticate_http_request,
+    bearer_challenge, protected_resource_metadata,
 };
 use cleankvm_media_protocol::{
-    Operation, SNAPSHOT_RESPONSE_BYTES, SnapshotRequest, VideoSnapshot, WireHeader,
+    AUDIO_REQUEST_BYTES, CAPTURE_METRICS_BYTES, CaptureMetrics, Operation, PLAYBACK_RECEIPT_BYTES,
+    PcmShape, PlaybackReceipt, SNAPSHOT_RESPONSE_BYTES, SnapshotRequest, VideoSnapshot, WireHeader,
 };
 use rustls::{
     ServerConfig, ServerConnection, StreamOwned,
@@ -30,6 +31,10 @@ const METADATA_PATH: &str = "/.well-known/oauth-protected-resource";
 const HID_SOCKET: &str = "/run/cleankvm/hid.sock";
 const VIDEO_SOCKET: &str = "/run/cleankvm/video.sock";
 const VIDEO_ENABLED_PATH: &str = "/run/cleankvm/video-enabled";
+const AUDIO_CAPTURE_SOCKET: &str = "/run/cleankvm/audio-capture.sock";
+const AUDIO_CAPTURE_ENABLED_PATH: &str = "/run/cleankvm/audio-capture-enabled";
+const AUDIO_OUTPUT_SOCKET: &str = "/run/cleankvm/audio-output.sock";
+const AUDIO_OUTPUT_ENABLED_PATH: &str = "/run/cleankvm/audio-output-enabled";
 
 struct BrokerHid;
 
@@ -80,6 +85,53 @@ impl VideoTransport for BrokerVideo {
         let mut response = [0_u8; SNAPSHOT_RESPONSE_BYTES];
         stream.read_exact(&mut response)?;
         VideoSnapshot::decode(response).map_err(|_| invalid("invalid video broker response"))
+    }
+}
+
+fn audio_transaction<const N: usize>(
+    socket: &str,
+    operation: Operation,
+    shape: PcmShape,
+) -> io::Result<[u8; N]> {
+    let mut stream = UnixStream::connect(socket)?;
+    stream.set_read_timeout(Some(TIMEOUT))?;
+    stream.set_write_timeout(Some(TIMEOUT))?;
+    let payload = shape.encode();
+    let header = WireHeader {
+        operation,
+        payload_bytes: u32::try_from(AUDIO_REQUEST_BYTES)
+            .map_err(|_| invalid("invalid audio request length"))?,
+    };
+    stream.write_all(&header.encode())?;
+    stream.write_all(&payload)?;
+    let mut response = [0_u8; N];
+    stream.read_exact(&mut response)?;
+    Ok(response)
+}
+
+struct BrokerAudioCapture;
+
+impl AudioCaptureTransport for BrokerAudioCapture {
+    fn capture_metrics(&self, shape: PcmShape) -> io::Result<CaptureMetrics> {
+        let response = audio_transaction::<CAPTURE_METRICS_BYTES>(
+            AUDIO_CAPTURE_SOCKET,
+            Operation::CapturePcm,
+            shape,
+        )?;
+        Ok(CaptureMetrics::decode(response))
+    }
+}
+
+struct BrokerAudioOutput;
+
+impl AudioOutputTransport for BrokerAudioOutput {
+    fn play_bounded_tone(&self, shape: PcmShape) -> io::Result<PlaybackReceipt> {
+        let response = audio_transaction::<PLAYBACK_RECEIPT_BYTES>(
+            AUDIO_OUTPUT_SOCKET,
+            Operation::PlayPcm,
+            shape,
+        )?;
+        Ok(PlaybackReceipt::decode(response))
     }
 }
 
@@ -243,6 +295,8 @@ fn handle(
     let grant = claims.as_grant();
     let hid = BrokerHid;
     let video = BrokerVideo;
+    let audio_capture = BrokerAudioCapture;
+    let audio_output = BrokerAudioOutput;
     let mut server = if method == Some("initialize") || !*initialized {
         Server::remote(&config.resource, now, grant)
     } else {
@@ -250,6 +304,12 @@ fn handle(
     };
     if Path::new(VIDEO_ENABLED_PATH).exists() {
         server = server.with_video(&video);
+    }
+    if Path::new(AUDIO_CAPTURE_ENABLED_PATH).exists() {
+        server = server.with_audio_capture(&audio_capture);
+    }
+    if Path::new(AUDIO_OUTPUT_ENABLED_PATH).exists() {
+        server = server.with_audio_output(&audio_output);
     }
     let Some(body) = server.handle_line(&request.body) else {
         return respond(stream, 202, "application/json", b"", None);

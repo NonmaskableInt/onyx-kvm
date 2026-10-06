@@ -87,9 +87,11 @@ HID operations without gaining a broader grant than an equivalent MCP client.
 
 Status: enumeration and the bounded local microphone proof pass on v51. The
 capture returned exactly one second of metrics-only PCM and left no open PCM,
-process, output file, gate, or taint. Playback routing and both network-facing
-audio brokers remain unadmitted. Playback routing and the bounded local output
-proof now pass on v52 with clean PCM/process/file/gate/taint cleanup.
+process, output file, gate, or taint. Playback routing and the bounded local
+output proof now pass on v52 with clean PCM/process/file/gate/taint cleanup.
+The separate brokers plus shared MCP/web controls are implemented and packaged
+in the offline-verified v53 candidate; on-device Stage D admission remains
+pending.
 
 1. Run the existing root-only one-second microphone metrics probe under fresh
    explicit local authorization. Confirm capture stops, DMA and file

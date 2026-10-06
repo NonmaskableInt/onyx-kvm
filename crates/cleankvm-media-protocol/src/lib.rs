@@ -63,6 +63,9 @@ pub enum ValidationError {
 
 pub const SNAPSHOT_REQUEST_BYTES: usize = 8;
 pub const SNAPSHOT_RESPONSE_BYTES: usize = 42;
+pub const AUDIO_REQUEST_BYTES: usize = 8;
+pub const CAPTURE_METRICS_BYTES: usize = 32;
+pub const PLAYBACK_RECEIPT_BYTES: usize = 20;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct WireHeader {
@@ -317,6 +320,14 @@ pub enum PcmFormat {
     Signed16LittleEndian,
 }
 
+impl PcmFormat {
+    const fn wire_value(self) -> u8 {
+        match self {
+            Self::Signed16LittleEndian => 1,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct PcmShape {
     pub format: PcmFormat,
@@ -365,6 +376,138 @@ impl PcmShape {
             duration_ms,
             total_bytes: bytes,
         })
+    }
+
+    #[must_use]
+    pub const fn encode(self) -> [u8; AUDIO_REQUEST_BYTES] {
+        let rate = self.sample_rate_hz.to_be_bytes();
+        let duration = self.duration_ms.to_be_bytes();
+        [
+            rate[0],
+            rate[1],
+            rate[2],
+            rate[3],
+            self.channels,
+            self.format.wire_value(),
+            duration[2],
+            duration[3],
+        ]
+    }
+
+    /// Decode one fixed-size PCM shape.
+    ///
+    /// # Errors
+    /// Rejects unknown formats and shapes outside the global audio bounds.
+    pub fn decode(bytes: [u8; AUDIO_REQUEST_BYTES]) -> Result<Self, ValidationError> {
+        let sample_rate_hz = u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
+        let channels = bytes[4];
+        let format = match bytes[5] {
+            1 => PcmFormat::Signed16LittleEndian,
+            _ => return Err(ValidationError::InvalidAudioParameters),
+        };
+        let duration_ms = u32::from(u16::from_be_bytes([bytes[6], bytes[7]]));
+        Self::new(format, sample_rate_hz, channels, duration_ms)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct CaptureMetrics {
+    pub frames: u32,
+    pub bytes: u32,
+    pub peak_absolute: u32,
+    pub mean_absolute: u32,
+    pub rms: u32,
+    pub clipped_samples: u32,
+    pub zero_samples: u32,
+    pub elapsed_ms: u32,
+}
+
+impl CaptureMetrics {
+    #[must_use]
+    pub fn encode(self) -> [u8; CAPTURE_METRICS_BYTES] {
+        let values = [
+            self.frames,
+            self.bytes,
+            self.peak_absolute,
+            self.mean_absolute,
+            self.rms,
+            self.clipped_samples,
+            self.zero_samples,
+            self.elapsed_ms,
+        ];
+        let mut output = [0_u8; CAPTURE_METRICS_BYTES];
+        for (index, value) in values.into_iter().enumerate() {
+            output[index * 4..index * 4 + 4].copy_from_slice(&value.to_be_bytes());
+        }
+        output
+    }
+
+    #[must_use]
+    pub fn decode(bytes: [u8; CAPTURE_METRICS_BYTES]) -> Self {
+        let value = |index: usize| {
+            u32::from_be_bytes([
+                bytes[index * 4],
+                bytes[index * 4 + 1],
+                bytes[index * 4 + 2],
+                bytes[index * 4 + 3],
+            ])
+        };
+        Self {
+            frames: value(0),
+            bytes: value(1),
+            peak_absolute: value(2),
+            mean_absolute: value(3),
+            rms: value(4),
+            clipped_samples: value(5),
+            zero_samples: value(6),
+            elapsed_ms: value(7),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct PlaybackReceipt {
+    pub frames: u32,
+    pub bytes: u32,
+    pub tone_hz: u32,
+    pub peak: u32,
+    pub elapsed_ms: u32,
+}
+
+impl PlaybackReceipt {
+    #[must_use]
+    pub fn encode(self) -> [u8; PLAYBACK_RECEIPT_BYTES] {
+        let values = [
+            self.frames,
+            self.bytes,
+            self.tone_hz,
+            self.peak,
+            self.elapsed_ms,
+        ];
+        let mut output = [0_u8; PLAYBACK_RECEIPT_BYTES];
+        for (index, value) in values.into_iter().enumerate() {
+            output[index * 4..index * 4 + 4].copy_from_slice(&value.to_be_bytes());
+        }
+        output
+    }
+
+    #[must_use]
+    pub fn decode(bytes: [u8; PLAYBACK_RECEIPT_BYTES]) -> Self {
+        let value = |index: usize| {
+            u32::from_be_bytes([
+                bytes[index * 4],
+                bytes[index * 4 + 1],
+                bytes[index * 4 + 2],
+                bytes[index * 4 + 3],
+            ])
+        };
+        Self {
+            frames: value(0),
+            bytes: value(1),
+            tone_hz: value(2),
+            peak: value(3),
+            elapsed_ms: value(4),
+        }
     }
 }
 
@@ -482,6 +625,32 @@ mod tests {
             Err(ValidationError::WritableMediaForbidden)
         );
         assert!(MediaImage::new(MAX_READ_ONLY_MEDIA_BYTES, true).is_ok());
+    }
+
+    #[test]
+    fn audio_wire_records_roundtrip() {
+        let shape = PcmShape::new(PcmFormat::Signed16LittleEndian, 16_000, 1, 1_000)
+            .unwrap_or_else(|error| panic!("valid PCM shape failed: {error:?}"));
+        assert_eq!(PcmShape::decode(shape.encode()), Ok(shape));
+        let metrics = CaptureMetrics {
+            frames: 16_000,
+            bytes: 32_000,
+            peak_absolute: 512,
+            mean_absolute: 128,
+            rms: 180,
+            clipped_samples: 0,
+            zero_samples: 1,
+            elapsed_ms: 1_012,
+        };
+        assert_eq!(CaptureMetrics::decode(metrics.encode()), metrics);
+        let receipt = PlaybackReceipt {
+            frames: 16_000,
+            bytes: 32_000,
+            tone_hz: 1_000,
+            peak: 512,
+            elapsed_ms: 1_008,
+        };
+        assert_eq!(PlaybackReceipt::decode(receipt.encode()), receipt);
     }
 
     #[test]

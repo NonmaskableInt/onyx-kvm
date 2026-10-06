@@ -241,3 +241,36 @@ audio gates remained absent.
 Stage C passes the bounded local output proof. This admits the physical DAC/PA
 path as evidence only; it does not authorize boot-time playback, arbitrary PCM,
 background sessions, network-facing playback, UAC, or HDMI audio.
+
+## Stage D implementation candidate (v53)
+
+Two privileged Rust brokers now wrap the admitted Stage B/C probes without
+expanding their hardware contracts. Capture and playback have separate sockets
+(`/run/cleankvm/audio-capture.sock` and `/run/cleankvm/audio-output.sock`),
+separate enable files, independent MCP scopes, and independent web controls.
+Each broker accepts only UID 900, serves one request at a time, requires exactly
+mono S16LE at 16 kHz for one second, and invokes a root-only fixed-function
+probe. Capture returns metrics, never PCM. Playback accepts no caller-supplied
+PCM and returns only a completion receipt for the admitted 1 kHz, peak-512 tone.
+
+Both gates remain absent by default and are removed by their service stop
+paths. MCP additionally requires `kvm:audio-capture` for capture and both
+`kvm:audio-output` and an explicit mutation-enabled grant for playback. The
+human web console calls the same MCP operations and displays `Active` for the
+entire request.
+
+Workspace tests and strict lints pass. The offline static RISC-V artifacts are:
+
+- `cleankvmd`: `f25e309533a65abc63dd8f39e96c663ef3dce2a3d9b9df976f208ca4bd12c808`
+- capture broker: `4276c86b5036bab37fc024ce735d11a3d8227318a2100dec64f6d801545eeb79`
+- playback broker: `140e955e38f3dd93218c39e32ad1478a7c06f77050a98c062bacc8578b36b46f`
+
+The verified v53 image is
+`out/phase3a-audio-brokers-v53/cleankvm-phase1.img`, 79,692,288 bytes,
+SHA-256 `1df82c71aeaee33f4dc53583218f980554383f75c737e4c4e4d43add594605d0`.
+Its rootfs SHA-256 is
+`31243d5bb6061b03e7860af514f2eabfd8c4bff320900970e9aa279f8bff7f6f`;
+FIT and FIP remain `1b504a2c...` and `6e6d3b5c...`. Hardware/network admission
+is still pending, so Stage D remains fail-closed until v53 read-back, cold-boot,
+negative gate tests, independent authenticated operations, and post-operation
+PCM/process/file/gate checks pass.

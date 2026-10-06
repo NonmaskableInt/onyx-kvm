@@ -15,6 +15,8 @@ expected_edid_programmer=${10:-}
 expected_lt_backup=${11:-}
 expected_video_broker=${12:-}
 expected_audio_playback_probe=${13:-}
+expected_audio_capture_broker=${14:-}
+expected_audio_playback_broker=${15:-}
 test -d "$rootfs" || {
     printf 'not a root filesystem directory: %s\n' "$rootfs" >&2
     exit 1
@@ -25,15 +27,47 @@ for path in \
     usr/sbin/dnsmasq usr/sbin/udhcpd usr/sbin/wpa_supplicant \
     usr/bin/mender usr/bin/mosh usr/bin/rauc usr/bin/swupdate \
     usr/bin/ffmpeg usr/bin/gst-launch-1.0 usr/bin/arecord usr/bin/aplay \
-    usr/bin/cleankvm-hid-hold-test \
-    usr/bin/cleankvm-media-broker usr/bin/cleankvm-audio-capture-broker \
-    usr/bin/cleankvm-audio-playback-broker
+    usr/bin/cleankvm-hid-hold-test usr/bin/cleankvm-media-broker
 do
     if test -e "$rootfs/$path"; then
         printf 'prohibited Phase-1 executable: /%s\n' "$path" >&2
         exit 1
     fi
 done
+
+for audio_broker in cleankvm-audio-capture-broker cleankvm-audio-playback-broker; do
+    expected=
+    case "$audio_broker" in
+        cleankvm-audio-capture-broker) expected=$expected_audio_capture_broker ;;
+        cleankvm-audio-playback-broker) expected=$expected_audio_playback_broker ;;
+    esac
+    if test -z "$expected"; then
+        test ! -e "$rootfs/usr/bin/$audio_broker" || {
+            printf 'unexpected audio broker: /usr/bin/%s\n' "$audio_broker" >&2
+            exit 1
+        }
+    else
+        test -s "$rootfs/usr/bin/$audio_broker"
+        cmp "$expected" "$rootfs/usr/bin/$audio_broker"
+        case "$(file "$rootfs/usr/bin/$audio_broker")" in
+            *"ELF 64-bit"*"RISC-V"*"statically linked"*"stripped"*) ;;
+            *) printf 'installed %s is not a static stripped RISC-V ELF\n' "$audio_broker" >&2; exit 1 ;;
+        esac
+    fi
+done
+
+if test -n "$expected_audio_capture_broker"; then
+    test -x "$rootfs/etc/init.d/S47cleankvm-audio-capture-broker"
+    cmp "$repo_root/image/phase3a-audio-overlay/etc/init.d/S47cleankvm-audio-capture-broker" \
+        "$rootfs/etc/init.d/S47cleankvm-audio-capture-broker"
+    test ! -e "$rootfs/run/cleankvm/audio-capture-enabled"
+fi
+if test -n "$expected_audio_playback_broker"; then
+    test -x "$rootfs/etc/init.d/S48cleankvm-audio-playback-broker"
+    cmp "$repo_root/image/phase3a-audio-overlay/etc/init.d/S48cleankvm-audio-playback-broker" \
+        "$rootfs/etc/init.d/S48cleankvm-audio-playback-broker"
+    test ! -e "$rootfs/run/cleankvm/audio-output-enabled"
+fi
 
 if test -z "$expected_video_broker" && test -e "$rootfs/usr/bin/cleankvm-video-broker"; then
     printf '%s\n' 'prohibited Phase-1 executable: /usr/bin/cleankvm-video-broker' >&2
