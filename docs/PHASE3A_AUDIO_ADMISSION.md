@@ -220,3 +220,24 @@ root layout). Exact-span read-back produced whole-image SHA-256
 `aaafba1076b7e2d63d75aef01085d48de85fe96cb73e7b574649f328863e36d2`
 after macOS FAT bookkeeping, while embedded FIT, rootfs, and FIP verification
 passed against the audited v52 artifacts. The card was safely ejected.
+
+## Stage C v52 hardware result
+
+v52 cold-booted at `192.168.2.100` with taint `0`, loadable-module support
+kernel-disabled, `/dev/mem` absent, and video/microphone/speaker gates absent.
+The installed playback and capture probes matched their audited SHA-256 hashes;
+the playback probe was root-owned and mode `0500`. Its internal tone-generation
+and zeroization self-test passed.
+
+The single authorized playback completed with `PLAYBACK_RC=0` in about 1.01
+seconds: 16,000 mono S16LE frames (32,000 bytes), 16 kHz, 1 kHz tone, peak 512,
+and inverted DAC control 31 (the lowest nonzero hardware setting). The probe's
+successful return includes a completed drain and successful final safe-mute
+write. Afterward the PCM status endpoint was unavailable (closed), a full
+process-FD scan found no sound-device handle, no probe process remained, no
+audio/PCM/WAV file existed under `/run` or `/tmp`, taint remained `0`, and both
+audio gates remained absent.
+
+Stage C passes the bounded local output proof. This admits the physical DAC/PA
+path as evidence only; it does not authorize boot-time playback, arbitrary PCM,
+background sessions, network-facing playback, UAC, or HDMI audio.

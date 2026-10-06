@@ -118,6 +118,15 @@ The card was safely ejected. Next: cold boot v52, verify the playback-probe hash
 and fail-closed baseline, execute its self-test and one bounded tone, then prove
 internal mute, PCM release, absent output files/processes, and unchanged taint.
 
+The v52 Stage C proof passed at `192.168.2.100`. The audited root-only probe
+played exactly 16,000 mono S16LE frames at 16 kHz (one second), using a 1 kHz
+tone with peak 512 and the lowest nonzero DAC setting. It drained and returned
+success in about 1.01 seconds. Post-run, the PCM was closed, no sound FD,
+process, or output file remained, both audio gates stayed absent, and taint
+remained 0. The next implementation step is separate privileged capture and
+playback brokers with separate Unix sockets, gates, scopes, leases, and MCP/web
+controls; neither broker may autoadmit its capability.
+
 ## First hardware video frame captured: MIPI RX pinmux and pad pull-down resolution (2026-09-23)
 
 Offline attribution of the persistent D3 instability and packet header
