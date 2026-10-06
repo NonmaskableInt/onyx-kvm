@@ -89,8 +89,8 @@ Status: enumeration and the bounded local microphone proof pass on v51. The
 capture returned exactly one second of metrics-only PCM and left no open PCM,
 process, output file, gate, or taint. Playback routing and both network-facing
 audio brokers remain unadmitted. Playback routing is now attributed and the
-root-only bounded v52 proof image is offline-verified; its hardware run remains
-pending.
+root-only bounded v52 proof image is offline-verified, flashed, and verified
+from SD read-back; its hardware run remains pending.
 
 1. Run the existing root-only one-second microphone metrics probe under fresh
    explicit local authorization. Confirm capture stops, DMA and file
@@ -125,8 +125,8 @@ privacy, cleanup, authorization, timeout, and cold-boot fail-closed tests.
 
 ## Immediate execution order
 
-1. Flash/read-back v52 and run its separately bounded output proof, verifying
-   final internal mute, closed PCM, absent files/processes, and unchanged taint.
+1. Cold-boot v52 and run its separately bounded output proof, verifying final
+   internal mute, closed PCM, absent files/processes, and unchanged taint.
 2. Enroll browser trust and verify the authenticated web shell status and
    snapshot-metadata flow without bypassing TLS warnings.
 3. Implement audio brokers and expose them through MCP and the web console only

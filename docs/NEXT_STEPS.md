@@ -110,6 +110,14 @@ drains, re-mutes, closes, and zeroizes. The verified v52 test image is
 `46e3116e5e011f1173ed7b40bb985d791f55caef0fd8d293d0f25b10d2c2e545`).
 Flash/read-back and the single bounded hardware playback proof are next.
 
+The v52 flash/read-back is complete on the confirmed 31 GB CleanKVM card.
+Embedded FIP, FIT, and rootfs matched; FAT bookkeeping changed the exact-span
+read-back SHA-256 to
+`aaafba1076b7e2d63d75aef01085d48de85fe96cb73e7b574649f328863e36d2`.
+The card was safely ejected. Next: cold boot v52, verify the playback-probe hash
+and fail-closed baseline, execute its self-test and one bounded tone, then prove
+internal mute, PCM release, absent output files/processes, and unchanged taint.
+
 ## First hardware video frame captured: MIPI RX pinmux and pad pull-down resolution (2026-09-23)
 
 Offline attribution of the persistent D3 instability and packet header

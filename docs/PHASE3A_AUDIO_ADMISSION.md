@@ -213,3 +213,10 @@ passed embedded-artifact verification. The next bounded operation is SD
 flash/read-back followed by cold-boot, probe self-test, one tone, and post-test
 mute/PCM/file/taint verification. No playback broker or network operation is
 present.
+
+The image was then flashed to the confirmed prior CleanKVM card (`/dev/disk4`,
+USB, 30,992,760,832 bytes, existing 16.8 MB `CLEANKVM` boot and 62.9 MB Linux
+root layout). Exact-span read-back produced whole-image SHA-256
+`aaafba1076b7e2d63d75aef01085d48de85fe96cb73e7b574649f328863e36d2`
+after macOS FAT bookkeeping, while embedded FIT, rootfs, and FIP verification
+passed against the audited v52 artifacts. The card was safely ejected.
