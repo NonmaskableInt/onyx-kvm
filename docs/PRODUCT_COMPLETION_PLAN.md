@@ -114,11 +114,11 @@ privacy, cleanup, authorization, timeout, and cold-boot fail-closed tests.
 ## Phase 4: continuous media and release engineering
 
 Status: a first combined product-profile candidate (v54) has been built and
-verified offline. It contains the authenticated MCP/web control plane, HID,
-video foundation, and independent microphone/output brokers in one image, with
-all media admission gates absent by default. Hardware flash/read-back and the
-combined cold-boot matrix remain pending. Continuous pixel/audio sessions and
-production enrollment remain release blockers.
+verified offline and through SD-card read-back. It contains the authenticated
+MCP/web control plane, HID, video foundation, and independent
+microphone/output brokers in one image, with all media admission gates absent
+by default. The combined cold-boot matrix remains pending. Continuous
+pixel/audio sessions and production enrollment remain release blockers.
 
 1. Add authenticated, short-lived continuous video/audio sessions behind the
    same policy layer, with bounded rings and no credential access in media

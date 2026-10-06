@@ -188,12 +188,20 @@ and non-audio/audio device-node checks. A fresh device identity and recovery
 credential were generated outside Git, replacing the disclosed v53 development
 credential.
 
-Next bounded step: resolve the removable SD card afresh, flash/read back v54,
-then cold-boot it. Verify taint 0, `/dev/mem` absent, all video/microphone/audio
-gates absent, broker sockets and the web/MCP service present, the rotated
-credential works, and no unexpected module or sound descriptor is active.
-Only after that baseline may video, HID, microphone capture, and audio output
-be exercised one at a time through their independently scoped MCP/web paths.
+The v54 flash/read-back is complete. The resolver selected exactly one external
+physical target, `/dev/disk4` (USB, 30,992,760,832 bytes, existing `CLEANKVM`
+layout). Exactly 79,692,288 bytes were written and read back. macOS FAT
+bookkeeping changed the exact-span SHA-256 to
+`3e60b49f4edc6b60112928c26e0b5060b4f5db0b87ca85dcebcd4aec6a872732`,
+while the embedded FIP, FIT, and rootfs all matched the audited v54 artifacts.
+The card was safely ejected.
+
+Next bounded step: cold-boot v54. Verify taint 0, `/dev/mem` absent, all
+video/microphone/audio gates absent, broker sockets and the web/MCP service
+present, the rotated credential works, and no unexpected module or sound
+descriptor is active. Only after that baseline may video, HID, microphone
+capture, and audio output be exercised one at a time through their
+independently scoped MCP/web paths.
 
 ## First hardware video frame captured: MIPI RX pinmux and pad pull-down resolution (2026-09-23)
 
