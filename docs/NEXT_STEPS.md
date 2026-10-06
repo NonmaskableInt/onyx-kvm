@@ -1,6 +1,6 @@
 # Next steps
 
-Updated: 2026-10-05
+Updated: 2026-10-06
 
 ## Product completion plan
 
@@ -175,6 +175,25 @@ and sent login material as shell input. No network service received it, but the
 development recovery credential must be treated as disclosed and rotated in
 the next packaged image. Remaining product work is the combined video+audio
 release profile, trusted browser enrollment, and the full release matrix.
+
+The combined product-profile v54 candidate is now built and verified offline.
+It composes the phase-1 security baseline, phase-2 USB HID, phase-3 video
+foundation, and phase-3a internal audio configuration without admitting any
+media capability at boot. Its independently assembled image is
+`out/product-v54/cleankvm-phase1.img` (79,692,288 bytes, SHA-256
+`77e66b0dfd7970376871bfb75c4b69aa9f0877a9c350b6d46dbe084a01107df9`).
+The FIT, rootfs, FIP, and whole image passed offline hash verification; the
+rootfs audit also passed video-module/probe ownership, audio-probe ownership,
+and non-audio/audio device-node checks. A fresh device identity and recovery
+credential were generated outside Git, replacing the disclosed v53 development
+credential.
+
+Next bounded step: resolve the removable SD card afresh, flash/read back v54,
+then cold-boot it. Verify taint 0, `/dev/mem` absent, all video/microphone/audio
+gates absent, broker sockets and the web/MCP service present, the rotated
+credential works, and no unexpected module or sound descriptor is active.
+Only after that baseline may video, HID, microphone capture, and audio output
+be exercised one at a time through their independently scoped MCP/web paths.
 
 ## First hardware video frame captured: MIPI RX pinmux and pad pull-down resolution (2026-09-23)
 

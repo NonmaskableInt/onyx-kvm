@@ -89,6 +89,7 @@ fi
             phase3-discovery) /repo/image/validate-phase3-discovery-config.sh /work/sdk ;;
             phase3-video-foundation) /repo/image/validate-phase3-video-foundation-config.sh /work/sdk ;;
             phase3a-audio-enumeration) /repo/image/validate-phase3a-audio-enumeration-config.sh /work/sdk ;;
+            product) /repo/image/validate-product-config.sh /work/sdk ;;
             *) printf "unknown configuration profile: %s\n" "$CLEANKVM_CONFIG_PROFILE" >&2; exit 1 ;;
         esac
         source build/cvisetup.sh
@@ -128,19 +129,30 @@ fi
             -e "\\|^/usr/libexec/cleankvm-lt6911uxc-edid-programmer f |d" \
             -e "\\|^/usr/libexec/cleankvm-lt6911uxc-flash-backup f |d" \
             cleankvm/phase1-devices.txt
-        if [ "$CLEANKVM_CONFIG_PROFILE" != phase3-video-foundation ]; then
+        if [ "$CLEANKVM_CONFIG_PROFILE" != phase3-video-foundation ] && \
+           [ "$CLEANKVM_CONFIG_PROFILE" != product ]; then
             rm -f cleankvm/phase1-overlay/usr/bin/cleankvm-video-broker
             rm -f cleankvm/phase1-overlay/etc/init.d/S47cleankvm-video-broker
             rm -rf cleankvm/phase1-overlay/usr/lib/cleankvm/video-quarantine
             rm -f buildroot/output/target/usr/bin/cleankvm-video-broker
             rm -f buildroot/output/target/etc/init.d/S47cleankvm-video-broker
             rm -rf buildroot/output/target/usr/lib/cleankvm/video-quarantine
+        else
+            cp -a /repo/image/phase3-video-overlay/. cleankvm/phase1-overlay/
+            install -m 0755 /repo/out/phase3-rust/cleankvm-video-broker \
+                cleankvm/phase1-overlay/usr/bin/cleankvm-video-broker
+            mkdir -p cleankvm/phase1-overlay/usr/lib/cleankvm/video-quarantine
+            for module in /video-modules/*.ko; do
+                install -m 0444 "$module" \
+                    "cleankvm/phase1-overlay/usr/lib/cleankvm/video-quarantine/$(basename "$module")"
+            done
         fi
         # Incremental profile changes must not carry generated device nodes from
         # an earlier audio image into a non-audio filesystem. These nodes are
         # not owned by an overlay or device table and otherwise survive in the
         # Buildroot target tree even when CONFIG_SOUND is disabled.
-        if [ "$CLEANKVM_CONFIG_PROFILE" != phase3a-audio-enumeration ]; then
+        if [ "$CLEANKVM_CONFIG_PROFILE" != phase3a-audio-enumeration ] && \
+           [ "$CLEANKVM_CONFIG_PROFILE" != product ]; then
             rm -rf buildroot/output/target/dev/snd
             rm -f cleankvm/phase1-overlay/usr/bin/cleankvm-audio-capture-broker
             rm -f cleankvm/phase1-overlay/usr/bin/cleankvm-audio-playback-broker
@@ -229,16 +241,19 @@ fi
         if [ "$CLEANKVM_CONFIG_PROFILE" = phase2-hid ] || \
            [ "$CLEANKVM_CONFIG_PROFILE" = phase3-discovery ] || \
            [ "$CLEANKVM_CONFIG_PROFILE" = phase3-video-foundation ] || \
-           [ "$CLEANKVM_CONFIG_PROFILE" = phase3a-audio-enumeration ]; then
+           [ "$CLEANKVM_CONFIG_PROFILE" = phase3a-audio-enumeration ] || \
+           [ "$CLEANKVM_CONFIG_PROFILE" = product ]; then
             hid_broker=/repo/out/phase2-rust/cleankvm-hid-broker
         fi
-        if [ "$CLEANKVM_CONFIG_PROFILE" = phase3-video-foundation ]; then
+        if [ "$CLEANKVM_CONFIG_PROFILE" = phase3-video-foundation ] || \
+           [ "$CLEANKVM_CONFIG_PROFILE" = product ]; then
             video_modules="$CLEANKVM_VIDEO_MODULE_DIR"
             if [ -f /repo/out/phase3-rust/cleankvm-video-broker ]; then
                 video_broker=/repo/out/phase3-rust/cleankvm-video-broker
             fi
         fi
-        if [ "$CLEANKVM_CONFIG_PROFILE" = phase3a-audio-enumeration ]; then
+        if [ "$CLEANKVM_CONFIG_PROFILE" = phase3a-audio-enumeration ] || \
+           [ "$CLEANKVM_CONFIG_PROFILE" = product ]; then
             audio_capture_broker=/repo/out/phase3a-rust/cleankvm-audio-capture-broker
             audio_playback_broker=/repo/out/phase3a-rust/cleankvm-audio-playback-broker
         fi
