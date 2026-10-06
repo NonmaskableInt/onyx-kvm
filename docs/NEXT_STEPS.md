@@ -350,17 +350,54 @@ fail-closed on target (`192.168.2.104`):
 
 ## Next steps
 
-1. **Human Web Console Verification**:
+1. **Cold-Boot Baseline on v56 Target**:
+   - Reinsert the safely ejected SD card into the NanoKVM Lite.
+   - Power on device and monitor console / DHCP assignment.
+   - Run cold-boot baseline to confirm all four capability brokers start cleanly
+     with their native verified probes, with all admission gates fail-closed.
+   - Verify unauthenticated rejection, scoped authenticated MCP calls, and
+     fail-closed gate semantics.
+2. **Human Web Console Verification**:
    - Establish trusted client TLS enrollment for the device identity certificate
      to allow web browsers to access `https://cleankvm-recovery:8443` without
      bypassing security warnings.
    - Verify web console UI rendering: capability indicator strip, snapshot
      metadata, and authenticated control flows.
-2. **Release Image Packaging (v56)**:
-   - Assemble `out/product-v56` incorporating the rootfs build probe defaults.
-   - Verify image assembly, FIP/FIT/rootfs digests, and offline audits.
-   - Flash to removable target, perform read-back hash verification, and run
-     cold-boot acceptance.
+
+### Product release image v56: native probe defaults and verified read-back
+
+The v56 product release image has been built, packaged, audited, flashed, and
+verified via card read-back:
+
+1. **Native Verified Probe Build**:
+   - Built rootfs using `image/build-phase1-rootfs.sh` with profile `product` and
+     fresh credentials (`out/product-v56-secrets`).
+   - Automatically included verified probes:
+     - Raw frame probe: `151287655f54f42f34b5c70ea73d27c58a48e2c54bc1f94374d5eee40846be45`
+     - Audio capture probe: `55f10830fa0589c75d597f328a94b40a5105f64124d019b50254dab68c34c652`
+     - Audio playback probe: `b9b6d69a9d30d056fc9642117ea2708f273565262a53377074d7a7f9d7b0c256`
+   - All offline audits passed: rootfs audit, ext4 identity ownership, ext4
+     raw-frame probe ownership, ext4 non-audio device-node audit, ext4 audio
+     capture probe ownership, and ext4 audio playback probe ownership.
+
+2. **Partition & Whole Image Assembly**:
+   - Packaged at `out/product-v56/cleankvm-phase1.img` (79,692,288 bytes, SHA-256
+     `1995bab5df70ee46ccbeb5ba7a64d9afdeaf02175bdfde1e1d8f8a28bc2862b2`).
+   - Embedded artifacts:
+     - `boot.sd`: SHA-256 `f624df1de67a6a0b8c3a60af7de9f2e429828bd1383be562aba359b72000625b`
+     - `rootfs.ext4`: SHA-256 `ab89948f4f91aa49f000fdefbdda3161b2d34f3972b1394862e16684d371bc2c`
+     - `fip.bin`: SHA-256 `6e6d3b5c7a58c1a585bf1ea456c76bd7c91cfd33c76dfc67bd33b31cf86cd301`
+
+3. **Target Disk Resolution & Flash**:
+   - Removable target disk uniquely resolved: `/dev/disk4` (31.0 GB USB mass storage,
+     `CLEANKVM` volume label).
+   - Unmounted and flashed 79,692,288 bytes to `/dev/rdisk4`.
+   - Read back the exact 79,692,288-byte span (155,649 sectors).
+   - Read-back span SHA-256: `fae836efe03fd101d8569e0489376b78fcd572f44383b9884d30094847bd57dc`
+     (expected variation due to FAT bookkeeping).
+   - Embedded FIP, FIT, and rootfs artifacts verified bit-for-bit against audited
+     v56 inputs via `verify-sd-image.py` (`embedded_artifacts=verified`).
+   - Card safely ejected via `diskutil eject /dev/disk4`.
 
 ## First hardware video frame captured: MIPI RX pinmux and pad pull-down resolution (2026-09-23)
 
