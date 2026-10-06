@@ -203,6 +203,23 @@ descriptor is active. Only after that baseline may video, HID, microphone
 capture, and audio output be exercised one at a time through their
 independently scoped MCP/web paths.
 
+The v54 network-side cold-boot baseline is partially complete at
+`192.168.2.102`. DHCP, ICMP, and HTTPS are live. HTTPS identity validation
+against the freshly provisioned certificate succeeded without bypassing trust;
+the web root returned 200 with no-store, strict CSP, permission denial,
+no-referrer, no-sniff, and frame-denial headers. A freshly minted, five-minute
+read-only token completed MCP initialization. `kvm.status` reported video,
+microphone capture, audio output, and mutating operations all disabled, and
+`tools/list` exposed only `kvm.status`.
+
+Offline comparison confirms the final rootfs contains the exact fresh v54
+recovery-password hash. UART output reaches the Mac, but target input is not
+currently arriving reliably: three paced login attempts timed out rather than
+being accepted or rejected. SSH is deliberately unavailable. Therefore the
+local-only checks (taint, `/dev/mem`, loaded modules, broker sockets/processes,
+and sound descriptors) remain pending until the UART transmit path is reseated.
+No capability gate was opened and no media operation was attempted.
+
 ## First hardware video frame captured: MIPI RX pinmux and pad pull-down resolution (2026-09-23)
 
 Offline attribution of the persistent D3 instability and packet header
