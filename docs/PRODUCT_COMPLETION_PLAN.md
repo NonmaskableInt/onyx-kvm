@@ -113,12 +113,12 @@ privacy, cleanup, authorization, timeout, and cold-boot fail-closed tests.
 
 ## Phase 4: continuous media and release engineering
 
-Status: the combined product image (v55) has completed cold-boot fail-closed
-baseline and full independent capability admission on physical hardware
-(`192.168.2.104`). All four capabilities—Video snapshot (1080p YUV420P), USB HID
-(keyboard and pointer reports), Audio capture (16 kHz mono S16LE metrics), and
-Audio output (1 kHz diagnostic tone)—have been exercised independently over
-authenticated MCP and confirmed fail-closed on gate removal. Continuous
+Status: the release product image (v56) has completed native probe packaging,
+clean SD-card read-back verification, cold-boot baseline, and full independent
+capability acceptance on physical hardware (`192.168.2.105`). All four capabilities—
+Video snapshot (1080p YUV420P), USB HID (keyboard and pointer reports), Audio
+capture (16 kHz mono S16LE metrics), and Audio output (1 kHz diagnostic tone)—function
+out of the box via authenticated MCP and fail-closed upon gate removal. Continuous
 pixel/audio streaming sessions, browser trust enrollment, and production
 enrollment are the remaining milestones.
 

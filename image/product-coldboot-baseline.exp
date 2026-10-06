@@ -8,20 +8,26 @@ if {![regexp -line {^password=(.*)$} $credential_text -> password]} { exit 2 }
 
 spawn /usr/bin/sudo /usr/bin/cu -l /dev/cu.usbserial-112440 -s 115200
 expect { -re {Connected\.} {} timeout { exit 7 } }
+after 300
 send "\r"
 set logged_in 0
-expect {
-    -re {# *$} { set logged_in 1 }
-    -re {login: *$} {}
-    timeout { send "~."; exit 3 }
+set tries 0
+while {$tries < 10} {
+    set timeout 2
+    expect {
+        -re {# } { set logged_in 1; break }
+        -re {login: *$} { break }
+        timeout { incr tries; send "\r" }
+    }
 }
+set timeout 45
 if {!$logged_in} {
     send "root\r"
-    expect { -re {Password: *$} {} timeout { send "~."; exit 4 } }
+    expect { -re {Password: *$} {} timeout { exit 4 } }
     set send_slow {1 .02}
     log_user 0
     send -s -- "$password\r"
-    expect { -re {# *$} {} timeout { log_user 1; send "~."; exit 5 } }
+    expect { -re {# } {} timeout { log_user 1; exit 5 } }
 }
 unset password
 unset credential_text
@@ -30,8 +36,14 @@ send "stty -echo\r"
 after 300
 send -- {echo CLEANKVM_PRODUCT_BASELINE_BEGIN; printf 'UPTIME='; cut -d' ' -f1 /proc/uptime; printf 'TAINT='; cat /proc/sys/kernel/tainted; printf 'IPV4='; ip -4 -o addr show scope global | awk '{print $2 "=" $4 ","}'; echo; printf 'SOPH_MODULES='; awk '$1 ~ /^soph_/ {printf "%s,", $1}' /proc/modules; echo; test ! -e /dev/mem; echo DEVMEM_ABSENT_RC=$?; for g in video-enabled hid-enabled audio-capture-enabled audio-output-enabled; do test ! -e /run/cleankvm/$g; echo GATE_${g}_ABSENT_RC=$?; done; for s in hid video audio-capture audio-output; do test -S /run/cleankvm/$s.sock; echo SOCKET_${s}_RC=$?; done; printf 'SERVICE_PIDS='; pidof cleankvmd cleankvm-hid-broker cleankvm-video-broker cleankvm-audio-capture-broker cleankvm-audio-playback-broker | tr '\n' ','; echo; printf 'SOUND_FDS='; for p in /proc/[0-9]*/fd/*; do t=$(readlink "$p" 2>/dev/null || true); case "$t" in /dev/snd/*) printf '%s,' "$p";; esac; done; echo; echo CLEANKVM_PRODUCT_BASELINE_END}
 send "\r"
-expect { -re {CLEANKVM_PRODUCT_BASELINE_END} {} timeout { send "~."; exit 6 } }
+expect { -re {CLEANKVM_PRODUCT_BASELINE_END} {} timeout { exit 6 } }
+expect { -re {# } {} timeout {} }
 send "stty echo\r"
-after 300
-send "\r~."
-expect eof
+after 100
+send "\r\r"
+after 200
+send "~.\r"
+expect { -re {Disconnected\.} {} timeout {} }
+catch close
+catch wait
+exit 0

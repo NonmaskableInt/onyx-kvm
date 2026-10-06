@@ -350,19 +350,92 @@ fail-closed on target (`192.168.2.104`):
 
 ## Next steps
 
-1. **Cold-Boot Baseline on v56 Target**:
-   - Reinsert the safely ejected SD card into the NanoKVM Lite.
-   - Power on device and monitor console / DHCP assignment.
-   - Run cold-boot baseline to confirm all four capability brokers start cleanly
-     with their native verified probes, with all admission gates fail-closed.
-   - Verify unauthenticated rejection, scoped authenticated MCP calls, and
-     fail-closed gate semantics.
-2. **Human Web Console Verification**:
+1. **Human Web Console Verification**:
    - Establish trusted client TLS enrollment for the device identity certificate
      to allow web browsers to access `https://cleankvm-recovery:8443` without
      bypassing security warnings.
    - Verify web console UI rendering: capability indicator strip, snapshot
      metadata, and authenticated control flows.
+2. **Phase 4 Continuous Media & Release Hardening**:
+   - Implement short-lived, authenticated continuous streaming sessions with
+     bounded ring buffers, backpressure, and zero-residual memory erasure.
+   - Web console interactive HID event capture and canvas frame rendering.
+
+### Complete hardware acceptance on release image v56 (target `192.168.2.105`)
+
+The v56 product release image has completed full cold-boot baseline and end-to-end
+capability acceptance on target hardware (`192.168.2.105`):
+
+1. **Cold Boot Baseline Invariants**:
+   - Device booted cleanly and acquired `192.168.2.105/24` via DHCP.
+   - Kernel taint: `0`.
+   - Vendor modules: none preloaded (`SOPH_MODULES=` empty).
+   - `/dev/mem`: absent (`DEVMEM_ABSENT_RC=0`).
+   - Capability admission gates: all four absent by default (`GATE_*_ABSENT_RC=0`).
+   - Broker Unix sockets: all four listening (`SOCKET_*_RC=0`).
+   - Running services: all five active (`cleankvmd`, `cleankvm-hid-broker`,
+     `cleankvm-video-broker`, `cleankvm-audio-capture-broker`, `cleankvm-audio-playback-broker`).
+   - Open sound descriptors: zero (`SOUND_FDS=` empty).
+   - Built-in probe verification: all three probe binaries installed directly in
+     the rootfs matched their audited SHA-256 digests bit-for-bit out of the box:
+     - `cleankvm-raw-frame-probe`: `151287655f54f42f34b5c70ea73d27c58a48e2c54bc1f94374d5eee40846be45`
+     - `cleankvm-audio-capture-probe`: `55f10830fa0589c75d597f328a94b40a5105f64124d019b50254dab68c34c652`
+     - `cleankvm-audio-playback-probe`: `b9b6d69a9d30d056fc9642117ea2708f273565262a53377074d7a7f9d7b0c256`
+
+2. **Network Security & MCP Baseline**:
+   - HTTPS web root `/` returned 200 with no-store, strict CSP, browser permission
+     denial, no-referrer, no-sniff, and frame-denial headers.
+   - Unauthenticated POST `/mcp` returned 401 Unauthorized with Bearer challenge.
+   - Authenticated read-only session reported all media gates `false` and exposed
+     only `kvm.status`.
+   - Negative authorization calls for all four media operations failed closed:
+     - `kvm.video.snapshot`: `Unknown or disabled tool` (`-32602`)
+     - `kvm.keyboard.send`: `Policy denied HID report` (`-32603`)
+     - `kvm.audio.capture`: `Policy denied audio operation` (`-32603`)
+     - `kvm.audio.play`: `Policy denied audio operation` (`-32603`)
+
+3. **Capability 1: Video snapshot (`kvm.video.snapshot`)**:
+   - Enabled `/run/cleankvm/video-enabled`; `kvm.status` reported `videoEnabled: true`.
+   - `tools/list` exposed `kvm.video.snapshot`.
+   - Calling `kvm.video.snapshot` with 5s deadline captured live 1920x1080 planar
+     YUV420P frame (3,110,400 bytes, SHA-256
+     `0f41e6389208cd2597532340d4d5732c5e25ad76897908e16c7b31ee191abe9f`,
+     `isError: false`). Digest matched earlier admission proofs bit-for-bit.
+   - Disabled gate; verified post-cleanup: frame absent, `/dev/mem` absent, all 6
+     `soph_*` modules unloaded (`SOPH_MODULES=` empty), post-taint 4096,
+     `kvm.status` reported `videoEnabled: false`, calling `kvm.video.snapshot`
+     failed closed (`-32602`).
+
+4. **Capability 2: HID controls (`kvm.keyboard.send` / `kvm.pointer.send`)**:
+   - Enabled `/run/cleankvm/hid-enabled` with mutation token.
+   - `tools/list` exposed `kvm.keyboard.send` and `kvm.pointer.send`.
+   - Calling `kvm.keyboard.send` with 8-byte zero report returned `accepted: true`.
+   - Calling `kvm.pointer.send` with 4-byte zero report returned `accepted: true`.
+   - Disabled gate; calling `kvm.keyboard.send` failed closed with
+     `-32603 ("HID broker rejected report")`.
+
+5. **Capability 3: Audio capture (`kvm.audio.capture`)**:
+   - Enabled `/run/cleankvm/audio-capture-enabled` with scoped token.
+   - Calling `kvm.audio.capture` captured exactly 16,000 frames (32,000 bytes at
+     16 kHz mono S16LE, 1,003 ms). Returned aggregate metrics only (peak 32767,
+     mean 8063, RMS 11215, 0 clipped, 1 zero), with zero raw PCM leaked.
+   - Disabled gate; verified zero sound descriptors held (`SOUND_FDS=` empty),
+     calling `kvm.audio.capture` failed closed with `-32602`.
+
+6. **Capability 4: Audio output (`kvm.audio.play`)**:
+   - Enabled `/run/cleankvm/audio-output-enabled` with mutation token.
+   - `kvm.status` reported `audioOutputEnabled: true`; `tools/list` exposed `kvm.audio.play`.
+   - Calling `kvm.audio.play` played exactly 16,000 mono S16LE frames / 32,000 bytes
+     at 16 kHz (1 kHz diagnostic tone, peak 512, lowest nonzero DAC setting,
+     completed in 1,004 ms, `isError: false`).
+   - Disabled gate; `kvm.status` reported `audioOutputEnabled: false`, calling
+     `kvm.audio.play` failed closed with `-32602`, and zero sound descriptors remained
+     (`SOUND_FDS=` empty).
+
+7. **Target Final Global Invariant Audit**:
+   - Executed `cleanup-all`: all four capability gates absent (`RC=0`), `/dev/mem`
+     absent (`RC=0`), zero vendor modules loaded (`SOPH_MODULES=` empty), kernel
+     taint `4096`, and zero sound descriptors open across all processes (`SOUND_FDS=` empty).
 
 ### Product release image v56: native probe defaults and verified read-back
 
