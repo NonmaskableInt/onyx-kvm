@@ -237,8 +237,14 @@ The rotated v55 replacement is built at
 `8c2c1a9f3898ba8147ff2356b740486ab79f565d40984882af67c637cd9f08db`).
 It uses a fresh recovery credential, TLS identity, and OAuth issuer; the FIT,
 rootfs, FIP, whole-image hashes, product configuration, and complete rootfs
-audit pass. Next: power down, return the SD card, flash/read back v55, then
-repeat the cold-boot baseline with the corrected prompt-aware harness.
+audit pass. The v55 flash/read-back is complete on the uniquely resolved
+external physical 31 GB `CLEANKVM` card (`/dev/disk4`). Exactly 79,692,288
+bytes were written; the same image span read back with SHA-256
+`aef8d7463b610a62db1b32545cccfbb3ddfb1e1b3631486c3db02b1f730288f6`.
+macOS FAT bookkeeping changed the whole-span digest, while the embedded FIP,
+FIT, and rootfs matched the audited v55 artifacts. The card was safely
+ejected. Next: cold-boot v55 and repeat the baseline with the corrected
+prompt-aware harness.
 
 ## First hardware video frame captured: MIPI RX pinmux and pad pull-down resolution (2026-09-23)
 
