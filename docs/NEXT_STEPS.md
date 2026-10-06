@@ -220,6 +220,26 @@ local-only checks (taint, `/dev/mem`, loaded modules, broker sockets/processes,
 and sound descriptors) remain pending until the UART transmit path is reseated.
 No capability gate was opened and no media operation was attempted.
 
+After the UART/device reset, the local v54 baseline completed: taint was `0`,
+no `soph_*` module was loaded, `/dev/mem` was absent, video/microphone/output
+gates were absent, both audio broker sockets existed, no process held a sound
+descriptor, and the daemon/video/capture/playback hashes matched the audited
+artifacts. The device reacquired `192.168.2.103`.
+
+However, the legacy v53 audio harness reconnected to the already-authenticated
+shell and sent the v54 recovery credential as command input. The credential is
+therefore disclosed and v54 is rejected for continued use. The harness now
+checks whether it is already at a shell prompt and sends credentials only after
+observing an explicit password prompt.
+
+The rotated v55 replacement is built at
+`out/product-v55/cleankvm-phase1.img` (79,692,288 bytes, SHA-256
+`8c2c1a9f3898ba8147ff2356b740486ab79f565d40984882af67c637cd9f08db`).
+It uses a fresh recovery credential, TLS identity, and OAuth issuer; the FIT,
+rootfs, FIP, whole-image hashes, product configuration, and complete rootfs
+audit pass. Next: power down, return the SD card, flash/read back v55, then
+repeat the cold-boot baseline with the corrected prompt-aware harness.
+
 ## First hardware video frame captured: MIPI RX pinmux and pad pull-down resolution (2026-09-23)
 
 Offline attribution of the persistent D3 instability and packet header

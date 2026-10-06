@@ -8,16 +8,23 @@ if {![regexp -line {^password=(.*)$} $credential_text -> password]} { exit 2 }
 
 spawn /usr/bin/sudo /usr/bin/cu -l /dev/cu.usbserial-112440 -s 115200
 expect { -re {Connected\.} {} timeout { exit 7 } }
-send "\003\r"
-after 2500
-set send_slow {1 .02}
-send -s "root\r"
-after 1500
-log_user 0
-send -s -- "$password\r"
+send "\r"
+set logged_in 0
+expect {
+    -re {# *$} { set logged_in 1 }
+    -re {login: *$} {}
+    timeout { send "~."; exit 3 }
+}
+if {!$logged_in} {
+    send "root\r"
+    expect { -re {Password: *$} {} timeout { send "~."; exit 4 } }
+    set send_slow {1 .02}
+    log_user 0
+    send -s -- "$password\r"
+    expect { -re {# *$} {} timeout { log_user 1; send "~."; exit 5 } }
+}
 unset password
 unset credential_text
-after 3500
 log_user 1
 set send_slow {1 .003}
 send -s "stty -echo\r"
