@@ -590,10 +590,18 @@ impl<'a> Server<'a> {
             self.audio_capture.is_some() && self.authorize("kvm.audio.capture").is_ok();
         let audio_output_enabled =
             self.audio_output.is_some() && self.authorize("kvm.audio.play").is_ok();
+        let mutating_operations_enabled = match self.authority {
+            Authority::LocalRecovery => false,
+            Authority::Remote { grant, .. } => {
+                grant.mutation_enabled
+                    && self.hid.is_some()
+                    && self.authorize("kvm.keyboard.send").is_ok()
+            }
+        };
         let status = json!({
             "mode": mode,
             "networkListeners": network_listeners,
-            "mutatingOperationsEnabled": false,
+            "mutatingOperationsEnabled": mutating_operations_enabled,
             "videoEnabled": video_enabled,
             "audioCaptureEnabled": audio_capture_enabled,
             "audioOutputEnabled": audio_output_enabled
@@ -1248,6 +1256,39 @@ mod tests {
         );
         assert_eq!(malformed["error"]["code"], -32602);
         assert_eq!(hid.pointer.get(), None);
+
+        let read_control = [Scope::Read, Scope::Control];
+        let full_grant = Grant {
+            audience: "https://kvm.example/mcp",
+            expires_at_unix_seconds: 200,
+            scopes: &read_control,
+            mutation_enabled: true,
+        };
+        let mut server = Server::remote_ready_with_hid("https://kvm.example/mcp", 100, full_grant, &hid);
+        let status = response(
+            &mut server,
+            r#"{"jsonrpc":"2.0","id":14,"method":"tools/call","params":{"name":"kvm.status","arguments":{}}}"#,
+        );
+        assert_eq!(
+            status["result"]["structuredContent"]["mutatingOperationsEnabled"],
+            true
+        );
+
+        let non_mutating_grant = Grant {
+            audience: "https://kvm.example/mcp",
+            expires_at_unix_seconds: 200,
+            scopes: &read_control,
+            mutation_enabled: false,
+        };
+        let mut server = Server::remote_ready_with_hid("https://kvm.example/mcp", 100, non_mutating_grant, &hid);
+        let status = response(
+            &mut server,
+            r#"{"jsonrpc":"2.0","id":15,"method":"tools/call","params":{"name":"kvm.status","arguments":{}}}"#,
+        );
+        assert_eq!(
+            status["result"]["structuredContent"]["mutatingOperationsEnabled"],
+            false
+        );
     }
 
     struct TestValidator;
