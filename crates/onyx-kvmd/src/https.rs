@@ -359,9 +359,9 @@ fn handle(
     let audio_capture = BrokerAudioCapture;
     let audio_output = BrokerAudioOutput;
     let mut server = if method == Some("initialize") || !*initialized {
-        Server::remote(&config.resource, now, grant)
+        Server::remote(&claims.audience, now, grant)
     } else {
-        Server::remote_ready_with_hid(&config.resource, now, grant, &hid)
+        Server::remote_ready_with_hid(&claims.audience, now, grant, &hid)
     };
     if Path::new(VIDEO_ENABLED_PATH).exists() {
         server = server.with_video(&video);

@@ -119,7 +119,20 @@ fn serve_one(mut stream: UnixStream, config: &Config) -> io::Result<()> {
     stream.read_exact(&mut payload)?;
     authorize_request(header, payload, config.kind, &config.gate)?;
     let started = Instant::now();
-    let output = Command::new(&config.probe)
+    let probe_path = if config.probe.exists() {
+        config.probe.as_path()
+    } else {
+        let fallback = match config.kind {
+            Kind::Capture => Path::new("/usr/libexec/cleankvm-audio-capture-probe"),
+            Kind::Playback => Path::new("/usr/libexec/cleankvm-audio-playback-probe"),
+        };
+        if fallback.exists() {
+            fallback
+        } else {
+            config.probe.as_path()
+        }
+    };
+    let output = Command::new(probe_path)
         .stdin(Stdio::null())
         .stderr(Stdio::null())
         .output()?;

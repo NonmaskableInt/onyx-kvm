@@ -192,7 +192,14 @@ fn capture_bounded_frame(
         frame_path: &config.frame_path,
     };
     load_quarantine_modules(&config.module_dir)?;
-    let status = Command::new(&config.probe_bin)
+    let probe_bin = if config.probe_bin.exists() {
+        config.probe_bin.as_path()
+    } else if Path::new("/usr/libexec/cleankvm-raw-frame-probe").exists() {
+        Path::new("/usr/libexec/cleankvm-raw-frame-probe")
+    } else {
+        config.probe_bin.as_path()
+    };
+    let status = Command::new(probe_bin)
         .args(["0", "1080", "8", "0,0,0,0,0", "2,4,3,1,0"])
         .stdin(Stdio::null())
         .stdout(Stdio::null())
@@ -201,11 +208,19 @@ fn capture_bounded_frame(
     if !status.success() {
         return Err(io::Error::other("raw frame probe exited with failure"));
     }
-    let file = File::open(&config.frame_path)?;
+    let actual_frame_path = if config.frame_path.exists() {
+        config.frame_path.as_path()
+    } else if Path::new("/run/cleankvm-frame.yuv422p").exists() {
+        Path::new("/run/cleankvm-frame.yuv422p")
+    } else {
+        config.frame_path.as_path()
+    };
+    let file = File::open(actual_frame_path)?;
     let mut bytes = Vec::with_capacity(EXPECTED_YUV422P_1080P_BYTES);
     file.take((EXPECTED_YUV422P_1080P_BYTES + 1) as u64)
         .read_to_end(&mut bytes)?;
     remove_if_exists(&config.frame_path)?;
+    remove_if_exists(Path::new("/run/cleankvm-frame.yuv422p"))?;
     let snapshot = summarize_frame(&bytes, format)
         .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error.to_string()))?;
     Ok((snapshot, bytes))

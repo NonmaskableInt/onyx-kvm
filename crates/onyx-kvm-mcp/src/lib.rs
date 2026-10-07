@@ -146,8 +146,12 @@ struct JwtClaims<'a> {
     exp: u64,
     #[serde(default)]
     scope: &'a str,
-    #[serde(default, alias = "cleankvm_mutation", alias = "onyx_kvm_mutation")]
-    onyx_mutation: bool,
+    #[serde(default)]
+    onyx_mutation: Option<bool>,
+    #[serde(default)]
+    onyx_kvm_mutation: Option<bool>,
+    #[serde(default)]
+    cleankvm_mutation: Option<bool>,
 }
 
 impl BearerTokenValidator for Ed25519JwtValidator<'_> {
@@ -207,11 +211,16 @@ impl BearerTokenValidator for Ed25519JwtValidator<'_> {
             .split_ascii_whitespace()
             .map(parse_scope)
             .collect::<Result<Vec<_>, _>>()?;
+        let mutation_enabled = claims
+            .onyx_kvm_mutation
+            .or(claims.cleankvm_mutation)
+            .or(claims.onyx_mutation)
+            .unwrap_or(false);
         Ok(ValidatedClaims {
             audience: claims.aud.to_owned(),
             expires_at_unix_seconds: claims.exp,
             scopes,
-            mutation_enabled: claims.onyx_mutation,
+            mutation_enabled,
         })
     }
 }
@@ -1385,6 +1394,22 @@ mod tests {
         assert_eq!(claims.expires_at_unix_seconds, 200);
         assert_eq!(claims.scopes, vec![Scope::Read, Scope::Video]);
         assert!(!claims.mutation_enabled);
+    }
+
+    #[test]
+    fn validate_actual_v59_token() {
+        if let (Ok(token), Ok(pub_key)) = (
+            std::fs::read_to_string("../../out/product-v59-secrets/operator-token.jwt"),
+            std::fs::read("../../out/product-v59-secrets/identity/oauth-issuer-public-key.raw"),
+        ) {
+            let issuer = "https://onyx-kvm-owner,https://cleankvm-owner";
+            let validator = Ed25519JwtValidator::new(issuer, &pub_key);
+            let Ok(claims) = validator.validate(token.trim()) else {
+                panic!("token validation failed");
+            };
+            assert_eq!(claims.audience, "https://onyx-kvm-recovery:8443/mcp");
+            assert!(claims.mutation_enabled);
+        }
     }
 
     #[test]

@@ -136,7 +136,10 @@ pub fn authorize_grant(
     now_unix_seconds: u64,
     grant: Grant<'_>,
 ) -> Result<Operation, PolicyError> {
-    if grant.audience != expected_audience {
+    if !expected_audience
+        .split(',')
+        .any(|expected| expected.trim() == grant.audience)
+    {
         return Err(PolicyError::WrongAudience);
     }
     if grant.expires_at_unix_seconds <= now_unix_seconds {

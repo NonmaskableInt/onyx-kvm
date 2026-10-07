@@ -433,10 +433,55 @@ The v59 product release image transitions the full stack to the **Onyx KVM** ide
    - Embedded FIP, FIT, and rootfs artifacts verified bit-for-bit against audited v59 inputs via `verify-sd-image.py` (`embedded_artifacts=verified`).
    - Card safely ejected via `diskutil eject /dev/disk4`.
 
-4. **Next Bounded Step**:
-   - Insert card into NanoKVM Lite target device and cold boot.
-   - Verify serial fail-closed baseline: kernel taint `0`, no preloaded modules, `/dev/mem` absent, all 4 capability admission gates absent, broker Unix sockets listening, and services running.
-   - Over network: verify TLS certificate against enrolled trust, fetch web console at `https://<target-ip>:8443/`, authenticate with fresh v59 operator token, verify Onyx KVM UI branding, interactive HID forwarding, and live WebGL UYVY video streaming.
+4. **Cold Boot Baseline Invariants (target `192.168.2.108`)**:
+   - Device booted cleanly and acquired `192.168.2.108/24` on `eth0`.
+   - Kernel taint: `0`.
+   - Vendor modules: none preloaded (`SOPH_MODULES=` empty).
+   - `/dev/mem`: absent (`DEVMEM_ABSENT_RC=0`).
+   - Capability admission gates: all four absent by default (`GATE_*_ABSENT_RC=0`).
+   - Broker Unix sockets: all four listening (`SOCKET_*_RC=0`).
+   - Running services: all five active under UID/GID 900 (`onyx-kvmd`, `onyx-kvm-hid-broker`, `onyx-kvm-video-broker`, `onyx-kvm-audio-capture-broker`, `onyx-kvm-audio-playback-broker`).
+   - Open sound descriptors: zero (`SOUND_FDS=` empty).
+
+5. **Network & Protocol Acceptance**:
+   - Web console at `https://192.168.2.108:8443/`: HTTP 200 OK, `<title>Onyx KVM</title>`, strict CSP, and security headers.
+   - Unauthenticated `POST /mcp`: HTTP 401 Unauthorized with RFC 9728 Bearer challenge.
+   - Authenticated MCP `initialize` with protocol version `2025-11-25`: HTTP 200 OK, serverInfo `onyx-kvm` 0.1.0.
+   - Fail-closed baseline initial state verified via `kvm.status`:
+     `{"audioCaptureEnabled":false,"audioOutputEnabled":false,"mode":"development-remote","mutatingOperationsEnabled":true,"networkListeners":1,"videoEnabled":false}`.
+
+6. **Capability 1: HID Controls**:
+   - Closed gate: report rejected fail-closed with code `-32603` (`HID broker rejected report`).
+   - Enabled `/run/onyx-kvm/hid-enabled`.
+   - Dispatched keyboard report `kvm.keyboard.send` (`[0,0,0,0,0,0,0,0]`): returned `accepted: true`.
+   - Dispatched pointer report `kvm.pointer.send` (`[0,0,0,0]`): returned `accepted: true`.
+
+7. **Capability 2: Video Snapshot & HTTP Streaming**:
+   - Closed gate: `GET /video/frame` returned HTTP 403 Forbidden (`video disabled`).
+   - Enabled `/run/onyx-kvm/video-enabled`: `tools/list` dynamically exposed `kvm.video.snapshot`.
+   - Called `kvm.video.snapshot` with format `yuv420p`: returned live 1080p planar YUV frame (3,110,400 bytes, SHA-256 `5f7f76ef8dda19381ebc70ebc8118613ed9696c07a2df1f55cf7b81d111e14f1`).
+   - Fetched `GET /video/frame`: returned HTTP 200 OK with `Content-Type: application/octet-stream`, `Content-Length: 3110400`, `X-Frame-Width: 1920`, `X-Frame-Height: 1080`, `X-Frame-Format: yuv420p`, and `X-Frame-Digest: 670420af726487e4ee3cb2b083d6a9926f78bf88235dc90b39be82bf9f7fe700`.
+
+8. **Capability 3: Audio Capture & Output Metrics**:
+   - Closed gate: `kvm.audio.capture` and `kvm.audio.play` failed closed (`-32602 Unknown or disabled tool`).
+   - Enabled `/run/onyx-kvm/audio-capture-enabled`: `kvm.status` reported `audioCaptureEnabled: true`.
+   - Called `kvm.audio.capture`: executed 1.0s capture (16,000 frames at 16 kHz mono s16le, 32,000 bytes, peak 32,530, RMS 7,925, elapsed 1,010 ms, zero raw PCM leak).
+   - Enabled `/run/onyx-kvm/audio-output-enabled`: `kvm.status` reported `audioOutputEnabled: true`.
+   - Called `kvm.audio.play`: played 1.0s 1,000 Hz test tone (16,000 frames at 16 kHz mono s16le, 32,000 bytes, toneHz 1,000, peak 512, elapsed 1,005 ms, `completed: true`).
+
+9. **Teardown & Fail-Closed Invariant Verification**:
+   - Ran `cleanup-all` via `product-gate.exp`:
+     - All capability gate flags absent (`GATE_*_ABSENT_RC=0`).
+     - `/dev/mem` absent (`DEVMEM_ABSENT_RC=0`).
+     - Quarantine modules cleanly unloaded (`SOPH_MODULES=` empty).
+     - Sound descriptors released (`SOUND_FDS=` empty).
+   - Post-cleanup MCP verified back to fail-closed baseline (`videoEnabled: false`, `audioCaptureEnabled: false`, `audioOutputEnabled: false`).
+
+10. **Authentication & Broker Compatibility Bug Fixes**:
+    - **JWT Mutation Claim Deserialization**: Resolved serde struct alias collision by defining separate optional fields `onyx_kvm_mutation`, `cleankvm_mutation`, and `onyx_mutation`, coalesced at validation time. Updated token generator to emit canonical `onyx_kvm_mutation`.
+    - **Multiple Audience Matching**: Updated `authorize_grant` to accept comma-separated resource audiences configured by init scripts (matching token audience against any comma-separated entry).
+    - **Broker Path Fallbacks**: Video and audio brokers resolve fallback paths (`/usr/libexec/cleankvm-*-probe` and `/run/cleankvm-frame.yuv422p`) to maintain seamless operation during binary migration.
+    - **Serial Expect Tooling**: Hardened `product-exec.exp` and `product-gate.exp` cu disconnection to eliminate hung serial terminal locks.
 
 ### Complete hardware acceptance on release image v58 (target `192.168.2.107`)
 
