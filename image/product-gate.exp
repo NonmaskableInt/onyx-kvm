@@ -86,6 +86,7 @@ after 100
 send "\r\r"
 after 200
 send "~.\r"
+set timeout 2
 expect { -re {Disconnected\.} {} timeout {} }
 catch close
 catch wait

@@ -41,7 +41,7 @@ impl fmt::Display for BrokerError {
 pub fn decode_and_authorize(
     frame: &[u8; FRAME_LEN],
     video_enabled: bool,
-) -> Result<SnapshotRequest, BrokerError> {
+) -> Result<(Operation, SnapshotRequest), BrokerError> {
     if !video_enabled {
         return Err(BrokerError::VideoDisabled);
     }
@@ -49,7 +49,7 @@ pub fn decode_and_authorize(
     let mut header_bytes = [0_u8; WIRE_HEADER_BYTES];
     header_bytes.copy_from_slice(&frame[..WIRE_HEADER_BYTES]);
     let header = WireHeader::decode(header_bytes).map_err(BrokerError::Validation)?;
-    if header.operation != Operation::Snapshot {
+    if header.operation != Operation::Snapshot && header.operation != Operation::SnapshotFrame {
         return Err(BrokerError::Validation(ValidationError::UnknownOperation));
     }
     if usize::try_from(header.payload_bytes).ok() != Some(SNAPSHOT_REQUEST_BYTES) {
@@ -67,7 +67,7 @@ pub fn decode_and_authorize(
     if request.width != 1920 || request.height != 1080 {
         return Err(BrokerError::UnsupportedDimensions);
     }
-    Ok(request)
+    Ok((header.operation, request))
 }
 
 /// Validate a captured 1920x1080 planar YUV frame buffer and construct its wire response.
@@ -122,14 +122,26 @@ mod tests {
     #[test]
     fn decodes_only_1080p_planar_yuv_requests() {
         let valid = valid_wire_frame(SnapshotFormat::Yuv420p, 1920, 1080);
-        let request = decode_and_authorize(&valid, true)
+        let (op, request) = decode_and_authorize(&valid, true)
             .unwrap_or_else(|error| panic!("valid frame rejected: {error}"));
+        assert_eq!(op, Operation::Snapshot);
         assert_eq!(request.width, 1920);
         assert_eq!(request.height, 1080);
         assert_eq!(request.format, SnapshotFormat::Yuv420p);
 
         let yuv422 = valid_wire_frame(SnapshotFormat::Yuv422p, 1920, 1080);
         assert!(decode_and_authorize(&yuv422, true).is_ok());
+
+        let mut frame_op = valid;
+        let frame_header = WireHeader {
+            operation: Operation::SnapshotFrame,
+            payload_bytes: 8,
+        };
+        frame_op[..WIRE_HEADER_BYTES].copy_from_slice(&frame_header.encode());
+        let (op2, req2) = decode_and_authorize(&frame_op, true)
+            .unwrap_or_else(|error| panic!("valid snapshot frame rejected: {error}"));
+        assert_eq!(op2, Operation::SnapshotFrame);
+        assert_eq!(req2.format, SnapshotFormat::Yuv420p);
 
         let wrong_format = valid_wire_frame(SnapshotFormat::Jpeg, 1920, 1080);
         assert_eq!(

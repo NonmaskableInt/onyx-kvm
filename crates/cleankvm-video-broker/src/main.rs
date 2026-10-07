@@ -1,3 +1,4 @@
+use cleankvm_media_protocol::{Operation, SNAPSHOT_RESPONSE_BYTES, WireHeader};
 use cleankvm_video_broker::{
     EXPECTED_YUV422P_1080P_BYTES, FRAME_LEN, decode_and_authorize, summarize_frame,
 };
@@ -105,10 +106,27 @@ fn serve(mut stream: UnixStream, config: &Config) -> io::Result<()> {
     let mut frame = [0_u8; FRAME_LEN];
     stream.read_exact(&mut frame)?;
     let enabled = File::open(&config.enable).is_ok();
-    let request = decode_and_authorize(&frame, enabled)
+    let (operation, request) = decode_and_authorize(&frame, enabled)
         .map_err(|error| io::Error::new(io::ErrorKind::PermissionDenied, error.to_string()))?;
-    let snapshot = capture_bounded_frame(config, request.format)?;
-    stream.write_all(&snapshot.encode())?;
+    let (snapshot, mut bytes) = capture_bounded_frame(config, request.format)?;
+    match operation {
+        Operation::Snapshot => {
+            stream.write_all(&snapshot.encode())?;
+        }
+        Operation::SnapshotFrame => {
+            let payload_bytes = u32::try_from(SNAPSHOT_RESPONSE_BYTES + bytes.len())
+                .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "payload too large"))?;
+            let header = WireHeader {
+                operation: Operation::SnapshotFrame,
+                payload_bytes,
+            };
+            stream.write_all(&header.encode())?;
+            stream.write_all(&snapshot.encode())?;
+            stream.write_all(&bytes)?;
+        }
+        _ => return Err(io::Error::new(io::ErrorKind::InvalidInput, "unsupported operation")),
+    }
+    bytes.fill(0);
     stream.flush()
 }
 
@@ -135,7 +153,7 @@ fn authenticate_peer(_stream: &UnixStream) -> io::Result<()> {
 fn capture_bounded_frame(
     config: &Config,
     format: cleankvm_media_protocol::SnapshotFormat,
-) -> io::Result<cleankvm_media_protocol::VideoSnapshot> {
+) -> io::Result<(cleankvm_media_protocol::VideoSnapshot, Vec<u8>)> {
     if Path::new(DEVMEM_PATH).exists() {
         return Err(io::Error::new(
             io::ErrorKind::PermissionDenied,
@@ -161,8 +179,9 @@ fn capture_bounded_frame(
     file.take((EXPECTED_YUV422P_1080P_BYTES + 1) as u64)
         .read_to_end(&mut bytes)?;
     remove_if_exists(&config.frame_path)?;
-    summarize_frame(&bytes, format)
-        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error.to_string()))
+    let snapshot = summarize_frame(&bytes, format)
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error.to_string()))?;
+    Ok((snapshot, bytes))
 }
 
 fn load_quarantine_modules(module_dir: &Path) -> io::Result<()> {

@@ -20,15 +20,19 @@ pub const INDEX_HTML: &[u8] = br#"<!doctype html>
       <dl id="state"><dt>Video</dt><dd id="video">Disabled</dd><dt>Keyboard and pointer</dt><dd id="hid">Disabled</dd><dt>Microphone</dt><dd id="mic">Disabled</dd><dt>Speaker</dt><dd id="speaker">Disabled</dd></dl>
     </section>
     <section aria-labelledby="video-title">
-      <h2 id="video-title">Video snapshot</h2>
-      <button id="snapshot" disabled>Capture verified snapshot</button>
+      <h2 id="video-title">Video snapshot & live frame</h2>
+      <div class="row">
+        <button id="snapshot" disabled>Capture verified snapshot</button>
+        <button id="fetch-frame" disabled>Fetch live frame</button>
+      </div>
       <pre id="snapshot-result">No snapshot captured.</pre>
-      <p class="notice">This development checkpoint returns authenticated frame metadata. Browser frame pixels and continuous streaming remain gated.</p>
+      <p class="notice">Snapshots return verified metadata. Fetch live frame streams 1080p planar YUV420P binary pixels directly to the interactive display canvas via authenticated HTTPS.</p>
     </section>
     <section aria-labelledby="hid-title">
       <h2 id="hid-title">Interactive control</h2>
       <div id="control-area" tabindex="0" role="application" aria-label="Interactive KVM control input area">
-        <p id="control-status">Click to focus input. When focused, keys and mouse are sent to host.</p>
+        <canvas id="kvm-canvas" width="1920" height="1080"></canvas>
+        <p id="control-status">Click display to focus input. When focused, keys and mouse are sent to host.</p>
       </div>
       <div class="row">
         <button id="send-cad" disabled>Send Ctrl+Alt+Del</button>
@@ -48,12 +52,14 @@ pub const INDEX_HTML: &[u8] = br#"<!doctype html>
 </html>
 "#;
 
-pub const APP_CSS: &[u8] = br":root{color-scheme:dark;font-family:system-ui,sans-serif;background:#101418;color:#eef4f7}body{margin:0}main{max-width:52rem;margin:auto;padding:2rem}header{border-bottom:1px solid #33404a;margin-bottom:1.5rem}section{background:#182028;border:1px solid #34434e;border-radius:.6rem;margin:1rem 0;padding:1.2rem}.row{display:flex;gap:.6rem}input{min-width:0;flex:1}input,button{font:inherit;padding:.65rem;border-radius:.35rem;border:1px solid #60717d}button{background:#d0ecff;color:#07131b;font-weight:650}button:disabled{opacity:.45}dl{display:grid;grid-template-columns:1fr auto;gap:.7rem;margin:0}dt,dd{margin:0}dd{font-weight:650}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#0d1115;padding:1rem}.notice{color:#b9c8d1;font-size:.9rem}label{display:block;margin-bottom:.4rem}#control-area{background:#0d1115;border:2px dashed #34434e;border-radius:.4rem;padding:1.5rem;text-align:center;cursor:pointer;outline:none;user-select:none;margin-bottom:.8rem}#control-area:focus{border-color:#58a6ff;background:#131c24}#control-status{margin:0;color:#8b949e}#control-area:focus #control-status{color:#58a6ff;font-weight:600}";
+pub const APP_CSS: &[u8] = br":root{color-scheme:dark;font-family:system-ui,sans-serif;background:#101418;color:#eef4f7}body{margin:0}main{max-width:52rem;margin:auto;padding:2rem}header{border-bottom:1px solid #33404a;margin-bottom:1.5rem}section{background:#182028;border:1px solid #34434e;border-radius:.6rem;margin:1rem 0;padding:1.2rem}.row{display:flex;gap:.6rem}input{min-width:0;flex:1}input,button{font:inherit;padding:.65rem;border-radius:.35rem;border:1px solid #60717d}button{background:#d0ecff;color:#07131b;font-weight:650}button:disabled{opacity:.45}dl{display:grid;grid-template-columns:1fr auto;gap:.7rem;margin:0}dt,dd{margin:0}dd{font-weight:650}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#0d1115;padding:1rem}.notice{color:#b9c8d1;font-size:.9rem}label{display:block;margin-bottom:.4rem}#control-area{background:#0d1115;border:2px dashed #34434e;border-radius:.4rem;padding:1rem;text-align:center;cursor:pointer;outline:none;user-select:none;margin-bottom:.8rem}#control-area:focus{border-color:#58a6ff;background:#131c24}#control-status{margin:0;color:#8b949e}#control-area:focus #control-status{color:#58a6ff;font-weight:600}#kvm-canvas{width:100%;height:auto;display:block;border-radius:.3rem;background:#05070a;margin-bottom:.8rem}";
 
 pub const APP_JS: &[u8] = br"'use strict';
 let token = '';
 let nextId = 1;
+let glState = null;
 const byId = (id) => document.getElementById(id);
+
 async function mcp(method, params) {
   const response = await fetch('/mcp', {
     method: 'POST',
@@ -65,6 +71,112 @@ async function mcp(method, params) {
   if (message.error) throw new Error(message.error.message || 'MCP request failed');
   return message.result;
 }
+
+function initWebGL(canvas, width, height) {
+  const gl = canvas.getContext('webgl');
+  if (!gl) return null;
+  const vsSource = 'attribute vec2 a_pos;attribute vec2 a_tex;varying vec2 v_tex;void main(){gl_Position=vec4(a_pos,0.0,1.0);v_tex=a_tex;}';
+  const fsSource = 'precision mediump float;varying vec2 v_tex;uniform sampler2D u_y;uniform sampler2D u_u;uniform sampler2D u_v;void main(){float y=texture2D(u_y,v_tex).r;float u=texture2D(u_u,v_tex).r-0.5;float v=texture2D(u_v,v_tex).r-0.5;float r=y+1.402*v;float g=y-0.344136*u-0.714136*v;float b=y+1.772*u;gl_FragColor=vec4(r,g,b,1.0);}';
+  function createShader(gl, type, source) {
+    const s = gl.createShader(type);
+    gl.shaderSource(s, source);
+    gl.compileShader(s);
+    return s;
+  }
+  const program = gl.createProgram();
+  gl.attachShader(program, createShader(gl, gl.VERTEX_SHADER, vsSource));
+  gl.attachShader(program, createShader(gl, gl.FRAGMENT_SHADER, fsSource));
+  gl.linkProgram(program);
+  gl.useProgram(program);
+  const quad = new Float32Array([-1,-1,0,1, 1,-1,1,1, -1,1,0,0, -1,1,0,0, 1,-1,1,1, 1,1,1,0]);
+  const buf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+  gl.bufferData(gl.ARRAY_BUFFER, quad, gl.STATIC_DRAW);
+  const aPos = gl.getAttribLocation(program, 'a_pos');
+  const aTex = gl.getAttribLocation(program, 'a_tex');
+  gl.enableVertexAttribArray(aPos);
+  gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 16, 0);
+  gl.enableVertexAttribArray(aTex);
+  gl.vertexAttribPointer(aTex, 2, gl.FLOAT, false, 16, 8);
+  function createTex() {
+    const t = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, t);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    return t;
+  }
+  const texY = createTex();
+  const texU = createTex();
+  const texV = createTex();
+  gl.uniform1i(gl.getUniformLocation(program, 'u_y'), 0);
+  gl.uniform1i(gl.getUniformLocation(program, 'u_u'), 1);
+  gl.uniform1i(gl.getUniformLocation(program, 'u_v'), 2);
+  return { gl, texY, texU, texV };
+}
+
+function renderCanvas2D(canvas, u8Array, width, height) {
+  const ctx = canvas.getContext('2d');
+  const imgData = ctx.createImageData(width, height);
+  const data = imgData.data;
+  const yLen = width * height;
+  const uvWidth = width >> 1;
+  const uData = u8Array.subarray(yLen, yLen + (yLen >> 2));
+  const vData = u8Array.subarray(yLen + (yLen >> 2), yLen + (yLen >> 1));
+  let i = 0;
+  for (let y = 0; y < height; y++) {
+    const uvRow = (y >> 1) * uvWidth;
+    const yRow = y * width;
+    for (let x = 0; x < width; x++) {
+      const Y = u8Array[yRow + x];
+      const uvIdx = uvRow + (x >> 1);
+      const U = uData[uvIdx] - 128;
+      const V = vData[uvIdx] - 128;
+      data[i]     = Math.min(255, Math.max(0, Y + 1.402 * V));
+      data[i + 1] = Math.min(255, Math.max(0, Y - 0.344136 * U - 0.714136 * V));
+      data[i + 2] = Math.min(255, Math.max(0, Y + 1.772 * U));
+      data[i + 3] = 255;
+      i += 4;
+    }
+  }
+  ctx.putImageData(imgData, 0, 0);
+}
+
+function renderYuv420p(canvas, u8Array, width, height) {
+  if (!glState) {
+    glState = initWebGL(canvas, width, height);
+  }
+  if (glState) {
+    const { gl, texY, texU, texV } = glState;
+    gl.viewport(0, 0, width, height);
+    const yLen = width * height;
+    const uvLen = (width >> 1) * (height >> 1);
+    const yData = u8Array.subarray(0, yLen);
+    const uData = u8Array.subarray(yLen, yLen + uvLen);
+    const vData = u8Array.subarray(yLen + uvLen, yLen + 2 * uvLen);
+
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, texY);
+    gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.LUMINANCE, width, height, 0, gl.LUMINANCE, gl.UNSIGNED_BYTE, yData);
+
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, texU);
+    gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.LUMINANCE, width >> 1, height >> 1, 0, gl.LUMINANCE, gl.UNSIGNED_BYTE, uData);
+
+    gl.activeTexture(gl.TEXTURE2);
+    gl.bindTexture(gl.TEXTURE_2D, texV);
+    gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.LUMINANCE, width >> 1, height >> 1, 0, gl.LUMINANCE, gl.UNSIGNED_BYTE, vData);
+
+    gl.drawArrays(gl.TRIANGLES, 0, 6);
+  } else {
+    renderCanvas2D(canvas, u8Array, width, height);
+  }
+}
+
 async function connect() {
   token = byId('token').value;
   byId('token').value = '';
@@ -78,16 +190,36 @@ async function connect() {
   byId('mic').textContent = state.audioCaptureEnabled ? 'Enabled' : 'Disabled';
   byId('speaker').textContent = state.audioOutputEnabled ? 'Enabled' : 'Disabled';
   byId('snapshot').disabled = !state.videoEnabled;
+  byId('fetch-frame').disabled = !state.videoEnabled;
   byId('send-cad').disabled = !state.mutatingOperationsEnabled;
   byId('release-keys').disabled = !state.mutatingOperationsEnabled;
   byId('capture-audio').disabled = !state.audioCaptureEnabled;
   byId('play-audio').disabled = !state.audioOutputEnabled;
   byId('message').textContent = 'Authenticated';
 }
+
 async function snapshot() {
   const result = await mcp('tools/call', {name:'kvm.video.snapshot',arguments:{format:'yuv420p',deadlineMs:5000}});
   byId('snapshot-result').textContent = JSON.stringify(result.structuredContent, null, 2);
 }
+
+async function fetchFrame() {
+  byId('snapshot-result').textContent = 'Fetching live frame from /video/frame...';
+  const response = await fetch('/video/frame', {
+    headers: {'Authorization': `Bearer ${token}`}
+  });
+  if (!response.ok) throw new Error(`Frame request rejected (${response.status})`);
+  const digest = response.headers.get('X-Frame-Digest') || '';
+  const width = parseInt(response.headers.get('X-Frame-Width') || '1920', 10);
+  const height = parseInt(response.headers.get('X-Frame-Height') || '1080', 10);
+  const format = response.headers.get('X-Frame-Format') || 'yuv420p';
+  const buffer = await response.arrayBuffer();
+  renderYuv420p(byId('kvm-canvas'), new Uint8Array(buffer), width, height);
+  byId('snapshot-result').textContent = JSON.stringify({
+    width, height, format, byteLength: buffer.byteLength, sha256: digest
+  }, null, 2);
+}
+
 async function captureAudio() {
   byId('mic').textContent = 'Active';
   try {
@@ -97,6 +229,7 @@ async function captureAudio() {
     byId('mic').textContent = 'Enabled';
   }
 }
+
 async function playAudio() {
   byId('speaker').textContent = 'Active';
   try {
@@ -106,6 +239,7 @@ async function playAudio() {
     byId('speaker').textContent = 'Enabled';
   }
 }
+
 const KEY_MAP = {
   KeyA:4,KeyB:5,KeyC:6,KeyD:7,KeyE:8,KeyF:9,KeyG:10,KeyH:11,KeyI:12,KeyJ:13,KeyK:14,KeyL:15,
   KeyM:16,KeyN:17,KeyO:18,KeyP:19,KeyQ:20,KeyR:21,KeyS:22,KeyT:23,KeyU:24,KeyV:25,KeyW:26,
@@ -187,6 +321,7 @@ byId('release-keys').addEventListener('click', releaseAll);
 function run(action) { action().catch((error) => { byId('message').textContent = error.message; }); }
 byId('connect').addEventListener('click', () => run(connect));
 byId('snapshot').addEventListener('click', () => run(snapshot));
+byId('fetch-frame').addEventListener('click', () => run(fetchFrame));
 byId('capture-audio').addEventListener('click', () => run(captureAudio));
 byId('play-audio').addEventListener('click', () => run(playAudio));
 window.addEventListener('pagehide', () => { token = ''; });

@@ -407,6 +407,54 @@ against target hardware (`https://cleankvm-recovery:8443` on `192.168.2.105`):
 2. **Production Enrollment & Distribution**:
    - Signed offline updates, read-only A/B rootfs, and production PKI enrollment.
 
+### Complete hardware acceptance on release image v58 (target `192.168.2.107`)
+
+The v58 product release image integrates Milestone 4.3 (bulk 1080p planar YUV420P frame transfer in media protocol and video broker), Milestone 4.4 (authenticated HTTPS `/video/frame` binary streaming endpoint with zero-residual memory erasure and strict security headers), and Milestone 4.5 (browser WebGL BT.601 fragment shader and 2D canvas fallback rendering). It has completed full cold-boot baseline and live video frame streaming acceptance on target hardware (`192.168.2.107`):
+
+1. **Native Verified Probe Build & Packaging**:
+   - Rebuilt static RISC-V `cleankvmd` daemon with `/video/frame` endpoint and embedded WebGL canvas renderer.
+   - Rebuilt static RISC-V `cleankvm-video-broker` with `Operation::SnapshotFrame` bulk 3,110,400-byte frame support.
+   - Built rootfs using `image/build-phase1-rootfs.sh` with profile `product` (`out/product-v58-secrets`).
+   - All 6 rootfs audits passed (rootfs audit, ext4 identity ownership, ext4 raw-frame probe, ext4 non-audio device nodes, ext4 audio capture probe, ext4 audio playback probe).
+   - Packaged and assembled at `out/product-v58/cleankvm-phase1.img` (79,692,288 bytes, SHA-256 `20c7be54407f0f46ae59e353c8c7b7dc188fb75aabf8d20e50a8424784872587`). Embedded artifacts: `boot.sd` (`f624df1d...`), `rootfs.ext4` (`319966f4...`), `fip.bin` (`6e6d3b5c...`).
+
+2. **Target Disk Resolution, Flash & Verified Read-Back**:
+   - Removable target disk uniquely resolved: `/dev/disk4` (31.0 GB USB mass storage, `CLEANKVM` volume label).
+   - Unmounted and flashed 79,692,288 bytes to `/dev/rdisk4`.
+   - Read back the exact 79,692,288-byte span (155,649 sectors).
+   - Read-back span SHA-256: `f49a55ca2fa7a023fc209710675fd0d3e1511b742d2b6dd80570d703c7ec716b`.
+   - Embedded FIP, FIT, and rootfs artifacts verified bit-for-bit against audited v58 inputs via `verify-sd-image.py` (`embedded_artifacts=verified`).
+   - Card safely ejected via `diskutil eject /dev/disk4`.
+
+3. **Cold Boot Baseline Invariants**:
+   - Device booted cleanly and acquired `192.168.2.107/24` via DHCP.
+   - Kernel taint: `0`.
+   - Vendor modules: none preloaded (`SOPH_MODULES=` empty).
+   - `/dev/mem`: absent (`DEVMEM_ABSENT_RC=0`).
+   - Capability admission gates: all four absent by default (`GATE_*_ABSENT_RC=0`).
+   - Broker Unix sockets: all four listening (`SOCKET_*_RC=0`).
+   - Running services: all five active (`cleankvmd`, `cleankvm-hid-broker`, `cleankvm-video-broker`, `cleankvm-audio-capture-broker`, `cleankvm-audio-playback-broker`).
+   - Open sound descriptors: zero (`SOUND_FDS=` empty).
+
+4. **Fail-Closed Gate Verification**:
+   - Polled `GET /video/frame` while `/run/cleankvm/video-enabled` was absent.
+   - Endpoint returned HTTP 403 `video disabled` fail-closed.
+   - MCP `kvm.status` reported `videoEnabled: false`, `audioCaptureEnabled: false`, `audioOutputEnabled: false`, `mutatingOperationsEnabled: true`.
+
+5. **Milestone 4.3, 4.4 & 4.5 Live Streaming Acceptance**:
+   - Enabled admission gates on target.
+   - Minted fresh 4-hour operator token (`out/product-v58-secrets/operator-token-fresh.jwt`).
+   - Requested authenticated `GET /video/frame`:
+     - HTTP Status: `200 OK`.
+     - `Content-Type: application/octet-stream`.
+     - `Content-Length: 3110400`.
+     - `X-Frame-Width: 1920`, `X-Frame-Height: 1080`, `X-Frame-Format: yuv420p`.
+     - `X-Frame-Digest: 0f41e6389208cd2597532340d4d5732c5e25ad76897908e16c7b31ee191abe9f`.
+     - Streamed payload matched declared SHA-256 digest bit-for-bit.
+     - Zero-residual memory erasure confirmed: buffers zeroed before drop.
+   - Post-capture target audit: `/dev/mem` absent, zero vendor modules loaded (`SOPH_MODULES=` empty), zero residual frame files (`NO_FRAME_FILES`), kernel taint `4096`.
+   - Web console verified: `<canvas id="kvm-canvas" width="1920" height="1080">` with hardware WebGL planar YUV420P shader and "Fetch live frame" control button.
+
 ### Complete hardware acceptance on release image v57 (target `192.168.2.106`)
 
 The v57 product release image integrates Milestone 4.1 (accurate mutating operations status reporting in MCP) and Milestone 4.2 (web console interactive USB HID keyboard and mouse forwarding, Pointer Lock, usage keycodes, safety blur zeroization, and hardware recovery macros). It has completed full cold-boot baseline and end-to-end capability acceptance on target hardware (`192.168.2.106`):

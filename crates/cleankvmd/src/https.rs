@@ -10,12 +10,13 @@ use std::{
 
 use cleankvm_mcp::{
     AudioCaptureTransport, AudioOutputTransport, Ed25519JwtValidator, HidTransport, HttpAuthError,
-    HttpRequestAuthError, MAX_MESSAGE_BYTES, Server, VideoTransport, authenticate_http_request,
+    HttpRequestAuthError, MAX_MESSAGE_BYTES, Scope, Server, VideoTransport, authenticate_http_request,
     bearer_challenge, protected_resource_metadata,
 };
 use cleankvm_media_protocol::{
     AUDIO_REQUEST_BYTES, CAPTURE_METRICS_BYTES, CaptureMetrics, Operation, PLAYBACK_RECEIPT_BYTES,
-    PcmShape, PlaybackReceipt, SNAPSHOT_RESPONSE_BYTES, SnapshotRequest, VideoSnapshot, WireHeader,
+    PcmShape, PlaybackReceipt, SNAPSHOT_RESPONSE_BYTES, SnapshotFormat, SnapshotRequest,
+    VideoSnapshot, WIRE_HEADER_BYTES, WireHeader,
 };
 use rustls::{
     ServerConfig, ServerConnection, StreamOwned,
@@ -66,6 +67,40 @@ impl HidTransport for BrokerHid {
 }
 
 struct BrokerVideo;
+
+impl BrokerVideo {
+    fn capture_frame(request: SnapshotRequest) -> io::Result<(VideoSnapshot, Vec<u8>)> {
+        let mut stream = UnixStream::connect(VIDEO_SOCKET)?;
+        let timeout = TIMEOUT.max(Duration::from_millis(u64::from(request.deadline_ms)));
+        stream.set_read_timeout(Some(timeout))?;
+        stream.set_write_timeout(Some(timeout))?;
+        let payload = request.encode();
+        let payload_bytes =
+            u32::try_from(payload.len()).map_err(|_| invalid("invalid snapshot request length"))?;
+        let header = WireHeader {
+            operation: Operation::SnapshotFrame,
+            payload_bytes,
+        };
+        stream.write_all(&header.encode())?;
+        stream.write_all(&payload)?;
+        let mut header_response = [0_u8; WIRE_HEADER_BYTES];
+        stream.read_exact(&mut header_response)?;
+        let wire_header = WireHeader::decode(header_response)
+            .map_err(|_| invalid("invalid video broker wire header"))?;
+        if wire_header.operation != Operation::SnapshotFrame {
+            return Err(invalid("unexpected operation in broker response"));
+        }
+        let mut snapshot_bytes = [0_u8; SNAPSHOT_RESPONSE_BYTES];
+        stream.read_exact(&mut snapshot_bytes)?;
+        let snapshot = VideoSnapshot::decode(snapshot_bytes)
+            .map_err(|_| invalid("invalid video broker snapshot response"))?;
+        let expected_frame_bytes = usize::try_from(snapshot.byte_length)
+            .map_err(|_| invalid("frame byte length overflow"))?;
+        let mut frame_bytes = vec![0_u8; expected_frame_bytes];
+        stream.read_exact(&mut frame_bytes)?;
+        Ok((snapshot, frame_bytes))
+    }
+}
 
 impl VideoTransport for BrokerVideo {
     fn capture_snapshot(&self, request: SnapshotRequest) -> io::Result<VideoSnapshot> {
@@ -252,6 +287,9 @@ fn handle(
             protected_resource_metadata(&config.resource, &config.authorization_server).to_string();
         return respond(stream, 200, "application/json", body.as_bytes(), None);
     }
+    if request.method == "GET" && request.path == "/video/frame" {
+        return handle_video_frame(stream, config, issuer_key, &request);
+    }
     if request.method == "GET" {
         return match request.path.as_str() {
             "/" => respond(stream, 200, "text/html; charset=utf-8", INDEX_HTML, None),
@@ -281,7 +319,11 @@ fn handle(
         .duration_since(UNIX_EPOCH)
         .map_err(io::Error::other)?
         .as_secs();
-    if claims.audience != config.resource || claims.expires_at_unix_seconds < now {
+    let valid_aud = config
+        .resource
+        .split(',')
+        .any(|expected| expected.trim() == claims.audience);
+    if !valid_aud || claims.expires_at_unix_seconds < now {
         return unauthorized(stream);
     }
 
@@ -315,6 +357,57 @@ fn handle(
         return respond(stream, 202, "application/json", b"", None);
     };
     respond(stream, 200, "application/json", body.as_bytes(), None)
+}
+
+fn handle_video_frame(
+    stream: &mut StreamOwned<ServerConnection, TcpStream>,
+    config: &Config,
+    issuer_key: &[u8],
+    request: &Request,
+) -> io::Result<()> {
+    if !Path::new(VIDEO_ENABLED_PATH).exists() {
+        return respond(stream, 403, "text/plain", b"video disabled", None);
+    }
+    let validator = Ed25519JwtValidator::new(&config.issuer, issuer_key);
+    let claims = match authenticate_http_request(
+        request.origin.as_deref(),
+        request.authorization.as_deref(),
+        &config.origin,
+        &validator,
+    ) {
+        Ok(claims) => claims,
+        Err(HttpRequestAuthError::Boundary(HttpAuthError::InvalidOrigin)) => {
+            return respond(stream, 403, "text/plain", b"forbidden", None);
+        }
+        Err(_) => return unauthorized(stream),
+    };
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(io::Error::other)?
+        .as_secs();
+    let valid_aud = config
+        .resource
+        .split(',')
+        .any(|expected| expected.trim() == claims.audience);
+    if !valid_aud || claims.expires_at_unix_seconds < now {
+        return unauthorized(stream);
+    }
+    if !claims.scopes.contains(&Scope::Video) {
+        return unauthorized(stream);
+    }
+    let Ok(snapshot_request) = SnapshotRequest::new(1920, 1080, SnapshotFormat::Yuv420p, 5000) else {
+        return respond(stream, 500, "text/plain", b"invalid snapshot request", None);
+    };
+    let (snapshot, mut frame_bytes) = match BrokerVideo::capture_frame(snapshot_request) {
+        Ok(res) => res,
+        Err(err) => {
+            eprintln!("failed to capture video frame: {err}");
+            return respond(stream, 500, "text/plain", b"frame capture failed", None);
+        }
+    };
+    let result = respond_frame(stream, &snapshot, &frame_bytes);
+    frame_bytes.fill(0);
+    result
 }
 
 fn unauthorized<W: Write>(stream: &mut W) -> io::Result<()> {
@@ -405,6 +498,39 @@ fn header_text(value: &[u8]) -> io::Result<String> {
 
 fn invalid(message: &'static str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, message)
+}
+
+fn respond_frame<W: Write>(
+    stream: &mut W,
+    snapshot: &VideoSnapshot,
+    body: &[u8],
+) -> io::Result<()> {
+    write!(
+        stream,
+        concat!(
+            "HTTP/1.1 200 OK\r\n",
+            "Content-Type: application/octet-stream\r\n",
+            "Content-Length: {}\r\n",
+            "Cache-Control: no-store, no-cache, must-revalidate\r\n",
+            "Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'\r\n",
+            "Permissions-Policy: camera=(), geolocation=(), microphone=()\r\n",
+            "Referrer-Policy: no-referrer\r\n",
+            "X-Content-Type-Options: nosniff\r\n",
+            "X-Frame-Options: DENY\r\n",
+            "X-Frame-Width: {}\r\n",
+            "X-Frame-Height: {}\r\n",
+            "X-Frame-Format: {}\r\n",
+            "X-Frame-Digest: {}\r\n",
+            "Connection: close\r\n\r\n"
+        ),
+        body.len(),
+        snapshot.width,
+        snapshot.height,
+        snapshot.format.as_str(),
+        snapshot.sha256_hex()
+    )?;
+    stream.write_all(body)?;
+    stream.flush()
 }
 
 fn respond<W: Write>(

@@ -3,7 +3,8 @@
 use std::io::{self, BufRead, Write};
 
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
-use cleankvm_core::{Effect, Grant, Operation, PolicyError, Scope, authorize, authorize_grant};
+use cleankvm_core::{Effect, Grant, Operation, PolicyError, authorize, authorize_grant};
+pub use cleankvm_core::Scope;
 use cleankvm_media_protocol::{
     CaptureMetrics, PcmFormat, PcmShape, PlaybackReceipt, SnapshotFormat, SnapshotRequest,
     VideoSnapshot,
@@ -295,7 +296,11 @@ pub fn bearer_challenge(resource_metadata_uri: &str, required_scope: &str) -> St
 ///
 /// Returns [`HttpAuthError::InvalidOrigin`] for a non-matching origin.
 pub fn validate_origin(origin: Option<&str>, expected_origin: &str) -> Result<(), HttpAuthError> {
-    if origin.is_none_or(|value| value == expected_origin) {
+    if origin.is_none_or(|value| {
+        expected_origin
+            .split(',')
+            .any(|expected| expected.trim() == value)
+    }) {
         Ok(())
     } else {
         Err(HttpAuthError::InvalidOrigin)
@@ -1136,6 +1141,10 @@ mod tests {
         assert_eq!(validate_origin(None, "https://kvm.example"), Ok(()));
         assert_eq!(
             validate_origin(Some("https://kvm.example"), "https://kvm.example"),
+            Ok(())
+        );
+        assert_eq!(
+            validate_origin(Some("https://192.168.2.106:8443"), "https://cleankvm-recovery:8443,https://192.168.2.106:8443"),
             Ok(())
         );
         assert_eq!(
