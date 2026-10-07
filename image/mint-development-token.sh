@@ -47,8 +47,8 @@ case "$profile" in
         ;;
     *) printf 'unknown development token profile: %s\n' "$profile" >&2; exit 1 ;;
 esac
-claims=$(printf '{"iss":"%s","aud":"%s","exp":%s,"scope":"%s","cleankvm_mutation":%s}' \
-    "$issuer" "$audience" "$expiry" "$scope" "$mutation" | encode)
+claims=$(printf '{"iss":"%s","aud":"%s","exp":%s,"scope":"%s","onyx_kvm_mutation":%s,"cleankvm_mutation":%s}' \
+    "$issuer" "$audience" "$expiry" "$scope" "$mutation" "$mutation" | encode)
 signing_input="$header.$claims"
 printf '%s' "$signing_input" >"$temporary_dir/signing-input"
 signature=$(openssl pkeyutl -sign -rawin -inkey "$issuer_key" \

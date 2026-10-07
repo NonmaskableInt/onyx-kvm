@@ -4,8 +4,8 @@ set -eu
 repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 engine=${CONTAINER_ENGINE:-podman}
 builder=${CLEANKVM_BUILDER_TAG:-localhost/cleankvm-builder:ubuntu-22.04-amd64}
-work_volume=${CLEANKVM_WORK_VOLUME:-cleankvm-work-v5}
-download_volume=${CLEANKVM_DOWNLOAD_VOLUME:-cleankvm-buildroot-dl-v2}
+work_volume=${CLEANKVM_WORK_VOLUME:-cleankvm-work-v50}
+download_volume=${CLEANKVM_DOWNLOAD_VOLUME:-cleankvm-buildroot-dl-v50}
 host_tools_volume=${CLEANKVM_HOST_TOOLS_VOLUME:-cleankvm-host-tools}
 incremental=${CLEANKVM_INCREMENTAL_ROOTFS:-0}
 credential_hash_file=${CLEANKVM_RECOVERY_PASSWORD_HASH_FILE:-}
@@ -134,6 +134,14 @@ fi
         # volume is reusable, so relying on a prior apply step can otherwise
         # retain a stale executable even when its source and verified output
         # have changed.
+        cp /repo/image/lock-root-password.sh cleankvm/lock-root-password.sh
+        chmod 0755 cleankvm/lock-root-password.sh
+        cp /repo/image/configs/phase1-users.txt cleankvm/phase1-users.txt
+        cp /repo/image/configs/phase1-devices.txt cleankvm/phase1-devices.txt
+        cp -a /repo/image/overlay/. cleankvm/phase1-overlay/
+        rm -f cleankvm/phase1-overlay/etc/init.d/S50cleankvmd
+        rm -f buildroot/output/target/etc/init.d/S50cleankvmd
+
         daemonsrc=/repo/out/phase2-rust/onyx-kvmd
         if [ ! -f "$daemonsrc" ]; then daemonsrc=/repo/out/phase2-rust/cleankvmd; fi
         install -m 0755 "$daemonsrc" cleankvm/phase1-overlay/usr/bin/onyx-kvmd
@@ -145,6 +153,9 @@ fi
         ln -sf onyx-kvm-memtest cleankvm/phase1-overlay/usr/bin/cleankvm-memtest
 
         if [ "$CLEANKVM_CONFIG_PROFILE" != phase1 ]; then
+            cp -a /repo/image/phase2-hid-overlay/. cleankvm/phase1-overlay/
+            rm -f cleankvm/phase1-overlay/etc/init.d/S45cleankvm-hid-gadget cleankvm/phase1-overlay/etc/init.d/S46cleankvm-hid-broker
+            rm -f buildroot/output/target/etc/init.d/S45cleankvm-hid-gadget buildroot/output/target/etc/init.d/S46cleankvm-hid-broker
             hidsrc=/repo/out/phase2-rust/onyx-kvm-hid-broker
             if [ ! -f "$hidsrc" ]; then hidsrc=/repo/out/phase2-rust/cleankvm-hid-broker; fi
             install -m 0755 "$hidsrc" cleankvm/phase1-overlay/usr/bin/onyx-kvm-hid-broker
@@ -183,6 +194,8 @@ fi
             rm -rf buildroot/output/target/usr/lib/onyx-kvm/video-quarantine buildroot/output/target/usr/lib/cleankvm/video-quarantine
         else
             cp -a /repo/image/phase3-video-overlay/. cleankvm/phase1-overlay/
+            rm -f cleankvm/phase1-overlay/etc/init.d/S47cleankvm-video-broker
+            rm -f buildroot/output/target/etc/init.d/S47cleankvm-video-broker
             videosrc=/repo/out/phase3-rust/onyx-kvm-video-broker
             if [ ! -f "$videosrc" ]; then videosrc=/repo/out/phase3-rust/cleankvm-video-broker; fi
             install -m 0755 "$videosrc" cleankvm/phase1-overlay/usr/bin/onyx-kvm-video-broker
@@ -214,6 +227,8 @@ fi
         elif [ -f /repo/out/phase3a-rust/onyx-kvm-audio-capture-broker ] || \
              [ -f /repo/out/phase3a-rust/cleankvm-audio-capture-broker ]; then
             cp -a /repo/image/phase3a-audio-overlay/. cleankvm/phase1-overlay/
+            rm -f cleankvm/phase1-overlay/etc/init.d/S47cleankvm-audio-capture-broker cleankvm/phase1-overlay/etc/init.d/S48cleankvm-audio-playback-broker
+            rm -f buildroot/output/target/etc/init.d/S47cleankvm-audio-capture-broker buildroot/output/target/etc/init.d/S48cleankvm-audio-playback-broker
             capturesrc=/repo/out/phase3a-rust/onyx-kvm-audio-capture-broker
             if [ ! -f "$capturesrc" ]; then capturesrc=/repo/out/phase3a-rust/cleankvm-audio-capture-broker; fi
             playbacksrc=/repo/out/phase3a-rust/onyx-kvm-audio-playback-broker

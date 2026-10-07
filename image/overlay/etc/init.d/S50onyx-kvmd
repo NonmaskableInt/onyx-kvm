@@ -20,9 +20,9 @@ case "${1:-}" in
         test -r "$identity_dir/oauth-issuer-public-key.raw"
         export ONYX_KVM_HTTPS_BIND=0.0.0.0:8443
         export ONYX_KVM_HTTPS_ORIGIN=https://onyx-kvm-recovery:8443,https://cleankvm-recovery:8443
-        export ONYX_KVM_MCP_RESOURCE=https://onyx-kvm-recovery:8443/mcp
+        export ONYX_KVM_MCP_RESOURCE=https://onyx-kvm-recovery:8443/mcp,https://cleankvm-recovery:8443/mcp
         export ONYX_KVM_AUTHORIZATION_SERVER=https://onyx-kvm-owner
-        export ONYX_KVM_TOKEN_ISSUER=https://onyx-kvm-owner
+        export ONYX_KVM_TOKEN_ISSUER=https://onyx-kvm-owner,https://cleankvm-owner
         export ONYX_KVM_TLS_CERTIFICATE_DER="$identity_dir/tls-certificate.der"
         export ONYX_KVM_TLS_PRIVATE_KEY_DER="$identity_dir/tls-private-key.pkcs8.der"
         export ONYX_KVM_ISSUER_PUBLIC_KEY_RAW="$identity_dir/oauth-issuer-public-key.raw"

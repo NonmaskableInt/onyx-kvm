@@ -18,18 +18,23 @@ if test -n "$expected_boot_sha256"; then
     }
 fi
 
+img_name=${ONYX_KVM_IMAGE_NAME:-onyx-kvm-phase1.img}
+
 python3 "$repo_root/image/build-sd-image.py" \
-    "$artifact_dir/cleankvm-phase1.img" \
+    "$artifact_dir/$img_name" \
     "$artifact_dir/boot.sd" \
     "$artifact_dir/rootfs.ext4" \
     "$artifact_dir/fip.bin"
 python3 "$repo_root/image/verify-sd-image.py" \
-    "$artifact_dir/cleankvm-phase1.img" \
+    "$artifact_dir/$img_name" \
     "$artifact_dir/boot.sd" \
     "$artifact_dir/rootfs.ext4" \
     "$artifact_dir/fip.bin"
+if [ "$img_name" != "cleankvm-phase1.img" ]; then
+    ln -sf "$img_name" "$artifact_dir/cleankvm-phase1.img"
+fi
 (cd "$artifact_dir" && \
-    shasum -a 256 boot.sd rootfs.ext4 fip.bin phase1.its cleankvm-phase1.img > SHA256SUMS && \
+    shasum -a 256 boot.sd rootfs.ext4 fip.bin phase1.its "$img_name" > SHA256SUMS && \
     shasum -a 256 -c SHA256SUMS)
 
-printf 'verified development SD image: %s/cleankvm-phase1.img\n' "$artifact_dir"
+printf 'verified development SD image: %s/%s\n' "$artifact_dir" "$img_name"

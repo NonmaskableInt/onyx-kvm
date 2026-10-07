@@ -407,6 +407,27 @@ against target hardware (`https://cleankvm-recovery:8443` on `192.168.2.105`):
 2. **Production Enrollment & Distribution**:
    - Signed offline updates, read-only A/B rootfs, and production PKI enrollment.
 
+### Product release image v59: Onyx KVM rebranding and product assembly
+
+The v59 product release image transitions the full stack to the **Onyx KVM** identity:
+1. **Full-Stack Rebranding & Multiple-Issuer Authentication**:
+   - All 9 crates, daemons, brokers, and utilities updated to `onyx-kvm-*` and `onyx-kvmd` while preserving backward-compatible fallbacks.
+   - Static RISC-V `onyx-kvmd` daemon (`f3834f8e...`) supports comma-separated token issuers and dual mutation JWT claim decoding (`onyx_kvm_mutation` and `cleankvm_mutation`).
+   - Fresh v59 product identity, TLS leaf certificate, and recovery credential generated in `out/product-v59-secrets`.
+   - Minted fresh 4-hour operator token (`out/product-v59-secrets/operator-token.jwt`).
+
+2. **Rootfs Build & Assembly**:
+   - Automatic sync of tracked devices and users tables (`phase1-devices.txt`, `phase1-users.txt`) and post-build normalization in `image/build-phase1-rootfs.sh` and `image/lock-root-password.sh`.
+   - All 6 rootfs audits passed: rootfs audit, ext4 identity ownership, ext4 raw-frame probe, ext4 non-audio device nodes, ext4 audio capture probe, ext4 audio playback probe.
+   - Packaged and assembled at `out/product-v59/onyx-kvm-phase1.img` (79,692,288 bytes, SHA-256 `9f81871e40c64f16603d7d147e7e10f71058aaaad5bc6779227c5bbf62e64a7a`).
+   - Embedded artifacts verified:
+     - `boot.sd`: SHA-256 `f624df1de67a6a0b8c3a60af7de9f2e429828bd1383be562aba359b72000625b`
+     - `rootfs.ext4`: SHA-256 `b2fee13e1392eb6634b3e8a9eac2a623abefd185f5567900e8b17bf20060f0b5`
+     - `fip.bin`: SHA-256 `6e6d3b5c7a58c1a585bf1ea456c76bd7c91cfd33c76dfc67bd33b31cf86cd301`
+
+3. **Flashing & Hardware Acceptance Prerequisite**:
+   - Next step: insert physical SD card, uniquely resolve target disk identity, flash `out/product-v59/onyx-kvm-phase1.img`, verify card read-back span and embedded artifacts, cold boot target, and verify Onyx KVM baseline and interactive web console.
+
 ### Complete hardware acceptance on release image v58 (target `192.168.2.107`)
 
 The v58 product release image integrates Milestone 4.3 (bulk 1080p planar YUV420P frame transfer in media protocol and video broker), Milestone 4.4 (authenticated HTTPS `/video/frame` binary streaming endpoint with zero-residual memory erasure and strict security headers), and Milestone 4.5 (browser WebGL BT.601 fragment shader and 2D canvas fallback rendering). It has completed full cold-boot baseline and live video frame streaming acceptance on target hardware (`192.168.2.107`):

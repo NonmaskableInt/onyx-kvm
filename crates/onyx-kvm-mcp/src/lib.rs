@@ -196,7 +196,7 @@ impl BearerTokenValidator for Ed25519JwtValidator<'_> {
             .map_err(|_| JwtValidationError::Malformed)?;
         let claims: JwtClaims<'_> =
             serde_json::from_slice(&claim_bytes).map_err(|_| JwtValidationError::InvalidClaims)?;
-        if claims.iss != self.issuer {
+        if claims.iss != self.issuer && !self.issuer.split(',').any(|i| i.trim() == claims.iss) {
             return Err(JwtValidationError::WrongIssuer);
         }
         if claims.aud.is_empty() {
