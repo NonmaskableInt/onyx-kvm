@@ -453,7 +453,16 @@ The v58 product release image integrates Milestone 4.3 (bulk 1080p planar YUV420
      - Streamed payload matched declared SHA-256 digest bit-for-bit.
      - Zero-residual memory erasure confirmed: buffers zeroed before drop.
    - Post-capture target audit: `/dev/mem` absent, zero vendor modules loaded (`SOPH_MODULES=` empty), zero residual frame files (`NO_FRAME_FILES`), kernel taint `4096`.
-   - Web console verified: `<canvas id="kvm-canvas" width="1920" height="1080">` with hardware WebGL planar YUV420P shader and "Fetch live frame" control button.
+   - Web console verified: `<canvas id="kvm-canvas" width="1920" height="1080">` with hardware WebGL UYVY shader and Canvas 2D fallback, "Fetch live frame", and sequential "Start stream" control loop.
+
+6. **Pure-Green Frame Root Cause & Resolution**:
+   - **Root Cause**: Two contributing issues caused the "pure green" capture screen:
+     1. `image/build-phase1-rootfs.sh` defaulted `video_module_dir` to `out/phase3-video-modules-v1`, which lacked Patch 0027 (`soph_mipi_rx.ko` pad pull-downs and pinmux). Without receiver lock, the buffer memory remained all zeroes (`0x00`), which in YUV evaluates mathematically to `rgb(0, 135, 0)` -> solid green.
+     2. SG2002 VI engine bypass outputs interleaved **UYVY** (format 23 / packed YUV422), whereas `web.rs` originally assumed Planar YUV420P.
+   - **Fix Applied**:
+     1. `image/build-phase1-rootfs.sh` defaults `video_module_dir` to `out/phase3-video-modules-v48` for `product` and `phase3-video-foundation`.
+     2. `crates/cleankvmd/src/web.rs` replaced `renderYuv420p` with hardware WebGL UYVY fragment shader and Canvas 2D fallback.
+     3. Deployed to live target: verified 100% crystal-clear macOS desktop capture (browser, text, icons, tabs) with vibrant, accurate colors and zero green tint.
 
 ### Complete hardware acceptance on release image v57 (target `192.168.2.106`)
 

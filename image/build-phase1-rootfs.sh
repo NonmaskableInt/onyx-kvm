@@ -11,7 +11,15 @@ incremental=${CLEANKVM_INCREMENTAL_ROOTFS:-0}
 credential_hash_file=${CLEANKVM_RECOVERY_PASSWORD_HASH_FILE:-}
 identity_dir=${CLEANKVM_IDENTITY_DIR:-}
 config_profile=${CLEANKVM_CONFIG_PROFILE:-phase1}
-video_module_dir=${CLEANKVM_VIDEO_MODULE_DIR:-$repo_root/out/phase3-video-modules-v1}
+default_video_module_dir=$repo_root/out/phase3-video-modules-v1
+if test -d "$repo_root/out/phase3-video-modules-v48"; then
+    case "$config_profile" in
+        phase3-video-foundation|product)
+            default_video_module_dir=$repo_root/out/phase3-video-modules-v48
+            ;;
+    esac
+fi
+video_module_dir=${CLEANKVM_VIDEO_MODULE_DIR:-$default_video_module_dir}
 
 default_raw_frame_probe=
 if test -f "$repo_root/out/phase3-raw-frame-probe-v46/cleankvm-raw-frame-probe"; then

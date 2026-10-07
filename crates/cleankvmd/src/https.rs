@@ -287,7 +287,9 @@ fn handle(
             protected_resource_metadata(&config.resource, &config.authorization_server).to_string();
         return respond(stream, 200, "application/json", body.as_bytes(), None);
     }
-    if request.method == "GET" && request.path == "/video/frame" {
+    if request.method == "GET"
+        && (request.path == "/video/frame" || request.path.starts_with("/video/frame?"))
+    {
         return handle_video_frame(stream, config, issuer_key, &request);
     }
     if request.method == "GET" {
@@ -395,7 +397,12 @@ fn handle_video_frame(
     if !claims.scopes.contains(&Scope::Video) {
         return unauthorized(stream);
     }
-    let Ok(snapshot_request) = SnapshotRequest::new(1920, 1080, SnapshotFormat::Yuv420p, 5000) else {
+    let format = if request.path.contains("format=yuv422p") {
+        SnapshotFormat::Yuv422p
+    } else {
+        SnapshotFormat::Yuv420p
+    };
+    let Ok(snapshot_request) = SnapshotRequest::new(1920, 1080, format, 5000) else {
         return respond(stream, 500, "text/plain", b"invalid snapshot request", None);
     };
     let (snapshot, mut frame_bytes) = match BrokerVideo::capture_frame(snapshot_request) {

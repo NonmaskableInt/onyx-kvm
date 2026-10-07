@@ -24,9 +24,10 @@ pub const INDEX_HTML: &[u8] = br#"<!doctype html>
       <div class="row">
         <button id="snapshot" disabled>Capture verified snapshot</button>
         <button id="fetch-frame" disabled>Fetch live frame</button>
+        <button id="stream-frame" disabled>Start stream</button>
       </div>
       <pre id="snapshot-result">No snapshot captured.</pre>
-      <p class="notice">Snapshots return verified metadata. Fetch live frame streams 1080p planar YUV420P binary pixels directly to the interactive display canvas via authenticated HTTPS.</p>
+      <p class="notice">Snapshots return verified metadata. Fetch live frame streams raw video binary pixels directly to the interactive display canvas via authenticated HTTPS.</p>
     </section>
     <section aria-labelledby="hid-title">
       <h2 id="hid-title">Interactive control</h2>
@@ -72,11 +73,25 @@ async function mcp(method, params) {
   return message.result;
 }
 
-function initWebGL(canvas, width, height) {
+function initWebGL(canvas) {
   const gl = canvas.getContext('webgl');
   if (!gl) return null;
   const vsSource = 'attribute vec2 a_pos;attribute vec2 a_tex;varying vec2 v_tex;void main(){gl_Position=vec4(a_pos,0.0,1.0);v_tex=a_tex;}';
-  const fsSource = 'precision mediump float;varying vec2 v_tex;uniform sampler2D u_y;uniform sampler2D u_u;uniform sampler2D u_v;void main(){float y=texture2D(u_y,v_tex).r;float u=texture2D(u_u,v_tex).r-0.5;float v=texture2D(u_v,v_tex).r-0.5;float r=y+1.402*v;float g=y-0.344136*u-0.714136*v;float b=y+1.772*u;gl_FragColor=vec4(r,g,b,1.0);}';
+  const fsSource = 'precision mediump float;' +
+    'varying vec2 v_tex;' +
+    'uniform sampler2D u_tex;' +
+    'uniform float u_width;' +
+    'void main(){' +
+    'vec4 texel=texture2D(u_tex,v_tex);' +
+    'float x=min(floor(v_tex.x*u_width),u_width-1.0);' +
+    'float y=mod(x,2.0)<0.5?texel.g:texel.a;' +
+    'float u=texel.r-(128.0/255.0);' +
+    'float v=texel.b-(128.0/255.0);' +
+    'float r=y+1.402*v;' +
+    'float g=y-0.344136*u-0.714136*v;' +
+    'float b=y+1.772*u;' +
+    'gl_FragColor=vec4(r,g,b,1.0);' +
+    '}';
   function createShader(gl, type, source) {
     const s = gl.createShader(type);
     gl.shaderSource(s, source);
@@ -98,82 +113,92 @@ function initWebGL(canvas, width, height) {
   gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 16, 0);
   gl.enableVertexAttribArray(aTex);
   gl.vertexAttribPointer(aTex, 2, gl.FLOAT, false, 16, 8);
-  function createTex() {
-    const t = gl.createTexture();
-    gl.bindTexture(gl.TEXTURE_2D, t);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-    return t;
-  }
-  const texY = createTex();
-  const texU = createTex();
-  const texV = createTex();
-  gl.uniform1i(gl.getUniformLocation(program, 'u_y'), 0);
-  gl.uniform1i(gl.getUniformLocation(program, 'u_u'), 1);
-  gl.uniform1i(gl.getUniformLocation(program, 'u_v'), 2);
-  return { gl, texY, texU, texV };
+  const tex = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, tex);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+  const uWidthLoc = gl.getUniformLocation(program, 'u_width');
+  const uTexLoc = gl.getUniformLocation(program, 'u_tex');
+  gl.uniform1i(uTexLoc, 0);
+  return { gl, tex, program, uWidthLoc };
 }
 
 function renderCanvas2D(canvas, u8Array, width, height) {
+  if (canvas.width !== width || canvas.height !== height) {
+    canvas.width = width;
+    canvas.height = height;
+  }
   const ctx = canvas.getContext('2d');
   const imgData = ctx.createImageData(width, height);
   const data = imgData.data;
-  const yLen = width * height;
-  const uvWidth = width >> 1;
-  const uData = u8Array.subarray(yLen, yLen + (yLen >> 2));
-  const vData = u8Array.subarray(yLen + (yLen >> 2), yLen + (yLen >> 1));
-  let i = 0;
-  for (let y = 0; y < height; y++) {
-    const uvRow = (y >> 1) * uvWidth;
-    const yRow = y * width;
-    for (let x = 0; x < width; x++) {
-      const Y = u8Array[yRow + x];
-      const uvIdx = uvRow + (x >> 1);
-      const U = uData[uvIdx] - 128;
-      const V = vData[uvIdx] - 128;
-      data[i]     = Math.min(255, Math.max(0, Y + 1.402 * V));
-      data[i + 1] = Math.min(255, Math.max(0, Y - 0.344136 * U - 0.714136 * V));
-      data[i + 2] = Math.min(255, Math.max(0, Y + 1.772 * U));
-      data[i + 3] = 255;
-      i += 4;
-    }
+  const numPixels = width * height;
+  let src = 0;
+  let dst = 0;
+  for (let i = 0; i < numPixels; i += 2) {
+    const u = u8Array[src] - 128;
+    const y0 = u8Array[src + 1];
+    const v = u8Array[src + 2] - 128;
+    const y1 = u8Array[src + 3];
+    src += 4;
+    data[dst]     = Math.min(255, Math.max(0, y0 + 1.402 * v));
+    data[dst + 1] = Math.min(255, Math.max(0, y0 - 0.344136 * u - 0.714136 * v));
+    data[dst + 2] = Math.min(255, Math.max(0, y0 + 1.772 * u));
+    data[dst + 3] = 255;
+    data[dst + 4] = Math.min(255, Math.max(0, y1 + 1.402 * v));
+    data[dst + 5] = Math.min(255, Math.max(0, y1 - 0.344136 * u - 0.714136 * v));
+    data[dst + 6] = Math.min(255, Math.max(0, y1 + 1.772 * u));
+    data[dst + 7] = 255;
+    dst += 8;
   }
   ctx.putImageData(imgData, 0, 0);
 }
 
-function renderYuv420p(canvas, u8Array, width, height) {
+function renderUyvy(canvas, u8Array, width, height) {
+  const actualHeight = Math.min(height, Math.floor(u8Array.byteLength / (width * 2)));
+  if (actualHeight <= 0) return;
   if (!glState) {
-    glState = initWebGL(canvas, width, height);
+    glState = initWebGL(canvas);
   }
   if (glState) {
-    const { gl, texY, texU, texV } = glState;
-    gl.viewport(0, 0, width, height);
-    const yLen = width * height;
-    const uvLen = (width >> 1) * (height >> 1);
-    const yData = u8Array.subarray(0, yLen);
-    const uData = u8Array.subarray(yLen, yLen + uvLen);
-    const vData = u8Array.subarray(yLen + uvLen, yLen + 2 * uvLen);
-
+    const { gl, tex, program, uWidthLoc } = glState;
+    if (canvas.width !== width || canvas.height !== actualHeight) {
+      canvas.width = width;
+      canvas.height = actualHeight;
+    }
+    gl.viewport(0, 0, width, actualHeight);
+    gl.useProgram(program);
+    gl.uniform1f(uWidthLoc, width);
     gl.activeTexture(gl.TEXTURE0);
-    gl.bindTexture(gl.TEXTURE_2D, texY);
+    gl.bindTexture(gl.TEXTURE_2D, tex);
     gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.LUMINANCE, width, height, 0, gl.LUMINANCE, gl.UNSIGNED_BYTE, yData);
-
-    gl.activeTexture(gl.TEXTURE1);
-    gl.bindTexture(gl.TEXTURE_2D, texU);
-    gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.LUMINANCE, width >> 1, height >> 1, 0, gl.LUMINANCE, gl.UNSIGNED_BYTE, uData);
-
-    gl.activeTexture(gl.TEXTURE2);
-    gl.bindTexture(gl.TEXTURE_2D, texV);
-    gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.LUMINANCE, width >> 1, height >> 1, 0, gl.LUMINANCE, gl.UNSIGNED_BYTE, vData);
-
+    const texWidth = width >> 1;
+    const uploadBytes = u8Array.subarray(0, texWidth * actualHeight * 4);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, texWidth, actualHeight, 0, gl.RGBA, gl.UNSIGNED_BYTE, uploadBytes);
     gl.drawArrays(gl.TRIANGLES, 0, 6);
   } else {
-    renderCanvas2D(canvas, u8Array, width, height);
+    renderCanvas2D(canvas, u8Array, width, actualHeight);
+  }
+}
+
+let streaming = false;
+async function toggleStream() {
+  streaming = !streaming;
+  byId('stream-frame').textContent = streaming ? 'Stop stream' : 'Start stream';
+  while (streaming && token) {
+    try {
+      await fetchFrame();
+    } catch (e) {
+      streaming = false;
+      byId('stream-frame').textContent = 'Start stream';
+      byId('message').textContent = e.message;
+      break;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  if (!streaming) {
+    byId('stream-frame').textContent = 'Start stream';
   }
 }
 
@@ -191,6 +216,7 @@ async function connect() {
   byId('speaker').textContent = state.audioOutputEnabled ? 'Enabled' : 'Disabled';
   byId('snapshot').disabled = !state.videoEnabled;
   byId('fetch-frame').disabled = !state.videoEnabled;
+  byId('stream-frame').disabled = !state.videoEnabled;
   byId('send-cad').disabled = !state.mutatingOperationsEnabled;
   byId('release-keys').disabled = !state.mutatingOperationsEnabled;
   byId('capture-audio').disabled = !state.audioCaptureEnabled;
@@ -212,9 +238,9 @@ async function fetchFrame() {
   const digest = response.headers.get('X-Frame-Digest') || '';
   const width = parseInt(response.headers.get('X-Frame-Width') || '1920', 10);
   const height = parseInt(response.headers.get('X-Frame-Height') || '1080', 10);
-  const format = response.headers.get('X-Frame-Format') || 'yuv420p';
+  const format = response.headers.get('X-Frame-Format') || 'uyvy';
   const buffer = await response.arrayBuffer();
-  renderYuv420p(byId('kvm-canvas'), new Uint8Array(buffer), width, height);
+  renderUyvy(byId('kvm-canvas'), new Uint8Array(buffer), width, height);
   byId('snapshot-result').textContent = JSON.stringify({
     width, height, format, byteLength: buffer.byteLength, sha256: digest
   }, null, 2);
@@ -322,7 +348,8 @@ function run(action) { action().catch((error) => { byId('message').textContent =
 byId('connect').addEventListener('click', () => run(connect));
 byId('snapshot').addEventListener('click', () => run(snapshot));
 byId('fetch-frame').addEventListener('click', () => run(fetchFrame));
+byId('stream-frame').addEventListener('click', () => run(toggleStream));
 byId('capture-audio').addEventListener('click', () => run(captureAudio));
 byId('play-audio').addEventListener('click', () => run(playAudio));
-window.addEventListener('pagehide', () => { token = ''; });
+window.addEventListener('pagehide', () => { streaming = false; token = ''; });
 ";

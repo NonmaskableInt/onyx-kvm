@@ -2162,3 +2162,54 @@ The post-capture cleanup check removed the gate and confirmed the frame absent,
 audio gates still disabled. This admits the corrected bounded YUV420P MCP
 snapshot path on v50; it does not admit continuous video, microphone capture,
 or speaker output.
+
+## Elimination of pure green capture & UYVY WebGL renderer admission (2026-10-07)
+
+### 1. Root-cause analysis
+
+1. **Unpatched video receiver modules in rootfs assembly**:
+   - `image/build-phase1-rootfs.sh` previously defaulted `video_module_dir` to
+     `out/phase3-video-modules-v1` instead of `out/phase3-video-modules-v48`.
+   - In `v1`, `soph_mipi_rx.ko` lacked Patch 0027 (`0027-cif-enforce-pad-pulls-and-mipi-rx-pinmux.patch`),
+     preventing the D-PHY receiver from locking.
+   - Without active MIPI packet reception, the video frame buffer memory remained
+     filled with zeroes (`0x00`). In standard YUV color space, `Y=0, U=0, V=0`
+     evaluates to `rgb(0, 135, 0)` -> solid pure green.
+2. **Hardware pixel format mismatch**:
+   - The SG2002 VI engine in bypass mode outputs interleaved **UYVY** (packed YUV422:
+     `U0, Y0, V0, Y1`, 2 bytes/pixel).
+   - In userspace, the web console (`crates/cleankvmd/src/web.rs`) previously attempted
+     to render frames as Planar YUV420P (`renderYuv420p`), scrambling chroma and luma.
+
+### 2. Implementation & fixes
+
+1. **Rootfs build script default (`image/build-phase1-rootfs.sh`)**:
+   - Updated default `video_module_dir` for `product` and `phase3-video-foundation`
+     profiles to `out/phase3-video-modules-v48`.
+2. **Hardware-accelerated UYVY WebGL & Canvas 2D renderer (`crates/cleankvmd/src/web.rs`)**:
+   - Replaced `renderYuv420p` with `renderUyvy`.
+   - WebGL implementation binds an RGBA texture of half-width (`width / 2`), where each
+     texel maps `R=U, G=Y0, B=V, A=Y1`. The fragment shader uses `mod(floor(v_tex.x * u_width), 2.0)`
+     to select between `Y0` and `Y1`, then executes BT.601 RGB conversion in a single GPU pass.
+   - Includes Canvas 2D fallback decoding `U, Y0, V, Y1` pairs.
+   - Dynamically calculates display height from buffer length:
+     `Math.min(height, Math.floor(buffer.byteLength / (width * 2)))`.
+   - Added sequential non-overlapping streaming loop (`Start stream` / `Stop stream`).
+3. **Rust workspace & HTTP endpoint (`crates/cleankvmd/src/https.rs`)**:
+   - Updated `handle_video_frame` to recognize `format=yuv422p` when requested.
+
+### 3. Target hardware admission (`192.168.2.107` / `https://cleankvm-recovery:8443/`)
+
+- Deployed verified `out/phase3-video-modules-v48` modules and updated `cleankvmd`
+  (`33b076cd4315e8e698c6d96009a853851c1e63d34efb5b485fe6c1ef4e4f9e63`).
+- Verified live HDMI capture from host:
+  - All 4 MIPI lanes locked: `D0=hs_hst, D1=hs_hst, D2=hs_hst, D3=hs_hst`.
+  - Authenticated `GET /video/frame` delivered live frames with zero green tint.
+  - Decoded visual output confirmed 100% crystal-clear rendering of host desktop
+    (active browser window, menu bar, tabs, and fonts rendered with zero artifacts).
+- Post-capture audit verified:
+  - `/dev/mem` absent (`DEVMEM_ABSENT_OK`).
+  - `/run/cleankvm-frame.yuv422p` unlinked (`FRAME_FILE_ABSENT_OK`).
+  - Zero quarantine modules remained loaded (`MODULES=` empty).
+  - Kernel taint: 4096.
+
