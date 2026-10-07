@@ -2,14 +2,14 @@
 set -eu
 
 repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-artifact_dir=${CLEANKVM_RUST_ARTIFACT_DIR:-"$repo_root/out/phase3a-rust"}
+artifact_dir=${ONYX_KVM_RUST_ARTIFACT_DIR:-${CLEANKVM_RUST_ARTIFACT_DIR:-"$repo_root/out/phase3a-rust"}}
 target_dir="$repo_root/target/riscv64gc-unknown-linux-musl/release"
 
 mkdir -p "$artifact_dir"
 cd "$repo_root"
-for binary in cleankvm-audio-capture-broker cleankvm-audio-playback-broker; do
+for binary in onyx-kvm-audio-capture-broker onyx-kvm-audio-playback-broker; do
     cargo rustc --release --target riscv64gc-unknown-linux-musl \
-        --package cleankvm-audio-brokers --bin "$binary" --offline -- \
+        --package onyx-kvm-audio-brokers --bin "$binary" --offline -- \
         -C linker=rust-lld \
         -C link-self-contained=yes \
         -C target-feature=+crt-static
@@ -20,8 +20,10 @@ for binary in cleankvm-audio-capture-broker cleankvm-audio-playback-broker; do
     esac
     install -m 0755 "$target_dir/$binary" "$artifact_dir/$binary"
 done
+cp -f "$artifact_dir/onyx-kvm-audio-capture-broker" "$artifact_dir/cleankvm-audio-capture-broker"
+cp -f "$artifact_dir/onyx-kvm-audio-playback-broker" "$artifact_dir/cleankvm-audio-playback-broker"
 cd "$artifact_dir"
-shasum -a 256 cleankvm-audio-capture-broker cleankvm-audio-playback-broker \
+shasum -a 256 onyx-kvm-audio-capture-broker onyx-kvm-audio-playback-broker \
     >audio-brokers.sha256
 shasum -a 256 -c audio-brokers.sha256
 printf 'verified static RISC-V audio brokers: %s\n' "$artifact_dir"

@@ -1,4 +1,4 @@
-CleanKVM recovery image
+Onyx KVM recovery image
 
 Development hardware bring-up environment. One authenticated MCP HTTPS
 listener is enabled; remote login and all mutating KVM operations remain off.

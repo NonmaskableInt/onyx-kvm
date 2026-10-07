@@ -27,7 +27,8 @@ for path in \
     usr/sbin/dnsmasq usr/sbin/udhcpd usr/sbin/wpa_supplicant \
     usr/bin/mender usr/bin/mosh usr/bin/rauc usr/bin/swupdate \
     usr/bin/ffmpeg usr/bin/gst-launch-1.0 usr/bin/arecord usr/bin/aplay \
-    usr/bin/cleankvm-hid-hold-test usr/bin/cleankvm-media-broker
+    usr/bin/onyx-kvm-hid-hold-test usr/bin/cleankvm-hid-hold-test \
+    usr/bin/onyx-kvm-media-broker usr/bin/cleankvm-media-broker
 do
     if test -e "$rootfs/$path"; then
         printf 'prohibited Phase-1 executable: /%s\n' "$path" >&2
@@ -35,43 +36,65 @@ do
     fi
 done
 
-for audio_broker in cleankvm-audio-capture-broker cleankvm-audio-playback-broker; do
+for audio_broker in audio-capture-broker audio-playback-broker; do
     expected=
     case "$audio_broker" in
-        cleankvm-audio-capture-broker) expected=$expected_audio_capture_broker ;;
-        cleankvm-audio-playback-broker) expected=$expected_audio_playback_broker ;;
+        audio-capture-broker) expected=$expected_audio_capture_broker ;;
+        audio-playback-broker) expected=$expected_audio_playback_broker ;;
     esac
+    broker_bin=
+    if test -f "$rootfs/usr/bin/onyx-kvm-$audio_broker"; then
+        broker_bin="$rootfs/usr/bin/onyx-kvm-$audio_broker"
+    elif test -f "$rootfs/usr/bin/cleankvm-$audio_broker"; then
+        broker_bin="$rootfs/usr/bin/cleankvm-$audio_broker"
+    fi
     if test -z "$expected"; then
-        test ! -e "$rootfs/usr/bin/$audio_broker" || {
-            printf 'unexpected audio broker: /usr/bin/%s\n' "$audio_broker" >&2
+        test -z "$broker_bin" || {
+            printf 'unexpected audio broker: %s\n' "$broker_bin" >&2
             exit 1
         }
     else
-        test -s "$rootfs/usr/bin/$audio_broker"
-        cmp "$expected" "$rootfs/usr/bin/$audio_broker"
-        case "$(file "$rootfs/usr/bin/$audio_broker")" in
+        test -n "$broker_bin" && test -s "$broker_bin"
+        cmp "$expected" "$broker_bin"
+        case "$(file "$broker_bin")" in
             *"ELF 64-bit"*"RISC-V"*"statically linked"*"stripped"*) ;;
-            *) printf 'installed %s is not a static stripped RISC-V ELF\n' "$audio_broker" >&2; exit 1 ;;
+            *) printf 'installed %s is not a static stripped RISC-V ELF\n' "$broker_bin" >&2; exit 1 ;;
         esac
     fi
 done
 
 if test -n "$expected_audio_capture_broker"; then
-    test -x "$rootfs/etc/init.d/S47cleankvm-audio-capture-broker"
-    cmp "$repo_root/image/phase3a-audio-overlay/etc/init.d/S47cleankvm-audio-capture-broker" \
-        "$rootfs/etc/init.d/S47cleankvm-audio-capture-broker"
+    if test -f "$rootfs/etc/init.d/S47onyx-kvm-audio-capture-broker"; then
+        test -x "$rootfs/etc/init.d/S47onyx-kvm-audio-capture-broker"
+        cmp "$repo_root/image/phase3a-audio-overlay/etc/init.d/S47onyx-kvm-audio-capture-broker" \
+            "$rootfs/etc/init.d/S47onyx-kvm-audio-capture-broker"
+    else
+        test -x "$rootfs/etc/init.d/S47cleankvm-audio-capture-broker"
+        cmp "$repo_root/image/phase3a-audio-overlay/etc/init.d/S47cleankvm-audio-capture-broker" \
+            "$rootfs/etc/init.d/S47cleankvm-audio-capture-broker"
+    fi
+    test ! -e "$rootfs/run/onyx-kvm/audio-capture-enabled"
     test ! -e "$rootfs/run/cleankvm/audio-capture-enabled"
 fi
 if test -n "$expected_audio_playback_broker"; then
-    test -x "$rootfs/etc/init.d/S48cleankvm-audio-playback-broker"
-    cmp "$repo_root/image/phase3a-audio-overlay/etc/init.d/S48cleankvm-audio-playback-broker" \
-        "$rootfs/etc/init.d/S48cleankvm-audio-playback-broker"
+    if test -f "$rootfs/etc/init.d/S48onyx-kvm-audio-playback-broker"; then
+        test -x "$rootfs/etc/init.d/S48onyx-kvm-audio-playback-broker"
+        cmp "$repo_root/image/phase3a-audio-overlay/etc/init.d/S48onyx-kvm-audio-playback-broker" \
+            "$rootfs/etc/init.d/S48onyx-kvm-audio-playback-broker"
+    else
+        test -x "$rootfs/etc/init.d/S48cleankvm-audio-playback-broker"
+        cmp "$repo_root/image/phase3a-audio-overlay/etc/init.d/S48cleankvm-audio-playback-broker" \
+            "$rootfs/etc/init.d/S48cleankvm-audio-playback-broker"
+    fi
+    test ! -e "$rootfs/run/onyx-kvm/audio-output-enabled"
     test ! -e "$rootfs/run/cleankvm/audio-output-enabled"
 fi
 
-if test -z "$expected_video_broker" && test -e "$rootfs/usr/bin/cleankvm-video-broker"; then
-    printf '%s\n' 'prohibited Phase-1 executable: /usr/bin/cleankvm-video-broker' >&2
-    exit 1
+if test -z "$expected_video_broker"; then
+    if test -e "$rootfs/usr/bin/onyx-kvm-video-broker" || test -e "$rootfs/usr/bin/cleankvm-video-broker"; then
+        printf '%s\n' 'prohibited Phase-1 executable: video broker present' >&2
+        exit 1
+    fi
 fi
 
 test -f "$rootfs/etc/network/interfaces" || {
@@ -82,36 +105,59 @@ grep -q '^iface eth0 inet dhcp$' "$rootfs/etc/network/interfaces" || {
     printf '%s\n' 'eth0 is not configured as a DHCP client' >&2
     exit 1
 }
-test -x "$rootfs/usr/sbin/cleankvm-wait-carrier" || {
+carrier_helper=
+if test -f "$rootfs/usr/sbin/onyx-kvm-wait-carrier"; then
+    carrier_helper="$rootfs/usr/sbin/onyx-kvm-wait-carrier"
+elif test -f "$rootfs/usr/sbin/cleankvm-wait-carrier"; then
+    carrier_helper="$rootfs/usr/sbin/cleankvm-wait-carrier"
+fi
+test -n "$carrier_helper" && test -x "$carrier_helper" || {
     printf '%s\n' 'missing bounded Ethernet carrier wait helper' >&2
     exit 1
 }
-grep -qF 'pre-up /usr/sbin/cleankvm-wait-carrier eth0 10' \
+grep -qE 'pre-up /usr/sbin/(onyx-kvm|cleankvm)-wait-carrier eth0 10' \
     "$rootfs/etc/network/interfaces" || {
     printf '%s\n' 'missing bounded pre-DHCP carrier wait' >&2
     exit 1
 }
 
+test ! -e "$rootfs/etc/init.d/S03onyx-kvm-enroll" || {
+    printf '%s\n' 'runtime recovery enrollment must not be present' >&2
+    exit 1
+}
 test ! -e "$rootfs/etc/init.d/S03cleankvm-enroll" || {
     printf '%s\n' 'runtime recovery enrollment must not be present' >&2
     exit 1
 }
 if test -n "$expected_identity"; then
-    test -x "$rootfs/etc/init.d/S50cleankvmd" || {
+    init_daemon=
+    if test -f "$rootfs/etc/init.d/S50onyx-kvmd"; then
+        init_daemon="$rootfs/etc/init.d/S50onyx-kvmd"
+    elif test -f "$rootfs/etc/init.d/S50cleankvmd"; then
+        init_daemon="$rootfs/etc/init.d/S50cleankvmd"
+    fi
+    test -n "$init_daemon" && test -x "$init_daemon" || {
         printf '%s\n' 'missing authenticated HTTPS service' >&2
         exit 1
     }
     grep -qF 'start-stop-daemon -S -b -m -p "$pidfile" -c 900:900 -x "$daemon"' \
-        "$rootfs/etc/init.d/S50cleankvmd" || {
+        "$init_daemon" || {
         printf '%s\n' 'HTTPS service does not drop to uid/gid 900' >&2
         exit 1
     }
-    test "$(wc -c <"$rootfs/etc/cleankvm/oauth-issuer-public-key.raw" | tr -d ' ')" -eq 32
-    cmp "$expected_identity/tls-certificate.der" "$rootfs/etc/cleankvm/tls-certificate.der"
+    identity_dir=
+    if test -d "$rootfs/etc/onyx-kvm"; then
+        identity_dir="$rootfs/etc/onyx-kvm"
+    elif test -d "$rootfs/etc/cleankvm"; then
+        identity_dir="$rootfs/etc/cleankvm"
+    fi
+    test -n "$identity_dir"
+    test "$(wc -c <"$identity_dir/oauth-issuer-public-key.raw" | tr -d ' ')" -eq 32
+    cmp "$expected_identity/tls-certificate.der" "$identity_dir/tls-certificate.der"
     cmp "$expected_identity/tls-private-key.pkcs8.der" \
-        "$rootfs/etc/cleankvm/tls-private-key.pkcs8.der"
+        "$identity_dir/tls-private-key.pkcs8.der"
     cmp "$expected_identity/oauth-issuer-public-key.raw" \
-        "$rootfs/etc/cleankvm/oauth-issuer-public-key.raw"
+        "$identity_dir/oauth-issuer-public-key.raw"
 fi
 case "$expected_password_hash" in
     '!'|'$6$'*) ;;
@@ -122,73 +168,103 @@ test "$(awk -F: '$1 == "root" { print $2 }' "$rootfs/etc/shadow")" = "$expected_
     exit 1
 }
 
-test -x "$rootfs/usr/bin/cleankvmd" || {
-    printf '%s\n' 'missing executable /usr/bin/cleankvmd' >&2
+installed_daemon=
+if test -f "$rootfs/usr/bin/onyx-kvmd"; then
+    installed_daemon="$rootfs/usr/bin/onyx-kvmd"
+elif test -f "$rootfs/usr/bin/cleankvmd"; then
+    installed_daemon="$rootfs/usr/bin/cleankvmd"
+fi
+test -n "$installed_daemon" && test -x "$installed_daemon" || {
+    printf '%s\n' 'missing executable daemon' >&2
     exit 1
 }
-test -s "$rootfs/usr/bin/cleankvmd" || {
-    printf '%s\n' 'installed /usr/bin/cleankvmd is empty' >&2
+test -s "$installed_daemon" || {
+    printf '%s\n' 'installed daemon is empty' >&2
     exit 1
 }
-cmp "$expected_daemon" "$rootfs/usr/bin/cleankvmd" || {
-    printf '%s\n' 'installed cleankvmd does not match the verified build' >&2
+cmp "$expected_daemon" "$installed_daemon" || {
+    printf '%s\n' 'installed daemon does not match the verified build' >&2
     exit 1
 }
-case "$(file "$rootfs/usr/bin/cleankvmd")" in
+case "$(file "$installed_daemon")" in
     *"ELF 64-bit"*"RISC-V"*"statically linked"*"stripped"*) ;;
     *)
-        printf '%s\n' 'installed cleankvmd is not a static stripped RISC-V ELF' >&2
+        printf '%s\n' 'installed daemon is not a static stripped RISC-V ELF' >&2
         exit 1
         ;;
 esac
 
-test -s "$rootfs/usr/bin/cleankvm-memtest" || {
-    printf '%s\n' 'missing or empty /usr/bin/cleankvm-memtest' >&2
+installed_memtest=
+if test -f "$rootfs/usr/bin/onyx-kvm-memtest"; then
+    installed_memtest="$rootfs/usr/bin/onyx-kvm-memtest"
+elif test -f "$rootfs/usr/bin/cleankvm-memtest"; then
+    installed_memtest="$rootfs/usr/bin/cleankvm-memtest"
+fi
+test -n "$installed_memtest" && test -s "$installed_memtest" || {
+    printf '%s\n' 'missing or empty memtest' >&2
     exit 1
 }
-cmp "$expected_memtest" "$rootfs/usr/bin/cleankvm-memtest" || {
-    printf '%s\n' 'installed cleankvm-memtest does not match the verified build' >&2
+cmp "$expected_memtest" "$installed_memtest" || {
+    printf '%s\n' 'installed memtest does not match the verified build' >&2
     exit 1
 }
-case "$(file "$rootfs/usr/bin/cleankvm-memtest")" in
+case "$(file "$installed_memtest")" in
     *"ELF 64-bit"*"RISC-V"*"statically linked"*"stripped"*) ;;
     *)
-        printf '%s\n' 'installed cleankvm-memtest is not a static stripped RISC-V ELF' >&2
+        printf '%s\n' 'installed memtest is not a static stripped RISC-V ELF' >&2
         exit 1
         ;;
 esac
 
 if test -n "$expected_hid_broker"; then
-    test -s "$rootfs/usr/bin/cleankvm-hid-broker" || {
-        printf '%s\n' 'missing or empty /usr/bin/cleankvm-hid-broker' >&2
+    installed_hid=
+    if test -f "$rootfs/usr/bin/onyx-kvm-hid-broker"; then
+        installed_hid="$rootfs/usr/bin/onyx-kvm-hid-broker"
+    elif test -f "$rootfs/usr/bin/cleankvm-hid-broker"; then
+        installed_hid="$rootfs/usr/bin/cleankvm-hid-broker"
+    fi
+    test -n "$installed_hid" && test -s "$installed_hid" || {
+        printf '%s\n' 'missing or empty hid broker' >&2
         exit 1
     }
-    cmp "$expected_hid_broker" "$rootfs/usr/bin/cleankvm-hid-broker" || {
+    cmp "$expected_hid_broker" "$installed_hid" || {
         printf '%s\n' 'installed HID broker does not match the verified build' >&2
         exit 1
     }
-    case "$(file "$rootfs/usr/bin/cleankvm-hid-broker")" in
+    case "$(file "$installed_hid")" in
         *"ELF 64-bit"*"RISC-V"*"statically linked"*"stripped"*) ;;
         *) printf '%s\n' 'installed HID broker is not a static stripped RISC-V ELF' >&2; exit 1 ;;
     esac
-    test -x "$rootfs/etc/init.d/S45cleankvm-hid-gadget"
-    test -x "$rootfs/etc/init.d/S46cleankvm-hid-broker"
-    cmp "$repo_root/image/phase2-hid-overlay/etc/init.d/S45cleankvm-hid-gadget" \
-        "$rootfs/etc/init.d/S45cleankvm-hid-gadget" || {
-        printf '%s\n' 'installed HID gadget init script does not match source overlay' >&2
-        exit 1
-    }
-    cmp "$repo_root/image/phase2-hid-overlay/etc/init.d/S46cleankvm-hid-broker" \
-        "$rootfs/etc/init.d/S46cleankvm-hid-broker" || {
-        printf '%s\n' 'installed HID broker init script does not match source overlay' >&2
-        exit 1
-    }
+    if test -f "$rootfs/etc/init.d/S45onyx-kvm-hid-gadget"; then
+        test -x "$rootfs/etc/init.d/S45onyx-kvm-hid-gadget"
+        cmp "$repo_root/image/phase2-hid-overlay/etc/init.d/S45onyx-kvm-hid-gadget" \
+            "$rootfs/etc/init.d/S45onyx-kvm-hid-gadget"
+    else
+        test -x "$rootfs/etc/init.d/S45cleankvm-hid-gadget"
+        cmp "$repo_root/image/phase2-hid-overlay/etc/init.d/S45cleankvm-hid-gadget" \
+            "$rootfs/etc/init.d/S45cleankvm-hid-gadget"
+    fi
+    if test -f "$rootfs/etc/init.d/S46onyx-kvm-hid-broker"; then
+        test -x "$rootfs/etc/init.d/S46onyx-kvm-hid-broker"
+        cmp "$repo_root/image/phase2-hid-overlay/etc/init.d/S46onyx-kvm-hid-broker" \
+            "$rootfs/etc/init.d/S46onyx-kvm-hid-broker"
+    else
+        test -x "$rootfs/etc/init.d/S46cleankvm-hid-broker"
+        cmp "$repo_root/image/phase2-hid-overlay/etc/init.d/S46cleankvm-hid-broker" \
+            "$rootfs/etc/init.d/S46cleankvm-hid-broker"
+    fi
+    test ! -e "$rootfs/run/onyx-kvm/hid-enabled"
     test ! -e "$rootfs/run/cleankvm/hid-enabled"
 fi
 
 if test -n "$expected_video_modules"; then
-    installed_video="$rootfs/usr/lib/cleankvm/video-quarantine"
-    test -d "$installed_video"
+    installed_video=
+    if test -d "$rootfs/usr/lib/onyx-kvm/video-quarantine"; then
+        installed_video="$rootfs/usr/lib/onyx-kvm/video-quarantine"
+    elif test -d "$rootfs/usr/lib/cleankvm/video-quarantine"; then
+        installed_video="$rootfs/usr/lib/cleankvm/video-quarantine"
+    fi
+    test -n "$installed_video" && test -d "$installed_video"
     set -- "$installed_video"/*.ko
     test "$#" -eq 6 || {
         printf '%s\n' 'video quarantine must contain exactly six modules' >&2
@@ -203,61 +279,96 @@ if test -n "$expected_video_modules"; then
 fi
 
 if test -n "$expected_raw_frame_probe"; then
-    installed_probe="$rootfs/usr/libexec/cleankvm-raw-frame-probe"
-    test -f "$installed_probe"
+    installed_probe=
+    if test -f "$rootfs/usr/libexec/onyx-kvm-raw-frame-probe"; then
+        installed_probe="$rootfs/usr/libexec/onyx-kvm-raw-frame-probe"
+    elif test -f "$rootfs/usr/libexec/cleankvm-raw-frame-probe"; then
+        installed_probe="$rootfs/usr/libexec/cleankvm-raw-frame-probe"
+    fi
+    test -n "$installed_probe" && test -f "$installed_probe"
     cmp "$expected_raw_frame_probe" "$installed_probe"
-    ! find "$rootfs/etc/init.d" -type f -exec grep -l 'cleankvm-raw-frame-probe' '{}' + | grep -q .
+    ! find "$rootfs/etc/init.d" -type f -exec grep -lE '(onyx-kvm|cleankvm)-raw-frame-probe' '{}' + | grep -q .
 fi
 
 if test -n "$expected_audio_capture_probe"; then
-    installed_probe="$rootfs/usr/libexec/cleankvm-audio-capture-probe"
-    test -f "$installed_probe"
+    installed_probe=
+    if test -f "$rootfs/usr/libexec/onyx-kvm-audio-capture-probe"; then
+        installed_probe="$rootfs/usr/libexec/onyx-kvm-audio-capture-probe"
+    elif test -f "$rootfs/usr/libexec/cleankvm-audio-capture-probe"; then
+        installed_probe="$rootfs/usr/libexec/cleankvm-audio-capture-probe"
+    fi
+    test -n "$installed_probe" && test -f "$installed_probe"
     cmp "$expected_audio_capture_probe" "$installed_probe"
-    ! find "$rootfs/etc/init.d" -type f -exec grep -l 'cleankvm-audio-capture-probe' '{}' + | grep -q .
+    ! find "$rootfs/etc/init.d" -type f -exec grep -lE '(onyx-kvm|cleankvm)-audio-capture-probe' '{}' + | grep -q .
 fi
 
 if test -n "$expected_audio_playback_probe"; then
-    installed_probe="$rootfs/usr/libexec/cleankvm-audio-playback-probe"
-    test -f "$installed_probe"
+    installed_probe=
+    if test -f "$rootfs/usr/libexec/onyx-kvm-audio-playback-probe"; then
+        installed_probe="$rootfs/usr/libexec/onyx-kvm-audio-playback-probe"
+    elif test -f "$rootfs/usr/libexec/cleankvm-audio-playback-probe"; then
+        installed_probe="$rootfs/usr/libexec/cleankvm-audio-playback-probe"
+    fi
+    test -n "$installed_probe" && test -f "$installed_probe"
     cmp "$expected_audio_playback_probe" "$installed_probe"
-    ! find "$rootfs/etc/init.d" -type f -exec grep -l 'cleankvm-audio-playback-probe' '{}' + | grep -q .
+    ! find "$rootfs/etc/init.d" -type f -exec grep -lE '(onyx-kvm|cleankvm)-audio-playback-probe' '{}' + | grep -q .
 fi
 
 if test -n "$expected_edid_programmer"; then
-    installed_probe="$rootfs/usr/libexec/cleankvm-lt6911uxc-edid-programmer"
-    test -f "$installed_probe"
+    installed_probe=
+    if test -f "$rootfs/usr/libexec/onyx-kvm-lt6911uxc-edid-programmer"; then
+        installed_probe="$rootfs/usr/libexec/onyx-kvm-lt6911uxc-edid-programmer"
+    elif test -f "$rootfs/usr/libexec/cleankvm-lt6911uxc-edid-programmer"; then
+        installed_probe="$rootfs/usr/libexec/cleankvm-lt6911uxc-edid-programmer"
+    fi
+    test -n "$installed_probe" && test -f "$installed_probe"
     cmp "$expected_edid_programmer" "$installed_probe"
     test "$(stat -c %a "$installed_probe")" = 500
-    ! find "$rootfs/etc/init.d" -type f -exec grep -l 'cleankvm-lt6911uxc-edid-programmer' '{}' + | grep -q .
+    ! find "$rootfs/etc/init.d" -type f -exec grep -lE '(onyx-kvm|cleankvm)-lt6911uxc-edid-programmer' '{}' + | grep -q .
 fi
 
 if test -n "$expected_lt_backup"; then
-    installed_probe="$rootfs/usr/libexec/cleankvm-lt6911uxc-flash-backup"
-    test -f "$installed_probe"
+    installed_probe=
+    if test -f "$rootfs/usr/libexec/onyx-kvm-lt6911uxc-flash-backup"; then
+        installed_probe="$rootfs/usr/libexec/onyx-kvm-lt6911uxc-flash-backup"
+    elif test -f "$rootfs/usr/libexec/cleankvm-lt6911uxc-flash-backup"; then
+        installed_probe="$rootfs/usr/libexec/cleankvm-lt6911uxc-flash-backup"
+    fi
+    test -n "$installed_probe" && test -f "$installed_probe"
     cmp "$expected_lt_backup" "$installed_probe"
     test "$(stat -c %a "$installed_probe")" = 500
-    ! find "$rootfs/etc/init.d" -type f -exec grep -l 'cleankvm-lt6911uxc-flash-backup' '{}' + | grep -q .
+    ! find "$rootfs/etc/init.d" -type f -exec grep -lE '(onyx-kvm|cleankvm)-lt6911uxc-flash-backup' '{}' + | grep -q .
 fi
 
 if test -n "$expected_video_broker"; then
-    test -s "$rootfs/usr/bin/cleankvm-video-broker" || {
-        printf '%s\n' 'missing or empty /usr/bin/cleankvm-video-broker' >&2
+    installed_video_broker=
+    if test -f "$rootfs/usr/bin/onyx-kvm-video-broker"; then
+        installed_video_broker="$rootfs/usr/bin/onyx-kvm-video-broker"
+    elif test -f "$rootfs/usr/bin/cleankvm-video-broker"; then
+        installed_video_broker="$rootfs/usr/bin/cleankvm-video-broker"
+    fi
+    test -n "$installed_video_broker" && test -s "$installed_video_broker" || {
+        printf '%s\n' 'missing or empty video broker' >&2
         exit 1
     }
-    cmp "$expected_video_broker" "$rootfs/usr/bin/cleankvm-video-broker" || {
+    cmp "$expected_video_broker" "$installed_video_broker" || {
         printf '%s\n' 'installed video broker does not match the verified build' >&2
         exit 1
     }
-    case "$(file "$rootfs/usr/bin/cleankvm-video-broker")" in
+    case "$(file "$installed_video_broker")" in
         *"ELF 64-bit"*"RISC-V"*"statically linked"*"stripped"*) ;;
         *) printf '%s\n' 'installed video broker is not a static stripped RISC-V ELF' >&2; exit 1 ;;
     esac
-    test -x "$rootfs/etc/init.d/S47cleankvm-video-broker"
-    cmp "$repo_root/image/phase3-video-overlay/etc/init.d/S47cleankvm-video-broker" \
-        "$rootfs/etc/init.d/S47cleankvm-video-broker" || {
-        printf '%s\n' 'installed video broker init script does not match source overlay' >&2
-        exit 1
-    }
+    if test -f "$rootfs/etc/init.d/S47onyx-kvm-video-broker"; then
+        test -x "$rootfs/etc/init.d/S47onyx-kvm-video-broker"
+        cmp "$repo_root/image/phase3-video-overlay/etc/init.d/S47onyx-kvm-video-broker" \
+            "$rootfs/etc/init.d/S47onyx-kvm-video-broker"
+    else
+        test -x "$rootfs/etc/init.d/S47cleankvm-video-broker"
+        cmp "$repo_root/image/phase3-video-overlay/etc/init.d/S47cleankvm-video-broker" \
+            "$rootfs/etc/init.d/S47cleankvm-video-broker"
+    fi
+    test ! -e "$rootfs/run/onyx-kvm/video-enabled"
     test ! -e "$rootfs/run/cleankvm/video-enabled"
 fi
 

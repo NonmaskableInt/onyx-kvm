@@ -1,6 +1,6 @@
-# CleanKVM
+# Onyx KVM
 
-CleanKVM is a security-first, independently built software image for the
+Onyx KVM is a security-first, independently built software image for the
 Sipeed NanoKVM Lite (SG2002). Network-facing services and device control are
 implemented in Rust. Vendor-specific multimedia code is isolated behind a
 small, auditable video adapter.
@@ -26,13 +26,18 @@ claim boundary.
 
 ## Repository layout
 
-- `crates/cleankvm-core`: hardware-neutral domain types and authorization
+- `crates/onyx-kvm-core`: hardware-neutral domain types and authorization
   policy.
-- `crates/cleankvm-mcp`: bounded MCP 2025-11-25 stdio server and default-deny
+- `crates/onyx-kvm-mcp`: bounded MCP 2025-11-25 stdio server and default-deny
   tool handling.
-- `crates/cleankvm-memtest`: bounded, address-sensitive and March-style Rust
+- `crates/onyx-kvm-memtest`: bounded, address-sensitive and March-style Rust
   memory qualification utility for controlled hardware testing.
-- `crates/cleankvmd`: local recovery MCP daemon; it has no network listener.
+- `crates/onyx-kvm-hid-broker`: privileged, fail-closed HID broker and USB gadget writer.
+- `crates/onyx-kvm-video-broker`: privileged, quarantined video capture broker.
+- `crates/onyx-kvm-audio-brokers`: isolated audio capture and playback brokers.
+- `crates/onyx-kvm-media-protocol`: shared fixed-size media and snapshot wire protocols.
+- `crates/onyx-kvm-evidence`: hardware and security evidence collector.
+- `crates/onyx-kvmd`: local recovery and authenticated HTTPS MCP daemon.
 - `image/`: independently built image integration and pinned inputs.
 - `docs/`: architecture, security model, and bring-up records.
 
@@ -45,15 +50,15 @@ licenses, and Linux builder are pinned; see
 
 ```sh
 cargo fmt --check
-cargo test --workspace
-cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace --locked
+cargo clippy --workspace --locked --all-targets -- -D warnings
 ```
 
 Build the local recovery daemon as a self-contained SG2002 userspace binary:
 
 ```sh
 cargo rustc --release --target riscv64gc-unknown-linux-musl \
-  --package cleankvmd --offline -- \
+  --package onyx-kvmd --offline -- \
   -C linker=rust-lld -C link-self-contained=yes \
   -C target-feature=+crt-static
 ```

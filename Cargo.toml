@@ -1,14 +1,14 @@
 [workspace]
 members = [
-    "crates/cleankvm-core",
-    "crates/cleankvm-evidence",
-    "crates/cleankvm-hid-broker",
-    "crates/cleankvm-mcp",
-    "crates/cleankvm-media-protocol",
-    "crates/cleankvm-memtest",
-    "crates/cleankvm-video-broker",
-    "crates/cleankvm-audio-brokers",
-    "crates/cleankvmd",
+    "crates/onyx-kvm-core",
+    "crates/onyx-kvm-evidence",
+    "crates/onyx-kvm-hid-broker",
+    "crates/onyx-kvm-mcp",
+    "crates/onyx-kvm-media-protocol",
+    "crates/onyx-kvm-memtest",
+    "crates/onyx-kvm-video-broker",
+    "crates/onyx-kvm-audio-brokers",
+    "crates/onyx-kvmd",
 ]
 resolver = "2"
 

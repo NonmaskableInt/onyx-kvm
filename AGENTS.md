@@ -1,4 +1,4 @@
-# CleanKVM contributor instructions
+# Onyx KVM contributor instructions
 
 These instructions apply to the entire repository.
 

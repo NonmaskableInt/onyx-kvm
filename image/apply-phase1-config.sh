@@ -89,7 +89,8 @@ case "$(file "$daemon_binary")" in
         exit 1
         ;;
 esac
-install -D -m 0755 "$daemon_binary" "$overlay_dir/usr/bin/cleankvmd"
+install -D -m 0755 "$daemon_binary" "$overlay_dir/usr/bin/onyx-kvmd"
+ln -sf onyx-kvmd "$overlay_dir/usr/bin/cleankvmd"
 test -f "$memtest_binary" || {
     printf 'missing static Rust memory tester: %s\n' "$memtest_binary" >&2
     exit 1
@@ -101,7 +102,8 @@ case "$(file "$memtest_binary")" in
         exit 1
         ;;
 esac
-install -D -m 0755 "$memtest_binary" "$overlay_dir/usr/bin/cleankvm-memtest"
+install -D -m 0755 "$memtest_binary" "$overlay_dir/usr/bin/onyx-kvm-memtest"
+ln -sf onyx-kvm-memtest "$overlay_dir/usr/bin/cleankvm-memtest"
 
 for patch_file in "$repo_root"/image/patches/*.patch; do
     case "${patch_file##*/}" in

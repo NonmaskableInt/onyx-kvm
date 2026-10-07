@@ -134,13 +134,21 @@ fi
         # volume is reusable, so relying on a prior apply step can otherwise
         # retain a stale executable even when its source and verified output
         # have changed.
-        install -m 0755 /repo/out/phase2-rust/cleankvmd \
-            cleankvm/phase1-overlay/usr/bin/cleankvmd
-        install -m 0755 /repo/out/phase2-rust/cleankvm-memtest \
-            cleankvm/phase1-overlay/usr/bin/cleankvm-memtest
+        daemonsrc=/repo/out/phase2-rust/onyx-kvmd
+        if [ ! -f "$daemonsrc" ]; then daemonsrc=/repo/out/phase2-rust/cleankvmd; fi
+        install -m 0755 "$daemonsrc" cleankvm/phase1-overlay/usr/bin/onyx-kvmd
+        ln -sf onyx-kvmd cleankvm/phase1-overlay/usr/bin/cleankvmd
+
+        memtestsrc=/repo/out/phase2-rust/onyx-kvm-memtest
+        if [ ! -f "$memtestsrc" ]; then memtestsrc=/repo/out/phase2-rust/cleankvm-memtest; fi
+        install -m 0755 "$memtestsrc" cleankvm/phase1-overlay/usr/bin/onyx-kvm-memtest
+        ln -sf onyx-kvm-memtest cleankvm/phase1-overlay/usr/bin/cleankvm-memtest
+
         if [ "$CLEANKVM_CONFIG_PROFILE" != phase1 ]; then
-            install -m 0755 /repo/out/phase2-rust/cleankvm-hid-broker \
-                cleankvm/phase1-overlay/usr/bin/cleankvm-hid-broker
+            hidsrc=/repo/out/phase2-rust/onyx-kvm-hid-broker
+            if [ ! -f "$hidsrc" ]; then hidsrc=/repo/out/phase2-rust/cleankvm-hid-broker; fi
+            install -m 0755 "$hidsrc" cleankvm/phase1-overlay/usr/bin/onyx-kvm-hid-broker
+            ln -sf onyx-kvm-hid-broker cleankvm/phase1-overlay/usr/bin/cleankvm-hid-broker
         fi
         # The SDK work volume is deliberately reusable, but Buildroot overlays
         # are additive. Remove every optional artifact from both the source
@@ -167,18 +175,23 @@ fi
             cleankvm/phase1-devices.txt
         if [ "$CLEANKVM_CONFIG_PROFILE" != phase3-video-foundation ] && \
            [ "$CLEANKVM_CONFIG_PROFILE" != product ]; then
-            rm -f cleankvm/phase1-overlay/usr/bin/cleankvm-video-broker
-            rm -f cleankvm/phase1-overlay/etc/init.d/S47cleankvm-video-broker
-            rm -rf cleankvm/phase1-overlay/usr/lib/cleankvm/video-quarantine
-            rm -f buildroot/output/target/usr/bin/cleankvm-video-broker
-            rm -f buildroot/output/target/etc/init.d/S47cleankvm-video-broker
-            rm -rf buildroot/output/target/usr/lib/cleankvm/video-quarantine
+            rm -f cleankvm/phase1-overlay/usr/bin/onyx-kvm-video-broker cleankvm/phase1-overlay/usr/bin/cleankvm-video-broker
+            rm -f cleankvm/phase1-overlay/etc/init.d/S47onyx-kvm-video-broker cleankvm/phase1-overlay/etc/init.d/S47cleankvm-video-broker
+            rm -rf cleankvm/phase1-overlay/usr/lib/onyx-kvm/video-quarantine cleankvm/phase1-overlay/usr/lib/cleankvm/video-quarantine
+            rm -f buildroot/output/target/usr/bin/onyx-kvm-video-broker buildroot/output/target/usr/bin/cleankvm-video-broker
+            rm -f buildroot/output/target/etc/init.d/S47onyx-kvm-video-broker buildroot/output/target/etc/init.d/S47cleankvm-video-broker
+            rm -rf buildroot/output/target/usr/lib/onyx-kvm/video-quarantine buildroot/output/target/usr/lib/cleankvm/video-quarantine
         else
             cp -a /repo/image/phase3-video-overlay/. cleankvm/phase1-overlay/
-            install -m 0755 /repo/out/phase3-rust/cleankvm-video-broker \
-                cleankvm/phase1-overlay/usr/bin/cleankvm-video-broker
+            videosrc=/repo/out/phase3-rust/onyx-kvm-video-broker
+            if [ ! -f "$videosrc" ]; then videosrc=/repo/out/phase3-rust/cleankvm-video-broker; fi
+            install -m 0755 "$videosrc" cleankvm/phase1-overlay/usr/bin/onyx-kvm-video-broker
+            ln -sf onyx-kvm-video-broker cleankvm/phase1-overlay/usr/bin/cleankvm-video-broker
+            mkdir -p cleankvm/phase1-overlay/usr/lib/onyx-kvm/video-quarantine
             mkdir -p cleankvm/phase1-overlay/usr/lib/cleankvm/video-quarantine
             for module in /video-modules/*.ko; do
+                install -m 0444 "$module" \
+                    "cleankvm/phase1-overlay/usr/lib/onyx-kvm/video-quarantine/$(basename "$module")"
                 install -m 0444 "$module" \
                     "cleankvm/phase1-overlay/usr/lib/cleankvm/video-quarantine/$(basename "$module")"
             done
@@ -190,21 +203,27 @@ fi
         if [ "$CLEANKVM_CONFIG_PROFILE" != phase3a-audio-enumeration ] && \
            [ "$CLEANKVM_CONFIG_PROFILE" != product ]; then
             rm -rf buildroot/output/target/dev/snd
-            rm -f cleankvm/phase1-overlay/usr/bin/cleankvm-audio-capture-broker
-            rm -f cleankvm/phase1-overlay/usr/bin/cleankvm-audio-playback-broker
-            rm -f cleankvm/phase1-overlay/etc/init.d/S47cleankvm-audio-capture-broker
-            rm -f cleankvm/phase1-overlay/etc/init.d/S48cleankvm-audio-playback-broker
-            rm -f buildroot/output/target/usr/bin/cleankvm-audio-capture-broker
-            rm -f buildroot/output/target/usr/bin/cleankvm-audio-playback-broker
-            rm -f buildroot/output/target/etc/init.d/S47cleankvm-audio-capture-broker
-            rm -f buildroot/output/target/etc/init.d/S48cleankvm-audio-playback-broker
-        elif [ -f /repo/out/phase3a-rust/cleankvm-audio-capture-broker ] && \
-             [ -f /repo/out/phase3a-rust/cleankvm-audio-playback-broker ]; then
+            rm -f cleankvm/phase1-overlay/usr/bin/onyx-kvm-audio-capture-broker cleankvm/phase1-overlay/usr/bin/cleankvm-audio-capture-broker
+            rm -f cleankvm/phase1-overlay/usr/bin/onyx-kvm-audio-playback-broker cleankvm/phase1-overlay/usr/bin/cleankvm-audio-playback-broker
+            rm -f cleankvm/phase1-overlay/etc/init.d/S47onyx-kvm-audio-capture-broker cleankvm/phase1-overlay/etc/init.d/S47cleankvm-audio-capture-broker
+            rm -f cleankvm/phase1-overlay/etc/init.d/S48onyx-kvm-audio-playback-broker cleankvm/phase1-overlay/etc/init.d/S48cleankvm-audio-playback-broker
+            rm -f buildroot/output/target/usr/bin/onyx-kvm-audio-capture-broker buildroot/output/target/usr/bin/cleankvm-audio-capture-broker
+            rm -f buildroot/output/target/usr/bin/onyx-kvm-audio-playback-broker buildroot/output/target/usr/bin/cleankvm-audio-playback-broker
+            rm -f buildroot/output/target/etc/init.d/S47onyx-kvm-audio-capture-broker buildroot/output/target/etc/init.d/S47cleankvm-audio-capture-broker
+            rm -f buildroot/output/target/etc/init.d/S48onyx-kvm-audio-playback-broker buildroot/output/target/etc/init.d/S48cleankvm-audio-playback-broker
+        elif [ -f /repo/out/phase3a-rust/onyx-kvm-audio-capture-broker ] || \
+             [ -f /repo/out/phase3a-rust/cleankvm-audio-capture-broker ]; then
             cp -a /repo/image/phase3a-audio-overlay/. cleankvm/phase1-overlay/
-            install -m 0755 /repo/out/phase3a-rust/cleankvm-audio-capture-broker \
-                cleankvm/phase1-overlay/usr/bin/cleankvm-audio-capture-broker
-            install -m 0755 /repo/out/phase3a-rust/cleankvm-audio-playback-broker \
-                cleankvm/phase1-overlay/usr/bin/cleankvm-audio-playback-broker
+            capturesrc=/repo/out/phase3a-rust/onyx-kvm-audio-capture-broker
+            if [ ! -f "$capturesrc" ]; then capturesrc=/repo/out/phase3a-rust/cleankvm-audio-capture-broker; fi
+            playbacksrc=/repo/out/phase3a-rust/onyx-kvm-audio-playback-broker
+            if [ ! -f "$playbacksrc" ]; then playbacksrc=/repo/out/phase3a-rust/cleankvm-audio-playback-broker; fi
+            install -m 0755 "$capturesrc" \
+                cleankvm/phase1-overlay/usr/bin/onyx-kvm-audio-capture-broker
+            ln -sf onyx-kvm-audio-capture-broker cleankvm/phase1-overlay/usr/bin/cleankvm-audio-capture-broker
+            install -m 0755 "$playbacksrc" \
+                cleankvm/phase1-overlay/usr/bin/onyx-kvm-audio-playback-broker
+            ln -sf onyx-kvm-audio-playback-broker cleankvm/phase1-overlay/usr/bin/cleankvm-audio-playback-broker
         fi
         if [ -n "$CLEANKVM_RAW_FRAME_PROBE" ]; then
             install -D -m 0500 "$CLEANKVM_RAW_FRAME_PROBE" \
@@ -251,14 +270,14 @@ fi
         fi
         make -C buildroot cvitek_SG200X_musl_riscv64_defconfig \
             BR2_TOOLCHAIN_EXTERNAL_PATH=/work/sdk/host-tools/gcc/riscv64-linux-musl-x86_64 \
-            "BR2_STRIP_EXCLUDE_FILES=cleankvmd cleankvm-memtest cleankvm-hid-broker cleankvm-video-broker cleankvm-audio-capture-broker cleankvm-audio-playback-broker"
+            "BR2_STRIP_EXCLUDE_FILES=onyx-kvmd onyx-kvm-memtest onyx-kvm-hid-broker onyx-kvm-video-broker onyx-kvm-audio-capture-broker onyx-kvm-audio-playback-broker cleankvmd cleankvm-memtest cleankvm-hid-broker cleankvm-video-broker cleankvm-audio-capture-broker cleankvm-audio-playback-broker"
         # The vendor Buildroot/BusyBox combination does not reliably preserve
         # GNU make jobserver descriptors through its nested configuration
         # makes. A single job is slower but deterministic and fail-closed.
         make -C buildroot -j1 \
             BR2_DL_DIR=/downloads \
             BR2_TOOLCHAIN_EXTERNAL_PATH=/work/sdk/host-tools/gcc/riscv64-linux-musl-x86_64 \
-            "BR2_STRIP_EXCLUDE_FILES=cleankvmd cleankvm-memtest cleankvm-hid-broker cleankvm-video-broker cleankvm-audio-capture-broker cleankvm-audio-playback-broker"
+            "BR2_STRIP_EXCLUDE_FILES=onyx-kvmd onyx-kvm-memtest onyx-kvm-hid-broker onyx-kvm-video-broker onyx-kvm-audio-capture-broker onyx-kvm-audio-playback-broker cleankvmd cleankvm-memtest cleankvm-hid-broker cleankvm-video-broker cleankvm-audio-capture-broker cleankvm-audio-playback-broker"
         # Incremental Buildroot finalization may retain the prior target-tree
         # mode even though the filesystem device table correctly applies 0500.
         # Normalize both views so the pre-image audit cannot disagree with the
@@ -274,28 +293,37 @@ fi
         video_broker=
         audio_capture_broker=
         audio_playback_broker=
+        daemon_bin=/repo/out/phase2-rust/onyx-kvmd
+        if [ ! -f "$daemon_bin" ]; then daemon_bin=/repo/out/phase2-rust/cleankvmd; fi
+        memtest_bin=/repo/out/phase2-rust/onyx-kvm-memtest
+        if [ ! -f "$memtest_bin" ]; then memtest_bin=/repo/out/phase2-rust/cleankvm-memtest; fi
         if [ "$CLEANKVM_CONFIG_PROFILE" = phase2-hid ] || \
            [ "$CLEANKVM_CONFIG_PROFILE" = phase3-discovery ] || \
            [ "$CLEANKVM_CONFIG_PROFILE" = phase3-video-foundation ] || \
            [ "$CLEANKVM_CONFIG_PROFILE" = phase3a-audio-enumeration ] || \
            [ "$CLEANKVM_CONFIG_PROFILE" = product ]; then
-            hid_broker=/repo/out/phase2-rust/cleankvm-hid-broker
+            hid_broker=/repo/out/phase2-rust/onyx-kvm-hid-broker
+            if [ ! -f "$hid_broker" ]; then hid_broker=/repo/out/phase2-rust/cleankvm-hid-broker; fi
         fi
         if [ "$CLEANKVM_CONFIG_PROFILE" = phase3-video-foundation ] || \
            [ "$CLEANKVM_CONFIG_PROFILE" = product ]; then
             video_modules="$CLEANKVM_VIDEO_MODULE_DIR"
-            if [ -f /repo/out/phase3-rust/cleankvm-video-broker ]; then
+            if [ -f /repo/out/phase3-rust/onyx-kvm-video-broker ]; then
+                video_broker=/repo/out/phase3-rust/onyx-kvm-video-broker
+            elif [ -f /repo/out/phase3-rust/cleankvm-video-broker ]; then
                 video_broker=/repo/out/phase3-rust/cleankvm-video-broker
             fi
         fi
         if [ "$CLEANKVM_CONFIG_PROFILE" = phase3a-audio-enumeration ] || \
            [ "$CLEANKVM_CONFIG_PROFILE" = product ]; then
-            audio_capture_broker=/repo/out/phase3a-rust/cleankvm-audio-capture-broker
-            audio_playback_broker=/repo/out/phase3a-rust/cleankvm-audio-playback-broker
+            audio_capture_broker=/repo/out/phase3a-rust/onyx-kvm-audio-capture-broker
+            if [ ! -f "$audio_capture_broker" ]; then audio_capture_broker=/repo/out/phase3a-rust/cleankvm-audio-capture-broker; fi
+            audio_playback_broker=/repo/out/phase3a-rust/onyx-kvm-audio-playback-broker
+            if [ ! -f "$audio_playback_broker" ]; then audio_playback_broker=/repo/out/phase3a-rust/cleankvm-audio-playback-broker; fi
         fi
         /repo/image/audit-rootfs.sh /work/sdk/buildroot/output/target \
-            /repo/out/phase2-rust/cleankvmd \
-            /repo/out/phase2-rust/cleankvm-memtest \
+            "$daemon_bin" \
+            "$memtest_bin" \
             "$CLEANKVM_RECOVERY_PASSWORD_HASH" \
             "$CLEANKVM_IDENTITY_SOURCE" \
             "$hid_broker" \
@@ -313,11 +341,15 @@ fi
             root_image=/work/sdk/buildroot/output/images/rootfs.ext4
             passwd_image=$($debugfs -R "cat /etc/passwd" "$root_image" 2>/dev/null)
             group_image=$($debugfs -R "cat /etc/group" "$root_image" 2>/dev/null)
-            key_stat=$($debugfs -R "stat /etc/cleankvm/tls-private-key.pkcs8.der" \
+            key_stat=$($debugfs -R "stat /etc/onyx-kvm/tls-private-key.pkcs8.der" \
                 "$root_image" 2>/dev/null)
+            if [ -z "$key_stat" ]; then
+                key_stat=$($debugfs -R "stat /etc/cleankvm/tls-private-key.pkcs8.der" \
+                    "$root_image" 2>/dev/null)
+            fi
             printf "%s\n" "$passwd_image" | \
-                grep -q "^cleankvm:x:900:900:.*:/nonexistent:/sbin/nologin$"
-            printf "%s\n" "$group_image" | grep -q "^cleankvm:x:900:"
+                grep -Eq "^(onyx-kvm|cleankvm):x:900:900:.*:/nonexistent:/sbin/nologin$"
+            printf "%s\n" "$group_image" | grep -Eq "^(onyx-kvm|cleankvm):x:900:"
             printf "%s\n" "$key_stat" | grep -q "Mode: *0640"
             printf "%s\n" "$key_stat" | grep -q "User: *0 *Group: *900"
             printf "%s\n" "finished ext4 identity ownership audit passed"

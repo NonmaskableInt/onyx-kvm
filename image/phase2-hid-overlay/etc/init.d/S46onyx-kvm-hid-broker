@@ -1,0 +1,30 @@
+#!/bin/sh
+set -eu
+
+pidfile=/run/onyx-kvm-hid-broker.pid
+daemon=/usr/bin/onyx-kvm-hid-broker
+if [ ! -x "$daemon" ] && [ -x /usr/bin/cleankvm-hid-broker ]; then
+    daemon=/usr/bin/cleankvm-hid-broker
+fi
+
+case "${1:-}" in
+    start)
+        test -x "$daemon"
+        test -c /dev/hidg0
+        test -c /dev/hidg1
+        mkdir -p /run/onyx-kvm
+        chown root:900 /run/onyx-kvm
+        chmod 2750 /run/onyx-kvm
+        if [ ! -e /run/cleankvm ]; then
+            ln -s /run/onyx-kvm /run/cleankvm
+        fi
+        start-stop-daemon -S -b -m -p "$pidfile" -x "$daemon"
+        ;;
+    stop)
+        start-stop-daemon -K -p "$pidfile" -x "$daemon" || true
+        rm -f "$pidfile" /run/onyx-kvm/hid.sock /run/onyx-kvm/hid-enabled \
+            /run/cleankvm-hid-broker.pid
+        ;;
+    restart) "$0" stop; "$0" start ;;
+    *) printf 'usage: %s {start|stop|restart}\n' "$0" >&2; exit 1 ;;
+esac

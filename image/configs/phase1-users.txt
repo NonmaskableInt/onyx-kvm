@@ -1,1 +1,1 @@
-cleankvm 900 cleankvm 900 * /nonexistent /sbin/nologin - CleanKVM_daemon
+onyx-kvm 900 onyx-kvm 900 * /nonexistent /sbin/nologin - Onyx_KVM_daemon

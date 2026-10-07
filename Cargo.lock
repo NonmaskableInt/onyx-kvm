@@ -40,71 +40,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9330f8b2ff13f34540b44e946ef35111825727b38d33286ef986142615121801"
 
 [[package]]
-name = "cleankvm-audio-brokers"
-version = "0.1.0"
-dependencies = [
- "cleankvm-media-protocol",
- "rustix",
-]
-
-[[package]]
-name = "cleankvm-core"
-version = "0.1.0"
-
-[[package]]
-name = "cleankvm-evidence"
-version = "0.1.0"
-
-[[package]]
-name = "cleankvm-hid-broker"
-version = "0.1.0"
-dependencies = [
- "cleankvm-core",
- "rustix",
-]
-
-[[package]]
-name = "cleankvm-mcp"
-version = "0.1.0"
-dependencies = [
- "base64",
- "cleankvm-core",
- "cleankvm-media-protocol",
- "ed25519-dalek",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "cleankvm-media-protocol"
-version = "0.1.0"
-
-[[package]]
-name = "cleankvm-memtest"
-version = "0.1.0"
-
-[[package]]
-name = "cleankvm-video-broker"
-version = "0.1.0"
-dependencies = [
- "cleankvm-core",
- "cleankvm-media-protocol",
- "rustix",
- "sha2",
-]
-
-[[package]]
-name = "cleankvmd"
-version = "0.1.0"
-dependencies = [
- "cleankvm-mcp",
- "cleankvm-media-protocol",
- "httparse",
- "rustls",
- "serde_json",
-]
-
-[[package]]
 name = "cpufeatures"
 version = "0.2.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -258,6 +193,71 @@ name = "once_cell"
 version = "1.21.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9f7c3e4beb33f85d45ae3e3a1792185706c8e16d043238c593331cc7cd313b50"
+
+[[package]]
+name = "onyx-kvm-audio-brokers"
+version = "0.1.0"
+dependencies = [
+ "onyx-kvm-media-protocol",
+ "rustix",
+]
+
+[[package]]
+name = "onyx-kvm-core"
+version = "0.1.0"
+
+[[package]]
+name = "onyx-kvm-evidence"
+version = "0.1.0"
+
+[[package]]
+name = "onyx-kvm-hid-broker"
+version = "0.1.0"
+dependencies = [
+ "onyx-kvm-core",
+ "rustix",
+]
+
+[[package]]
+name = "onyx-kvm-mcp"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "ed25519-dalek",
+ "onyx-kvm-core",
+ "onyx-kvm-media-protocol",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "onyx-kvm-media-protocol"
+version = "0.1.0"
+
+[[package]]
+name = "onyx-kvm-memtest"
+version = "0.1.0"
+
+[[package]]
+name = "onyx-kvm-video-broker"
+version = "0.1.0"
+dependencies = [
+ "onyx-kvm-core",
+ "onyx-kvm-media-protocol",
+ "rustix",
+ "sha2",
+]
+
+[[package]]
+name = "onyx-kvmd"
+version = "0.1.0"
+dependencies = [
+ "httparse",
+ "onyx-kvm-mcp",
+ "onyx-kvm-media-protocol",
+ "rustls",
+ "serde_json",
+]
 
 [[package]]
 name = "proc-macro2"

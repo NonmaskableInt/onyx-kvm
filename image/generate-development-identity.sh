@@ -29,8 +29,8 @@ trap 'rm -f "$temporary_der"' EXIT HUP INT TERM
 # A short-lived self-signed development leaf keeps this step independent of
 # external PKI. Production images must replace it with an enrolled identity.
 openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -days 30 \
-    -subj '/CN=cleankvm-recovery' \
-    -addext 'subjectAltName=DNS:cleankvm-recovery' \
+    -subj '/CN=onyx-kvm-recovery' \
+    -addext 'subjectAltName=DNS:onyx-kvm-recovery,DNS:cleankvm-recovery' \
     -addext 'extendedKeyUsage=serverAuth' \
     -addext 'keyUsage=digitalSignature,keyCertSign' \
     -keyout "$tls_key" -out "$tls_certificate" >/dev/null 2>&1

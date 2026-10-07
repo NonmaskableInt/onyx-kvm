@@ -28,7 +28,7 @@ def root_entry(name: bytes, cluster: int, size: int) -> bytes:
 def make_fat16(files: list[tuple[bytes, bytes]]) -> bytes:
     volume = bytearray(BOOT_SECTORS * SECTOR)
     volume[0:3] = b"\xeb\x3c\x90"
-    volume[3:11] = b"CLEANKVM"
+    volume[3:11] = b"ONYXKVM "
     struct.pack_into("<H", volume, 11, SECTOR)
     volume[13] = CLUSTER_SECTORS
     struct.pack_into("<H", volume, 14, RESERVED_SECTORS)
@@ -42,8 +42,8 @@ def make_fat16(files: list[tuple[bytes, bytes]]) -> bytes:
     struct.pack_into("<I", volume, 28, 0)
     volume[36] = 0x80
     volume[38] = 0x29
-    struct.pack_into("<I", volume, 39, 0x434B564D)
-    volume[43:54] = b"CLEANKVM   "
+    struct.pack_into("<I", volume, 39, 0x4F4E5958)
+    volume[43:54] = b"ONYXKVM    "
     volume[54:62] = b"FAT16   "
     volume[510:512] = b"\x55\xaa"
 
