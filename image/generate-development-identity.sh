@@ -31,6 +31,8 @@ trap 'rm -f "$temporary_der"' EXIT HUP INT TERM
 openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -days 30 \
     -subj '/CN=cleankvm-recovery' \
     -addext 'subjectAltName=DNS:cleankvm-recovery' \
+    -addext 'extendedKeyUsage=serverAuth' \
+    -addext 'keyUsage=digitalSignature,keyCertSign' \
     -keyout "$tls_key" -out "$tls_certificate" >/dev/null 2>&1
 openssl x509 -in "$tls_certificate" -outform DER -out "$tls_certificate_der"
 openssl pkey -in "$tls_key" -outform DER -out "$tls_key_der"

@@ -1,11 +1,12 @@
 #!/bin/sh
 set -eu
 
-issuer_key=${1:?usage: mint-development-token.sh ISSUER_PRIVATE_KEY ISSUER AUDIENCE OUTPUT_FILE [read-only|hid-control|video-snapshot|audio-capture|audio-output]}
-issuer=${2:?usage: mint-development-token.sh ISSUER_PRIVATE_KEY ISSUER AUDIENCE OUTPUT_FILE [read-only|hid-control|video-snapshot|audio-capture|audio-output]}
-audience=${3:?usage: mint-development-token.sh ISSUER_PRIVATE_KEY ISSUER AUDIENCE OUTPUT_FILE [read-only|hid-control|video-snapshot|audio-capture|audio-output]}
-output_file=${4:?usage: mint-development-token.sh ISSUER_PRIVATE_KEY ISSUER AUDIENCE OUTPUT_FILE [read-only|hid-control|video-snapshot|audio-capture|audio-output]}
+issuer_key=${1:?usage: mint-development-token.sh ISSUER_PRIVATE_KEY ISSUER AUDIENCE OUTPUT_FILE [read-only|hid-control|video-snapshot|audio-capture|audio-output|operator] [TTL_SECONDS]}
+issuer=${2:?usage: mint-development-token.sh ISSUER_PRIVATE_KEY ISSUER AUDIENCE OUTPUT_FILE [read-only|hid-control|video-snapshot|audio-capture|audio-output|operator] [TTL_SECONDS]}
+audience=${3:?usage: mint-development-token.sh ISSUER_PRIVATE_KEY ISSUER AUDIENCE OUTPUT_FILE [read-only|hid-control|video-snapshot|audio-capture|audio-output|operator] [TTL_SECONDS]}
+output_file=${4:?usage: mint-development-token.sh ISSUER_PRIVATE_KEY ISSUER AUDIENCE OUTPUT_FILE [read-only|hid-control|video-snapshot|audio-capture|audio-output|operator] [TTL_SECONDS]}
 profile=${5:-read-only}
+ttl_seconds=${6:-300}
 
 test -f "$issuer_key"
 test ! -e "$output_file"
@@ -18,7 +19,7 @@ encode() {
 }
 
 header=$(printf '%s' '{"alg":"EdDSA","typ":"at+jwt"}' | encode)
-expiry=$(( $(date +%s) + 300 ))
+expiry=$(( $(date +%s) + ttl_seconds ))
 case "$profile" in
     read-only)
         scope=kvm:read
@@ -38,6 +39,10 @@ case "$profile" in
         ;;
     audio-output)
         scope='kvm:read kvm:audio-output'
+        mutation=true
+        ;;
+    operator|all|full)
+        scope='kvm:read kvm:video kvm:audio-capture kvm:audio-output kvm:control'
         mutation=true
         ;;
     *) printf 'unknown development token profile: %s\n' "$profile" >&2; exit 1 ;;

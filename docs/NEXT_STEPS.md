@@ -348,18 +348,64 @@ fail-closed on target (`192.168.2.104`):
    - Added `image/product-gate.exp` and `image/product-exec.exp` with clean `cu`
      disconnect sequences and prompt-aware login.
 
+### Complete human web console acceptance on release image v56
+
+The embedded web console has completed full end-to-end human browser verification
+against target hardware (`https://cleankvm-recovery:8443` on `192.168.2.105`):
+
+1. **Client TLS Enrollment & Authentication**:
+   - Device TLS identity enrolled into macOS Keychain (`login.keychain-db` /
+     `System.keychain`) with explicit trust settings.
+   - Safari accepts the certificate cleanly with zero security warnings or bypasses.
+     Chrome requires socket pool flush or browser restart due to TLS session
+     socket caching; `image/generate-development-identity.sh` has been hardened to
+     include `extendedKeyUsage=serverAuth` and `keyUsage=digitalSignature,keyCertSign`.
+   - Minted 1-hour operator JWT token (`image/mint-development-token.sh` profile `operator`)
+     enabling `kvm:read`, `kvm:video`, `kvm:audio-capture`, `kvm:audio-output`, and
+     `kvm:control` with `cleankvm_mutation: true`.
+   - Pasted token into web console session input; `initialize` and
+     `notifications/initialized` succeeded, transitioning session state to `Authenticated`.
+
+2. **Live Capability Indicator Strip & Controls**:
+   - With gates open (`image/product-gate.exp enable-all`), `kvm.status` reported:
+     - `videoEnabled: true`
+     - `audioCaptureEnabled: true`
+     - `audioOutputEnabled: true`
+   - UI indicator strip immediately updated capability state to `Enabled`.
+   - Action buttons ("Capture verified snapshot", "Measure microphone for one second",
+     "Play quiet test tone") became active.
+
+3. **End-to-End Hardware Video Snapshot**:
+   - Operator clicked "Capture verified snapshot" in browser.
+   - Browser issued MCP `tools/call kvm.video.snapshot` with format `yuv420p` and
+     deadline 5,000 ms.
+   - Target executed raw frame probe through LT6911 bridge / SG2002 MIPI receiver,
+     captured live 1920x1080 planar YUV420P frame, returned verified SHA-256 digest
+     and dimensions to browser, and displayed result in `<pre id="snapshot-result">`.
+   - Serial invariant verification immediately post-capture confirmed:
+     - Zero vendor modules remained loaded (`SOPH_MODULES=` empty).
+     - Captured buffer unlinked immediately (`FRAME_ABSENT_RC=0`).
+     - `/dev/mem` absent (`DEVMEM_ABSENT_RC=0`).
+     - Kernel taint: 4096 (expected module unload cycle).
+
+4. **End-to-End Audio Capture & Output Controls**:
+   - Operator clicked "Measure microphone for one second" in browser.
+     - Live microphone captured 16,000 samples of 16 kHz mono S16LE audio via SG2002
+       codec, displayed RMS/peak metrics, and released PCM.
+   - Operator clicked "Play quiet test tone" in browser.
+     - Target played 1-second 1 kHz diagnostic tone through onboard AW8010A amplifier,
+       restored internal mute, and reported success.
+   - Serial audit confirmed zero lingering sound file descriptors across all
+     processes (`SOUND_FDS=` empty).
+
 ## Next steps
 
-1. **Human Web Console Verification**:
-   - Establish trusted client TLS enrollment for the device identity certificate
-     to allow web browsers to access `https://cleankvm-recovery:8443` without
-     bypassing security warnings.
-   - Verify web console UI rendering: capability indicator strip, snapshot
-     metadata, and authenticated control flows.
-2. **Phase 4 Continuous Media & Release Hardening**:
+1. **Phase 4 Continuous Media & Release Hardening**:
    - Implement short-lived, authenticated continuous streaming sessions with
      bounded ring buffers, backpressure, and zero-residual memory erasure.
    - Web console interactive HID event capture and canvas frame rendering.
+2. **Production Enrollment & Distribution**:
+   - Signed offline updates, read-only A/B rootfs, and production PKI enrollment.
 
 ### Complete hardware acceptance on release image v56 (target `192.168.2.105`)
 

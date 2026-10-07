@@ -68,6 +68,9 @@ switch -- $action {
     audio-output-disable {
         send -- "rm -f /run/cleankvm/audio-output-enabled; test ! -e /run/cleankvm/audio-output-enabled; echo OUTPUT_GATE_RC=\$?; printf 'SOUND_FDS='; for p in /proc/\[0-9\]*/fd/*; do t=\$(readlink \"\$p\" 2>/dev/null || true); case \"\$t\" in /dev/snd/*) printf '%s,' \"\$p\";; esac; done; echo; echo __GATE_ACTION_DONE__\r"
     }
+    enable-all {
+        send -- "touch /run/cleankvm/video-enabled /run/cleankvm/hid-enabled /run/cleankvm/audio-capture-enabled /run/cleankvm/audio-output-enabled; for g in video hid audio-capture audio-output; do test -f /run/cleankvm/\$g-enabled; echo GATE_\${g}_RC=\$?; done; echo __GATE_ACTION_DONE__\r"
+    }
     cleanup-all {
         send -- "rm -f /run/cleankvm/video-enabled /run/cleankvm/hid-enabled /run/cleankvm/audio-capture-enabled /run/cleankvm/audio-output-enabled /run/cleankvm-frame.*; for g in video hid audio-capture audio-output; do test ! -e /run/cleankvm/\$g-enabled; echo GATE_\${g}_ABSENT_RC=\$?; done; test ! -e /dev/mem; echo DEVMEM_ABSENT_RC=\$?; printf 'SOPH_MODULES='; awk '\$1 ~ /^soph_/ {printf \"%s,\", \$1}' /proc/modules; echo; printf 'TAINT='; cat /proc/sys/kernel/tainted; printf 'SOUND_FDS='; for p in /proc/\[0-9\]*/fd/*; do t=\$(readlink \"\$p\" 2>/dev/null || true); case \"\$t\" in /dev/snd/*) printf '%s,' \"\$p\";; esac; done; echo; echo __GATE_ACTION_DONE__\r"
     }

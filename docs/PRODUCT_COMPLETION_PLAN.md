@@ -137,6 +137,6 @@ enrollment are the remaining milestones.
 
 1. Complete trusted client TLS enrollment for browser access to `https://cleankvm-recovery:8443`
    without bypassing security warnings, and verify the web console capability strip
-   and snapshot flows.
-2. Package release profile image v56 with verified probe build defaults in rootfs.
-3. Advance to continuous media session architecture and production enrollment.
+   and snapshot flows. [COMPLETED - verified on Safari with zero security warnings; video, microphone, and speaker web controls fully verified on v56 target]
+2. Package release profile image v56 with verified probe build defaults in rootfs. [COMPLETED]
+3. Advance to continuous media session architecture (Phase 4), canvas pixel rendering, and production enrollment.
