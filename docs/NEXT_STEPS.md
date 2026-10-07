@@ -425,8 +425,18 @@ The v59 product release image transitions the full stack to the **Onyx KVM** ide
      - `rootfs.ext4`: SHA-256 `b2fee13e1392eb6634b3e8a9eac2a623abefd185f5567900e8b17bf20060f0b5`
      - `fip.bin`: SHA-256 `6e6d3b5c7a58c1a585bf1ea456c76bd7c91cfd33c76dfc67bd33b31cf86cd301`
 
-3. **Flashing & Hardware Acceptance Prerequisite**:
-   - Next step: insert physical SD card, uniquely resolve target disk identity, flash `out/product-v59/onyx-kvm-phase1.img`, verify card read-back span and embedded artifacts, cold boot target, and verify Onyx KVM baseline and interactive web console.
+3. **Target Disk Resolution, Flash & Verified Read-Back**:
+   - Removable target disk uniquely resolved: `/dev/disk4` (31.0 GB USB mass storage, `CLEANKVM` volume label).
+   - Unmounted and flashed 79,692,288 bytes to `/dev/rdisk4`.
+   - Read back the exact 79,692,288-byte span (155,649 sectors).
+   - Read-back span SHA-256: `c391dfecebc886070d43020da51129483ef384bdb7048e0f39a332143aff4f67` (expected FAT bookkeeping difference).
+   - Embedded FIP, FIT, and rootfs artifacts verified bit-for-bit against audited v59 inputs via `verify-sd-image.py` (`embedded_artifacts=verified`).
+   - Card safely ejected via `diskutil eject /dev/disk4`.
+
+4. **Next Bounded Step**:
+   - Insert card into NanoKVM Lite target device and cold boot.
+   - Verify serial fail-closed baseline: kernel taint `0`, no preloaded modules, `/dev/mem` absent, all 4 capability admission gates absent, broker Unix sockets listening, and services running.
+   - Over network: verify TLS certificate against enrolled trust, fetch web console at `https://<target-ip>:8443/`, authenticate with fresh v59 operator token, verify Onyx KVM UI branding, interactive HID forwarding, and live WebGL UYVY video streaming.
 
 ### Complete hardware acceptance on release image v58 (target `192.168.2.107`)
 
