@@ -407,6 +407,58 @@ against target hardware (`https://cleankvm-recovery:8443` on `192.168.2.105`):
 2. **Production Enrollment & Distribution**:
    - Signed offline updates, read-only A/B rootfs, and production PKI enrollment.
 
+### Complete hardware acceptance on release image v57 (target `192.168.2.106`)
+
+The v57 product release image integrates Milestone 4.1 (accurate mutating operations status reporting in MCP) and Milestone 4.2 (web console interactive USB HID keyboard and mouse forwarding, Pointer Lock, usage keycodes, safety blur zeroization, and hardware recovery macros). It has completed full cold-boot baseline and end-to-end capability acceptance on target hardware (`192.168.2.106`):
+
+1. **Native Verified Probe Build & X.509 Hardening**:
+   - Built rootfs using `image/build-phase1-rootfs.sh` with profile `product` and fresh credentials (`out/product-v57-secrets`).
+   - Provisioned TLS certificate with RFC 5280 / Chromium-compliant `extendedKeyUsage=serverAuth` and `keyUsage=digitalSignature,keyCertSign`.
+   - Built static RISC-V `cleankvmd` binary (`6094e4e3b16e...`) with interactive HID controls.
+   - All offline audits passed: rootfs audit, ext4 identity ownership, ext4 raw-frame probe ownership, ext4 non-audio device-node audit, ext4 audio capture probe ownership, and ext4 audio playback probe ownership.
+
+2. **Partition & Whole Image Assembly**:
+   - Packaged at `out/product-v57/cleankvm-phase1.img` (79,692,288 bytes, SHA-256 `4be4d9397646fe818c00f2ed3dec302b5408f27bbfa63cce5ebaa7548349f4d9`).
+   - Embedded artifacts:
+     - `boot.sd`: SHA-256 `f624df1de67a6a0b8c3a60af7de9f2e429828bd1383be562aba359b72000625b`
+     - `rootfs.ext4`: SHA-256 `8ba40d6cc7c63b3fe66b88af63c2353eb580718e5c08241e799013ac9dd2930c`
+     - `fip.bin`: SHA-256 `6e6d3b5c7a58c1a585bf1ea456c76bd7c91cfd33c76dfc67bd33b31cf86cd301`
+
+3. **Target Disk Resolution, Flash & Verified Read-Back**:
+   - Removable target disk uniquely resolved: `/dev/disk4` (31.0 GB USB mass storage, `CLEANKVM` volume label).
+   - Unmounted and flashed 79,692,288 bytes to `/dev/rdisk4`.
+   - Read back the exact 79,692,288-byte span (155,649 sectors).
+   - Read-back span SHA-256: `c4c7e4ab77a52b3c9ccfb20d461864777f849f451123f58adcbea5097a4d1fde` (expected FAT bookkeeping difference).
+   - Embedded FIP, FIT, and rootfs artifacts verified bit-for-bit against audited v57 inputs via `verify-sd-image.py` (`embedded_artifacts=verified`).
+   - Card safely ejected via `diskutil eject /dev/disk4`.
+
+4. **Cold Boot Baseline Invariants**:
+   - Device booted cleanly and acquired `192.168.2.106/24` via DHCP.
+   - Kernel taint: `0`.
+   - Vendor modules: none preloaded (`SOPH_MODULES=` empty).
+   - `/dev/mem`: absent (`DEVMEM_ABSENT_RC=0`).
+   - Capability admission gates: all four absent by default (`GATE_*_ABSENT_RC=0`).
+   - Broker Unix sockets: all four listening (`SOCKET_*_RC=0`).
+   - Running services: all five active (`cleankvmd`, `cleankvm-hid-broker`, `cleankvm-video-broker`, `cleankvm-audio-capture-broker`, `cleankvm-audio-playback-broker`).
+   - Open sound descriptors: zero (`SOUND_FDS=` empty).
+
+5. **Client TLS Trust & Network Baseline**:
+   - Native macOS Keychain trust enrolled in `login.keychain-db` for `cleankvm-recovery`. Standard macOS `curl https://cleankvm-recovery:8443/` verifies cleanly with zero certificate warnings and without `--cacert`.
+   - Root `/` serves embedded web console with `#control-area`, key event encoding, pointer listeners, and macro controls.
+   - Scoped 1-hour operator JWT minted (`image/mint-development-token.sh`).
+   - `kvm.status` reflects Milestone 4.1: `mutatingOperationsEnabled: true` when mutation grant and HID broker are present.
+
+6. **Interactive HID Hardware Forwarding (Milestone 4.2)**:
+   - Enabled `/run/cleankvm/hid-enabled`.
+   - `kvm.keyboard.send` successfully dispatched key report `[0,0,4,0,0,0,0,0]` ('a') and release `[0,0,0,0,0,0,0,0]`, returned `accepted: true`.
+   - `kvm.pointer.send` dispatched relative pointer motion `[0,10,251,0]` (clamped signed uint8 deltas) and release `[0,0,0,0]`, returned `accepted: true`.
+
+7. **Video & Audio Acceptance with Verified Cleanup**:
+   - Enabled `/run/cleankvm/video-enabled`, captured 1080p YUV420P frame (3,110,400 bytes, SHA-256 `0f41e6389208cd2597532340d4d5732c5e25ad76897908e16c7b31ee191abe9f`).
+   - Enabled `/run/cleankvm/audio-capture-enabled`, captured 16,000 samples at 16 kHz (1,010 ms, zero raw PCM leak).
+   - Enabled `/run/cleankvm/audio-output-enabled`, played 1-second 1 kHz tone through AW8010A PA (1,009 ms).
+   - Serial invariant verification: all temporary frame files deleted (`FRAME_ABSENT_RC=0`), `/dev/mem` absent (`DEVMEM_ABSENT_RC=0`), zero vendor modules loaded (`SOPH_MODULES=` empty), zero open sound descriptors (`SOUND_FDS=` empty), taint 4096.
+
 ### Complete hardware acceptance on release image v56 (target `192.168.2.105`)
 
 The v56 product release image has completed full cold-boot baseline and end-to-end
