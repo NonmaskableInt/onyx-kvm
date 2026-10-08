@@ -1,6 +1,6 @@
-# CleanKVM product completion plan
+# Onyx KVM product completion plan
 
-Updated: 2026-10-06
+Updated: 2026-10-08
 
 ## Product definition
 
@@ -33,26 +33,20 @@ an authenticated 1920x1080 YUV420P MCP snapshot with exact length and digest.
 
 Offline artifacts produced after the correction:
 
-- `cleankvmd`: SHA-256
-  `ecf337a8d6aaeb4fd1439ea8b7af531943e527dbde8dfe97869a1fdd1d501aaa`
-- `cleankvm-video-broker`: SHA-256
-  `84074a5851cc1c8d2942203bb06a36d4f7ec895ed4ae93c1126c800749e14e51`
+- `onyx-kvmd`: static RISC-V daemon
+- `onyx-kvm-video-broker`: static RISC-V broker
 - verified v50 SD image: `out/phase3-web-video-v50/cleankvm-phase1.img`,
   79,692,288 bytes, SHA-256
   `e57f5b480e0bf4da02350a88ebb8928cf34997ab1c273845c83e3e7732718fe8`
-- v50 embedded artifacts: `boot.sd`
-  `ec4d60fe34cde9bdf5aa94366589a2353fde7330864b7b5f9618ea125ed73d38`,
-  `rootfs.ext4`
-  `311cf493b5aebf6242b20e179d6d01be72af12ed0a5a2b03d761957bcab2a9a8`,
-  and `fip.bin`
-  `6e6d3b5c7a58c1a585bf1ea456c76bd7c91cfd33c76dfc67bd33b31cf86cd301`.
+- v50 embedded artifacts: `boot.sd` (`ec4d60fe...`), `rootfs.ext4` (`311cf493...`),
+  and `fip.bin` (`6e6d3b5c...`).
 
-## Phase 2: human web console
+## Phase 2: human web console and interactive controls
 
-Status: first authenticated development shell implemented, built, packaged,
-and served successfully from v50. Direct HTTPS and authorization-negative tests
-pass. Managed-browser use remains blocked on trusted certificate enrollment;
-the certificate warning will not be bypassed.
+Status: complete. Embedded web console in `onyx-kvmd` serves same-origin application
+with strict CSP, frame-denial, and permission-denial headers. Interactive HID keyboard
+and mouse forwarding (Milestone 4.2), `/video/frame` streaming endpoint (Milestone 4.4),
+and WebGL UYVY canvas rendering (Milestone 4.5) verified live on hardware.
 
 1. Serve a small static application from the existing TLS daemon; do not add a
    second network service.
@@ -66,77 +60,70 @@ the certificate warning will not be bypassed.
    capture lease.
 5. Add strict CSP, same-origin enforcement, anti-caching headers, bounded
    request bodies, session expiry, and browser-origin tests.
-6. Admit snapshot viewing first. Admit continuous video only after a bounded
-   media session transport has backpressure, cancellation, and memory-erasure
-   tests.
+6. Interactive HID controls: keyboard reports and relative pointer movements with
+   pointer lock, safety blur zeroization, and Ctrl+Alt+Del recovery macro.
+7. Authenticated `/video/frame` endpoint streaming live raw frames to browser
+   with hardware-accelerated WebGL UYVY fragment shader and Canvas 2D fallback.
 
-The first shell is embedded in `cleankvmd` and served by the existing TLS
-listener at `/`, with separate same-origin `/app.js` and `/app.css` resources.
-It keeps the short-lived bearer token only in memory, clears the input after
-connection, initializes MCP through `/mcp`, displays the four independent
-capability states, and can request an admitted YUV420P snapshot metadata record.
-Every response applies no-store, strict same-origin CSP, frame denial,
-no-referrer, content-sniffing denial, and camera/geolocation/microphone browser
-permission denial. It intentionally does not yet display pixels, provide HID
-controls, retain tokens, or perform production enrollment.
+Acceptance: an authenticated human can view the attached host in real time and
+use admitted HID operations without gaining a broader grant than an equivalent
+MCP client. Verified on release candidates v57 (`192.168.2.106`), v58 (`192.168.2.107`),
+and v59 (`192.168.2.108`).
 
-Acceptance: an authenticated human can view the attached host and use admitted
-HID operations without gaining a broader grant than an equivalent MCP client.
+## Phase 3: audio capture and playback (Phase 3a)
 
-## Phase 3: audio and microphone (Phase 3a)
+Status: complete. Enumeration, local proofs, independent brokers, and shared MCP/web
+controls implemented, built, and packaged. On-device hardware admission passes for
+independent capture (16 kHz mono S16LE metrics-only, zero PCM leak) and output
+(1 kHz diagnostic tone through AW8010A amplifier), including default-deny, scope
+separation, bounded operation, and clean resource release.
 
-Status: enumeration and the bounded local microphone proof pass on v51. The
-capture returned exactly one second of metrics-only PCM and left no open PCM,
-process, output file, gate, or taint. Playback routing and the bounded local
-output proof now pass on v52 with clean PCM/process/file/gate/taint cleanup.
-The separate brokers plus shared MCP/web controls are implemented and packaged
-in v53. On-device Stage D admission passes for independent capture and output,
-including default-deny, scope separation, bounded operation, and cleanup.
+1. Run root-only one-second microphone metrics probe under explicit local authorization.
+   Confirm capture stops, DMA and file descriptors are released, and buffer is zeroized.
+2. Establish physical microphone and DAC/amplifier routing. Keep HDMI audio extraction
+   and USB Audio Class disabled until separately proven routed.
+3. Implement privileged Rust capture and playback brokers with distinct Unix sockets,
+   enable gates, scopes, short leases, one-client limits, fixed PCM shapes, conservative
+   playback ceilings, cancellation, and buffer zeroization.
+4. Add `kvm.audio.capture` and `kvm.audio.play` as bounded control operations. MCP returns
+   metrics or a one-time media-session handle, never unbounded PCM.
+5. Add matching web controls and persistent privacy indication. Capture and playback
+   remain independently disabled by default and fail closed upon gate teardown.
 
-1. Run the existing root-only one-second microphone metrics probe under fresh
-   explicit local authorization. Confirm capture stops, DMA and file
-   descriptors are released, and the buffer is zeroized.
-2. Establish the physical microphone and DAC/amplifier routing. Keep HDMI audio
-   extraction and USB Audio Class disabled until separately proven routed.
-3. Implement privileged Rust capture and playback brokers with distinct Unix
-   sockets, enable gates, scopes, short leases, one-client limits, fixed PCM
-   shapes, conservative playback ceilings, cancellation, and buffer
-   zeroization.
-4. Add `kvm.audio.capture` and `kvm.audio.play` as bounded control operations.
-   MCP returns metrics or a one-time media-session handle, never unbounded PCM.
-5. Add matching web controls and persistent privacy indication. Capture and
-   playback must be independently disabled by default and independently
-   removable at build time.
-
-Acceptance: microphone capture and audio output each pass their own hardware,
-privacy, cleanup, authorization, timeout, and cold-boot fail-closed tests.
+Acceptance: microphone capture and audio output each pass hardware, privacy, cleanup,
+authorization, timeout, and cold-boot fail-closed tests on physical hardware.
 
 ## Phase 4: continuous media and release engineering
 
-Status: the release product image (v56) has completed native probe packaging,
-clean SD-card read-back verification, cold-boot baseline, and full independent
-capability acceptance on physical hardware (`192.168.2.105`). All four capabilities—
-Video snapshot (1080p YUV420P), USB HID (keyboard and pointer reports), Audio
-capture (16 kHz mono S16LE metrics), and Audio output (1 kHz diagnostic tone)—function
-out of the box via authenticated MCP and fail-closed upon gate removal. Continuous
-pixel/audio streaming sessions, browser trust enrollment, and production
-enrollment are the remaining milestones.
+Status: full-stack rebranding to Onyx KVM (v59) successfully assembled, flashed, and
+verified on target hardware (`192.168.2.108`). Baseline invariants, dual-issuer JWT
+authentication, broker fallbacks, and all four capability gates verified. Transitioning
+to continuous media streaming sessions and release hardening.
 
-1. Add authenticated, short-lived continuous video/audio sessions behind the
-   same policy layer, with bounded rings and no credential access in media
-   workers.
-2. Complete production enrollment, audit records, rate limits, physical/local
-   gate UX, and session revocation.
-3. Add read-only A/B roots, signed offline updates, recovery and power-failure
-   tests, SBOM/provenance output, and two-builder reproducibility.
-4. Run the complete release matrix: cold boot, network isolation, MCP, web,
-   video, HID, microphone, audio output, cleanup, and negative authorization
-   cases.
+1. **Phase 4.1: Continuous Media & Low-Latency Streaming Sessions**:
+   - Short-lived, authenticated continuous streaming sessions with explicit renewal leases.
+   - Bounded ring buffers with backpressure frame-drop policy and zero-residual memory erasure.
+   - Low-overhead binary stream transport (chunked frame stream or binary WebSocket)
+     delivering frames with sequence IDs, timestamps, and integrity digests.
+2. **Phase 4.2: Production Hardening & Rootfs Integrity**:
+   - Read-only rootfs with tmpfs overlays for `/run` and `/tmp`.
+   - Production PKI enrollment and local pairing ceremony replacing development tokens.
+   - Cryptographically signed offline update packaging and verification tooling.
+3. **Phase 4.3: Release Engineering & Packaging**:
+   - Complete release acceptance matrix across boot, network, MCP, web, video, HID,
+     audio, and teardown.
+   - Two-builder reproducible build verification and automated artifact hashing.
 
 ## Immediate execution order
 
-1. Complete trusted client TLS enrollment for browser access to `https://cleankvm-recovery:8443`
-   without bypassing security warnings, and verify the web console capability strip
-   and snapshot flows. [COMPLETED - verified on Safari with zero security warnings; video, microphone, and speaker web controls fully verified on v56 target]
-2. Package release profile image v56 with verified probe build defaults in rootfs. [COMPLETED]
-3. Advance to continuous media session architecture (Phase 4), canvas pixel rendering, and production enrollment.
+1. **Release Candidate v59 Rebranding & Hardware Acceptance** [COMPLETED]:
+   - All crates rebranded to `onyx-kvm-*` and `onyx-kvmd`.
+   - Built and assembled `out/product-v59/onyx-kvm-phase1.img` (79,692,288 bytes).
+   - Verified on physical hardware `192.168.2.108`: cold boot baseline, HID forwarding,
+     1080p live video streaming, audio capture metrics, audio tone playback, and fail-closed teardown.
+2. **Phase 4.1: Continuous Media & Low-Latency Streaming Session Architecture** [IN PROGRESS]:
+   - Design and implement bounded media streaming session management in `onyx-kvmd`.
+   - Single-producer/single-consumer frame queue with backpressure drop logic.
+   - Low-latency binary streaming endpoint with client heartbeat/keepalive.
+3. **Phase 4.2: Production Enrollment & Rootfs Hardening** [NEXT]:
+   - Read-only rootfs mount configuration and pairing enrollment.

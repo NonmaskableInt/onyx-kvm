@@ -400,12 +400,16 @@ against target hardware (`https://cleankvm-recovery:8443` on `192.168.2.105`):
 
 ## Next steps
 
-1. **Phase 4 Continuous Media & Release Hardening**:
+1. **Phase 4.1 Continuous Media & Low-Latency Streaming Sessions**:
    - Implement short-lived, authenticated continuous streaming sessions with
-     bounded ring buffers, backpressure, and zero-residual memory erasure.
-   - Web console interactive HID event capture and canvas frame rendering.
-2. **Production Enrollment & Distribution**:
-   - Signed offline updates, read-only A/B rootfs, and production PKI enrollment.
+     explicit leases, bounded ring buffers, backpressure drop policy, and
+     zero-residual memory erasure.
+   - Low-overhead binary stream transport (chunked frame stream or binary WebSocket)
+     with sequence numbering and frame integrity digests.
+2. **Phase 4.2 Production Hardening & Rootfs Integrity**:
+   - Read-only rootfs mount configuration with tmpfs overlays for `/run` and `/tmp`.
+   - Production PKI enrollment and local pairing ceremony replacing development tokens.
+   - Signed offline updates and A/B partition verification.
 
 ### Product release image v59: Onyx KVM rebranding and product assembly
 
