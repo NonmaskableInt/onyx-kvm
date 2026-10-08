@@ -183,21 +183,94 @@ function renderUyvy(canvas, u8Array, width, height) {
 }
 
 let streaming = false;
+let streamAbort = null;
 async function toggleStream() {
-  streaming = !streaming;
-  byId('stream-frame').textContent = streaming ? 'Stop stream' : 'Start stream';
-  while (streaming && token) {
-    try {
-      await fetchFrame();
-    } catch (e) {
-      streaming = false;
-      byId('stream-frame').textContent = 'Start stream';
-      byId('message').textContent = e.message;
-      break;
+  if (streaming) {
+    streaming = false;
+    if (streamAbort) {
+      streamAbort.abort();
+      streamAbort = null;
     }
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    byId('stream-frame').textContent = 'Start stream';
+    return;
   }
-  if (!streaming) {
+  if (!token) return;
+  streaming = true;
+  byId('stream-frame').textContent = 'Stop stream';
+  streamAbort = new AbortController();
+  const signal = streamAbort.signal;
+  try {
+    const response = await fetch('/video/stream', {
+      headers: {'Authorization': `Bearer ${token}`},
+      signal: signal,
+    });
+    if (!response.ok) throw new Error(`Stream rejected (${response.status})`);
+    const reader = response.body.getReader();
+    let chunks = [];
+    let totalLen = 0;
+    const HEADER_LEN = 64;
+
+    while (streaming && !signal.aborted) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value);
+      totalLen += value.length;
+
+      while (totalLen >= HEADER_LEN) {
+        let buffer;
+        if (chunks.length === 1) {
+          buffer = chunks[0];
+        } else {
+          buffer = new Uint8Array(totalLen);
+          let offset = 0;
+          for (const c of chunks) {
+            buffer.set(c, offset);
+            offset += c.length;
+          }
+          chunks = [buffer];
+        }
+
+        const view = new DataView(buffer.buffer, buffer.byteOffset, HEADER_LEN);
+        const seq = view.getUint32(4, false);
+        const width = view.getUint16(16, false);
+        const height = view.getUint16(18, false);
+        const formatByte = buffer[20];
+        const payloadLen = view.getUint32(24, false);
+        const totalFrameLen = HEADER_LEN + payloadLen;
+
+        if (totalLen < totalFrameLen) {
+          break;
+        }
+
+        const framePayload = buffer.subarray(HEADER_LEN, totalFrameLen);
+        renderUyvy(byId('kvm-canvas'), framePayload, width, height);
+
+        byId('snapshot-result').textContent = JSON.stringify({
+          stream: true,
+          seq,
+          width,
+          height,
+          format: formatByte === 3 ? 'yuv422p' : 'yuv420p',
+          byteLength: payloadLen,
+        }, null, 2);
+
+        if (totalLen === totalFrameLen) {
+          chunks = [];
+          totalLen = 0;
+        } else {
+          const remainder = buffer.subarray(totalFrameLen);
+          chunks = [remainder];
+          totalLen = remainder.length;
+        }
+      }
+    }
+  } catch (e) {
+    if (!signal.aborted) {
+      byId('message').textContent = e.message;
+    }
+  } finally {
+    streaming = false;
+    streamAbort = null;
     byId('stream-frame').textContent = 'Start stream';
   }
 }
@@ -351,5 +424,5 @@ byId('fetch-frame').addEventListener('click', () => run(fetchFrame));
 byId('stream-frame').addEventListener('click', () => run(toggleStream));
 byId('capture-audio').addEventListener('click', () => run(captureAudio));
 byId('play-audio').addEventListener('click', () => run(playAudio));
-window.addEventListener('pagehide', () => { streaming = false; token = ''; });
+window.addEventListener('pagehide', () => { if (streaming && streamAbort) streamAbort.abort(); streaming = false; token = ''; });
 ";

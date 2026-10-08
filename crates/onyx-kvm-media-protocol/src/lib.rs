@@ -4,6 +4,8 @@
 //! Network-facing code must construct these types before contacting a broker;
 //! each broker must validate its wire request again before touching hardware.
 
+use std::collections::VecDeque;
+
 pub const WIRE_MAGIC: [u8; 4] = *b"CKM3";
 pub const WIRE_VERSION: u8 = 1;
 pub const WIRE_HEADER_BYTES: usize = 12;
@@ -16,6 +18,13 @@ pub const MAX_AUDIO_DURATION_MS: u32 = 10_000;
 pub const MAX_PLAYBACK_VOLUME_PERCENT: u8 = 70;
 pub const MAX_READ_ONLY_MEDIA_BYTES: u64 = 8 * 1024 * 1024 * 1024;
 
+pub const STREAM_MAGIC: [u8; 4] = *b"OXFR";
+pub const STREAM_MAGIC_LEGACY: [u8; 4] = *b"CKFR";
+pub const STREAM_FRAME_HEADER_BYTES: usize = 64;
+pub const MAX_STREAM_LEASE_MS: u32 = 60_000;
+pub const DEFAULT_STREAM_LEASE_MS: u32 = 10_000;
+pub const MAX_RING_BUFFER_FRAMES: usize = 4;
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[repr(u8)]
 pub enum Operation {
@@ -23,6 +32,7 @@ pub enum Operation {
     AttachReadOnlyMedia = 2,
     DetachMedia = 3,
     SnapshotFrame = 4,
+    StreamFrame = 5,
     CapturePcm = 16,
     PlayPcm = 17,
     StopAudio = 18,
@@ -37,6 +47,7 @@ impl TryFrom<u8> for Operation {
             2 => Ok(Self::AttachReadOnlyMedia),
             3 => Ok(Self::DetachMedia),
             4 => Ok(Self::SnapshotFrame),
+            5 => Ok(Self::StreamFrame),
             16 => Ok(Self::CapturePcm),
             17 => Ok(Self::PlayPcm),
             18 => Ok(Self::StopAudio),
@@ -302,6 +313,290 @@ impl VideoSnapshot {
             text.push(char::from(HEX[usize::from(byte & 0x0f)]));
         }
         text
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct StreamFrameHeader {
+    pub sequence: u32,
+    pub timestamp_ms: u64,
+    pub width: u16,
+    pub height: u16,
+    pub format: SnapshotFormat,
+    pub flags: u8,
+    pub payload_bytes: u32,
+    pub sha256: [u8; 32],
+}
+
+impl StreamFrameHeader {
+    /// Create and validate a stream frame header.
+    ///
+    /// # Errors
+    /// Rejects zero/oversized dimensions or byte lengths exceeding [`MAX_SNAPSHOT_BYTES`].
+    pub fn new(
+        sequence: u32,
+        timestamp_ms: u64,
+        width: u16,
+        height: u16,
+        format: SnapshotFormat,
+        payload_bytes: u32,
+        sha256: [u8; 32],
+    ) -> Result<Self, ValidationError> {
+        if width == 0 || height == 0 || width > MAX_WIDTH || height > MAX_HEIGHT {
+            return Err(ValidationError::InvalidDimensions);
+        }
+        let len = usize::try_from(payload_bytes).map_err(|_| ValidationError::InvalidLength)?;
+        if len == 0 || len > MAX_SNAPSHOT_BYTES {
+            return Err(ValidationError::InvalidLength);
+        }
+        Ok(Self {
+            sequence,
+            timestamp_ms,
+            width,
+            height,
+            format,
+            flags: 0,
+            payload_bytes,
+            sha256,
+        })
+    }
+
+    /// Encode into fixed 64-byte binary header.
+    #[must_use]
+    pub const fn encode(self) -> [u8; STREAM_FRAME_HEADER_BYTES] {
+        let mut out = [0_u8; STREAM_FRAME_HEADER_BYTES];
+        out[0] = STREAM_MAGIC[0];
+        out[1] = STREAM_MAGIC[1];
+        out[2] = STREAM_MAGIC[2];
+        out[3] = STREAM_MAGIC[3];
+        let seq = self.sequence.to_be_bytes();
+        out[4] = seq[0];
+        out[5] = seq[1];
+        out[6] = seq[2];
+        out[7] = seq[3];
+        let ts = self.timestamp_ms.to_be_bytes();
+        out[8] = ts[0];
+        out[9] = ts[1];
+        out[10] = ts[2];
+        out[11] = ts[3];
+        out[12] = ts[4];
+        out[13] = ts[5];
+        out[14] = ts[6];
+        out[15] = ts[7];
+        let w = self.width.to_be_bytes();
+        out[16] = w[0];
+        out[17] = w[1];
+        let h = self.height.to_be_bytes();
+        out[18] = h[0];
+        out[19] = h[1];
+        out[20] = self.format as u8;
+        out[21] = self.flags;
+        out[22] = 0; // reserved
+        out[23] = 0; // reserved
+        let len = self.payload_bytes.to_be_bytes();
+        out[24] = len[0];
+        out[25] = len[1];
+        out[26] = len[2];
+        out[27] = len[3];
+        out[28] = 0; // reserved2
+        out[29] = 0;
+        out[30] = 0;
+        out[31] = 0;
+        let mut idx = 0;
+        while idx < 32 {
+            out[32 + idx] = self.sha256[idx];
+            idx += 1;
+        }
+        out
+    }
+
+    /// Decode and validate a fixed 64-byte header.
+    ///
+    /// # Errors
+    /// Rejects bad magic, non-zero flags/reserved bytes, or out-of-range dimensions/payloads.
+    pub fn decode(bytes: [u8; STREAM_FRAME_HEADER_BYTES]) -> Result<Self, ValidationError> {
+        if bytes[..4] != STREAM_MAGIC && bytes[..4] != STREAM_MAGIC_LEGACY {
+            return Err(ValidationError::BadMagic);
+        }
+        let sequence = u32::from_be_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]);
+        let timestamp_ms = u64::from_be_bytes([
+            bytes[8], bytes[9], bytes[10], bytes[11], bytes[12], bytes[13], bytes[14], bytes[15],
+        ]);
+        let width = u16::from_be_bytes([bytes[16], bytes[17]]);
+        let height = u16::from_be_bytes([bytes[18], bytes[19]]);
+        let format = SnapshotFormat::try_from(bytes[20])?;
+        let flags = bytes[21];
+        if flags != 0 || bytes[22] != 0 || bytes[23] != 0 || bytes[28..32] != [0, 0, 0, 0] {
+            return Err(ValidationError::NonZeroFlags);
+        }
+        let payload_bytes = u32::from_be_bytes([bytes[24], bytes[25], bytes[26], bytes[27]]);
+        let mut sha256 = [0_u8; 32];
+        sha256.copy_from_slice(&bytes[32..64]);
+        Self::new(
+            sequence,
+            timestamp_ms,
+            width,
+            height,
+            format,
+            payload_bytes,
+            sha256,
+        )
+    }
+
+    #[must_use]
+    pub fn sha256_hex(&self) -> String {
+        const HEX: &[u8; 16] = b"0123456789abcdef";
+        let mut text = String::with_capacity(64);
+        for byte in self.sha256 {
+            text.push(char::from(HEX[usize::from(byte >> 4)]));
+            text.push(char::from(HEX[usize::from(byte & 0x0f)]));
+        }
+        text
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct StreamFrame {
+    pub header: StreamFrameHeader,
+    pub payload: Vec<u8>,
+}
+
+impl StreamFrame {
+    /// Create a validated stream frame with owned buffer.
+    ///
+    /// # Errors
+    /// Returns [`ValidationError::InvalidLength`] if payload length does not match header.
+    pub fn new(header: StreamFrameHeader, payload: Vec<u8>) -> Result<Self, ValidationError> {
+        let expected =
+            usize::try_from(header.payload_bytes).map_err(|_| ValidationError::InvalidLength)?;
+        if payload.len() != expected {
+            return Err(ValidationError::InvalidLength);
+        }
+        Ok(Self { header, payload })
+    }
+
+    pub fn zeroize(&mut self) {
+        self.payload.fill(0);
+    }
+}
+
+impl Drop for StreamFrame {
+    fn drop(&mut self) {
+        self.zeroize();
+    }
+}
+
+#[derive(Debug)]
+pub struct BoundedFrameRing {
+    capacity: usize,
+    frames: VecDeque<StreamFrame>,
+    dropped_frames_count: u64,
+}
+
+impl BoundedFrameRing {
+    #[must_use]
+    pub fn new(capacity: usize) -> Self {
+        let cap = capacity.clamp(1, MAX_RING_BUFFER_FRAMES);
+        Self {
+            capacity: cap,
+            frames: VecDeque::with_capacity(cap),
+            dropped_frames_count: 0,
+        }
+    }
+
+    pub fn push(&mut self, frame: StreamFrame) -> bool {
+        let mut dropped = false;
+        if self.frames.len() >= self.capacity {
+            if let Some(mut old) = self.frames.pop_front() {
+                old.payload.fill(0);
+                self.dropped_frames_count = self.dropped_frames_count.saturating_add(1);
+                dropped = true;
+            }
+        }
+        self.frames.push_back(frame);
+        dropped
+    }
+
+    pub fn pop(&mut self) -> Option<StreamFrame> {
+        self.frames.pop_front()
+    }
+
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.frames.len()
+    }
+
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.frames.is_empty()
+    }
+
+    #[must_use]
+    pub fn dropped_count(&self) -> u64 {
+        self.dropped_frames_count
+    }
+
+    pub fn clear(&mut self) {
+        for frame in &mut self.frames {
+            frame.payload.fill(0);
+        }
+        self.frames.clear();
+    }
+}
+
+impl Drop for BoundedFrameRing {
+    fn drop(&mut self) {
+        self.clear();
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct StreamSessionLease {
+    pub session_id: u64,
+    pub created_at_unix_ms: u64,
+    pub expires_at_unix_ms: u64,
+}
+
+impl StreamSessionLease {
+    /// Create a bounded streaming session lease.
+    ///
+    /// # Errors
+    /// Returns [`ValidationError::InvalidDeadline`] if duration is 0 or exceeds [`MAX_STREAM_LEASE_MS`].
+    pub fn new(
+        session_id: u64,
+        now_unix_ms: u64,
+        duration_ms: u32,
+    ) -> Result<Self, ValidationError> {
+        if duration_ms == 0 || duration_ms > MAX_STREAM_LEASE_MS {
+            return Err(ValidationError::InvalidDeadline);
+        }
+        let expires_at_unix_ms = now_unix_ms.saturating_add(u64::from(duration_ms));
+        Ok(Self {
+            session_id,
+            created_at_unix_ms: now_unix_ms,
+            expires_at_unix_ms,
+        })
+    }
+
+    #[must_use]
+    pub fn is_expired(&self, now_unix_ms: u64) -> bool {
+        now_unix_ms >= self.expires_at_unix_ms
+    }
+
+    /// Renew the lease duration.
+    ///
+    /// # Errors
+    /// Returns [`ValidationError::PolicyRejected`] if already expired,
+    /// or [`ValidationError::InvalidDeadline`] if duration is out of bounds.
+    pub fn renew(&mut self, now_unix_ms: u64, duration_ms: u32) -> Result<(), ValidationError> {
+        if self.is_expired(now_unix_ms) {
+            return Err(ValidationError::PolicyRejected);
+        }
+        if duration_ms == 0 || duration_ms > MAX_STREAM_LEASE_MS {
+            return Err(ValidationError::InvalidDeadline);
+        }
+        self.expires_at_unix_ms = now_unix_ms.saturating_add(u64::from(duration_ms));
+        Ok(())
     }
 }
 
@@ -677,5 +972,142 @@ mod tests {
         let yuv420 = VideoSnapshot::new(1920, 1080, SnapshotFormat::Yuv420p, 3_110_400, digest)
             .unwrap_or_else(|error| panic!("valid 1080p YUV420P snapshot failed: {error:?}"));
         assert_eq!(VideoSnapshot::decode(yuv420.encode()), Ok(yuv420));
+    }
+
+    #[test]
+    fn stream_frame_header_roundtrip_and_bounds() {
+        let digest = [0x7a_u8; 32];
+        let header = StreamFrameHeader::new(
+            42,
+            1_700_000_000_123,
+            1920,
+            1080,
+            SnapshotFormat::Yuv420p,
+            3_110_400,
+            digest,
+        )
+        .unwrap_or_else(|error| panic!("valid stream frame header failed: {error:?}"));
+        let encoded = header.encode();
+        assert_eq!(encoded.len(), STREAM_FRAME_HEADER_BYTES);
+        let decoded = StreamFrameHeader::decode(encoded)
+            .unwrap_or_else(|error| panic!("decoding stream frame header failed: {error:?}"));
+        assert_eq!(decoded, header);
+        assert_eq!(decoded.sha256_hex().len(), 64);
+
+        // Rejects out of bounds
+        assert_eq!(
+            StreamFrameHeader::new(0, 0, 1921, 1080, SnapshotFormat::Yuv420p, 3_110_400, digest),
+            Err(ValidationError::InvalidDimensions)
+        );
+        assert_eq!(
+            StreamFrameHeader::new(0, 0, 1920, 1080, SnapshotFormat::Yuv420p, 0, digest),
+            Err(ValidationError::InvalidLength)
+        );
+
+        // Rejects bad magic
+        let mut bad_magic = encoded;
+        bad_magic[0] = b'X';
+        assert_eq!(
+            StreamFrameHeader::decode(bad_magic),
+            Err(ValidationError::BadMagic)
+        );
+
+        // Rejects non-zero flags
+        let mut bad_flags = encoded;
+        bad_flags[21] = 1;
+        assert_eq!(
+            StreamFrameHeader::decode(bad_flags),
+            Err(ValidationError::NonZeroFlags)
+        );
+    }
+
+    #[test]
+    fn stream_frame_drop_zeroizes_payload() {
+        let digest = [0x11_u8; 32];
+        let header = StreamFrameHeader::new(1, 100, 1920, 1080, SnapshotFormat::Yuv420p, 8, digest)
+            .unwrap_or_else(|e| panic!("{e:?}"));
+        let buf = vec![0xaa_u8; 8];
+        let mut frame = StreamFrame::new(header, buf).unwrap_or_else(|e| panic!("{e:?}"));
+        assert_eq!(frame.payload[0], 0xaa);
+        frame.zeroize();
+        assert_eq!(frame.payload, vec![0_u8; 8]);
+    }
+
+    #[test]
+    fn bounded_frame_ring_backpressure_eviction() {
+        let digest = [0x22_u8; 32];
+        let header1 =
+            StreamFrameHeader::new(1, 100, 1920, 1080, SnapshotFormat::Yuv420p, 4, digest)
+                .unwrap_or_else(|e| panic!("{e:?}"));
+        let header2 =
+            StreamFrameHeader::new(2, 200, 1920, 1080, SnapshotFormat::Yuv420p, 4, digest)
+                .unwrap_or_else(|e| panic!("{e:?}"));
+        let header3 =
+            StreamFrameHeader::new(3, 300, 1920, 1080, SnapshotFormat::Yuv420p, 4, digest)
+                .unwrap_or_else(|e| panic!("{e:?}"));
+
+        let mut ring = BoundedFrameRing::new(2);
+        assert_eq!(ring.len(), 0);
+        assert!(ring.is_empty());
+
+        let dropped1 = ring
+            .push(StreamFrame::new(header1, vec![1, 1, 1, 1]).unwrap_or_else(|e| panic!("{e:?}")));
+        assert!(!dropped1);
+        assert_eq!(ring.len(), 1);
+
+        let dropped2 = ring
+            .push(StreamFrame::new(header2, vec![2, 2, 2, 2]).unwrap_or_else(|e| panic!("{e:?}")));
+        assert!(!dropped2);
+        assert_eq!(ring.len(), 2);
+
+        // Ring is full (capacity 2). Pushing frame 3 evicts frame 1!
+        let dropped3 = ring
+            .push(StreamFrame::new(header3, vec![3, 3, 3, 3]).unwrap_or_else(|e| panic!("{e:?}")));
+        assert!(dropped3);
+        assert_eq!(ring.len(), 2);
+        assert_eq!(ring.dropped_count(), 1);
+
+        // Popping yields frame 2, then frame 3
+        let pop1 = ring.pop().unwrap_or_else(|| panic!("expected frame 2"));
+        assert_eq!(pop1.header.sequence, 2);
+        assert_eq!(pop1.payload, vec![2, 2, 2, 2]);
+
+        let pop2 = ring.pop().unwrap_or_else(|| panic!("expected frame 3"));
+        assert_eq!(pop2.header.sequence, 3);
+        assert_eq!(pop2.payload, vec![3, 3, 3, 3]);
+
+        assert!(ring.pop().is_none());
+        assert!(ring.is_empty());
+    }
+
+    #[test]
+    fn stream_session_lease_lifecycle() {
+        let lease = StreamSessionLease::new(101, 1_000, 5_000).unwrap_or_else(|e| panic!("{e:?}"));
+        assert_eq!(lease.session_id, 101);
+        assert!(!lease.is_expired(1_000));
+        assert!(!lease.is_expired(5_999));
+        assert!(lease.is_expired(6_000));
+
+        let mut renewable = lease;
+        assert!(renewable.renew(4_000, 3_000).is_ok());
+        assert_eq!(renewable.expires_at_unix_ms, 7_000);
+        assert!(!renewable.is_expired(6_500));
+        assert!(renewable.is_expired(7_000));
+
+        // Cannot renew expired lease
+        assert_eq!(
+            renewable.renew(7_000, 1_000),
+            Err(ValidationError::PolicyRejected)
+        );
+
+        // Cannot create zero or oversized lease
+        assert_eq!(
+            StreamSessionLease::new(1, 100, 0),
+            Err(ValidationError::InvalidDeadline)
+        );
+        assert_eq!(
+            StreamSessionLease::new(1, 100, MAX_STREAM_LEASE_MS + 1),
+            Err(ValidationError::InvalidDeadline)
+        );
     }
 }

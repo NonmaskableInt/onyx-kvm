@@ -14,9 +14,10 @@ use onyx_kvm_mcp::{
     authenticate_http_request, bearer_challenge, protected_resource_metadata,
 };
 use onyx_kvm_media_protocol::{
-    AUDIO_REQUEST_BYTES, CAPTURE_METRICS_BYTES, CaptureMetrics, Operation, PLAYBACK_RECEIPT_BYTES,
-    PcmShape, PlaybackReceipt, SNAPSHOT_RESPONSE_BYTES, SnapshotFormat, SnapshotRequest,
-    VideoSnapshot, WIRE_HEADER_BYTES, WireHeader,
+    AUDIO_REQUEST_BYTES, BoundedFrameRing, CAPTURE_METRICS_BYTES, CaptureMetrics,
+    DEFAULT_STREAM_LEASE_MS, Operation, PLAYBACK_RECEIPT_BYTES, PcmShape, PlaybackReceipt,
+    SNAPSHOT_RESPONSE_BYTES, SnapshotFormat, SnapshotRequest, StreamFrame, StreamFrameHeader,
+    StreamSessionLease, VideoSnapshot, WIRE_HEADER_BYTES, WireHeader,
 };
 use rustls::{
     ServerConfig, ServerConnection, StreamOwned,
@@ -309,6 +310,11 @@ fn handle(
     {
         return handle_video_frame(stream, config, issuer_key, &request);
     }
+    if request.method == "GET"
+        && (request.path == "/video/stream" || request.path.starts_with("/video/stream?"))
+    {
+        return handle_video_stream(stream, config, issuer_key, &request);
+    }
     if request.method == "GET" {
         return match request.path.as_str() {
             "/" => respond(stream, 200, "text/html; charset=utf-8", INDEX_HTML, None),
@@ -432,6 +438,151 @@ fn handle_video_frame(
     let result = respond_frame(stream, &snapshot, &frame_bytes);
     frame_bytes.fill(0);
     result
+}
+
+fn handle_video_stream(
+    stream: &mut StreamOwned<ServerConnection, TcpStream>,
+    config: &Config,
+    issuer_key: &[u8],
+    request: &Request,
+) -> io::Result<()> {
+    if !Path::new(VIDEO_ENABLED_PATH).exists() {
+        return respond(stream, 403, "text/plain", b"video disabled", None);
+    }
+    let validator = Ed25519JwtValidator::new(&config.issuer, issuer_key);
+    let claims = match authenticate_http_request(
+        request.origin.as_deref(),
+        request.authorization.as_deref(),
+        &config.origin,
+        &validator,
+    ) {
+        Ok(claims) => claims,
+        Err(HttpRequestAuthError::Boundary(HttpAuthError::InvalidOrigin)) => {
+            return respond(stream, 403, "text/plain", b"forbidden", None);
+        }
+        Err(_) => return unauthorized(stream),
+    };
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(io::Error::other)?
+        .as_secs();
+    let valid_aud = config
+        .resource
+        .split(',')
+        .any(|expected| expected.trim() == claims.audience);
+    if !valid_aud || claims.expires_at_unix_seconds < now {
+        return unauthorized(stream);
+    }
+    if !claims.scopes.contains(&Scope::Video) {
+        return unauthorized(stream);
+    }
+    let format = if request.path.contains("format=yuv422p") {
+        SnapshotFormat::Yuv422p
+    } else {
+        SnapshotFormat::Yuv420p
+    };
+    let Ok(snapshot_request) = SnapshotRequest::new(1920, 1080, format, 5000) else {
+        return respond(stream, 500, "text/plain", b"invalid snapshot request", None);
+    };
+
+    write!(
+        stream,
+        concat!(
+            "HTTP/1.1 200 OK\r\n",
+            "Content-Type: application/octet-stream\r\n",
+            "Cache-Control: no-store, no-cache, must-revalidate\r\n",
+            "Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'\r\n",
+            "Permissions-Policy: camera=(), geolocation=(), microphone=()\r\n",
+            "Referrer-Policy: no-referrer\r\n",
+            "X-Content-Type-Options: nosniff\r\n",
+            "X-Frame-Options: DENY\r\n",
+            "Connection: close\r\n\r\n"
+        )
+    )?;
+    stream.flush()?;
+
+    stream_frames_loop(stream, snapshot_request, claims.expires_at_unix_seconds)
+}
+
+fn stream_frames_loop(
+    stream: &mut StreamOwned<ServerConnection, TcpStream>,
+    snapshot_request: SnapshotRequest,
+    token_expiry: u64,
+) -> io::Result<()> {
+    let now_ms = u64::try_from(
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(io::Error::other)?
+            .as_millis(),
+    )
+    .map_err(io::Error::other)?;
+    let mut lease = StreamSessionLease::new(1, now_ms, DEFAULT_STREAM_LEASE_MS)
+        .map_err(|_| invalid("invalid stream lease"))?;
+    let mut ring = BoundedFrameRing::new(2);
+    let mut sequence = 0_u32;
+
+    loop {
+        if !Path::new(VIDEO_ENABLED_PATH).exists() {
+            break;
+        }
+        let current_now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(io::Error::other)?;
+        let current_secs = current_now.as_secs();
+        let current_ms = u64::try_from(current_now.as_millis()).map_err(io::Error::other)?;
+        if current_secs >= token_expiry || lease.is_expired(current_ms) {
+            break;
+        }
+
+        let (snapshot, frame_bytes) = match BrokerVideo::capture_frame(snapshot_request) {
+            Ok(res) => res,
+            Err(err) => {
+                eprintln!("failed to capture video frame in stream: {err}");
+                break;
+            }
+        };
+
+        let Ok(header) = StreamFrameHeader::new(
+            sequence,
+            current_ms,
+            snapshot.width,
+            snapshot.height,
+            snapshot.format,
+            snapshot.byte_length,
+            snapshot.sha256,
+        ) else {
+            break;
+        };
+
+        let Ok(frame) = StreamFrame::new(header, frame_bytes) else {
+            break;
+        };
+
+        ring.push(frame);
+
+        if let Some(mut to_send) = ring.pop() {
+            let encoded_hdr = to_send.header.encode();
+            if stream.write_all(&encoded_hdr).is_err() {
+                to_send.zeroize();
+                break;
+            }
+            if stream.write_all(&to_send.payload).is_err() {
+                to_send.zeroize();
+                break;
+            }
+            if stream.flush().is_err() {
+                to_send.zeroize();
+                break;
+            }
+            to_send.zeroize();
+        }
+
+        sequence = sequence.wrapping_add(1);
+        let _ = lease.renew(current_ms, DEFAULT_STREAM_LEASE_MS);
+    }
+
+    ring.clear();
+    Ok(())
 }
 
 fn unauthorized<W: Write>(stream: &mut W) -> io::Result<()> {
@@ -624,6 +775,17 @@ mod tests {
     fn rejects_transfer_encoding() {
         let input = b"POST /mcp HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n";
         assert!(read_request(&mut Cursor::new(input)).is_err());
+    }
+
+    #[test]
+    fn parses_bounded_video_stream_request() {
+        let input = b"GET /video/stream?format=yuv420p HTTP/1.1\r\nOrigin: https://kvm\r\nAuthorization: Bearer token\r\n\r\n";
+        let request = read_request(&mut Cursor::new(input))
+            .unwrap_or_else(|error| panic!("unexpected parse error: {error}"));
+        assert_eq!(request.method, "GET");
+        assert_eq!(request.path, "/video/stream?format=yuv420p");
+        assert_eq!(request.origin, Some("https://kvm".to_string()));
+        assert_eq!(request.authorization, Some("Bearer token".to_string()));
     }
 
     #[test]

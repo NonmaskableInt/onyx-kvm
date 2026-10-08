@@ -403,13 +403,35 @@ against target hardware (`https://cleankvm-recovery:8443` on `192.168.2.105`):
 1. **Phase 4.1 Continuous Media & Low-Latency Streaming Sessions**:
    - Implement short-lived, authenticated continuous streaming sessions with
      explicit leases, bounded ring buffers, backpressure drop policy, and
-     zero-residual memory erasure.
-   - Low-overhead binary stream transport (chunked frame stream or binary WebSocket)
-     with sequence numbering and frame integrity digests.
+     zero-residual memory erasure. [IMPLEMENTED]
+   - Low-overhead binary stream transport delivering frames with sequence numbering,
+     timestamps, and integrity digests. [IMPLEMENTED]
 2. **Phase 4.2 Production Hardening & Rootfs Integrity**:
    - Read-only rootfs mount configuration with tmpfs overlays for `/run` and `/tmp`.
    - Production PKI enrollment and local pairing ceremony replacing development tokens.
    - Signed offline updates and A/B partition verification.
+
+### Phase 4.1: Continuous media streaming architecture & bounded ring buffers
+
+Milestone 4.6 implements low-overhead continuous media delivery in `onyx-kvmd` and `onyx-kvm-media-protocol`:
+1. **Cache-Aligned Wire Frame Header (`StreamFrameHeader`)**:
+   - 64-byte binary packet header (matching CPU cache-line alignment): magic `OXFR` (`0x4F584652`), big-endian sequence number `u32`, capture timestamp `u64` (unix milliseconds), frame dimensions (`u16 x u16`), pixel format `u8`, flags `u8`, payload byte length `u32`, and SHA-256 payload digest (`[u8; 32]`).
+   - Bit-for-bit validated encode/decode with strict rejection of non-zero flags and reserved padding bytes.
+2. **Bounded Ring Buffer with Backpressure & Zero-Residual Erasure (`BoundedFrameRing`)**:
+   - Capacity-bounded frame queue (depth 2) decoupling frame capture from network transmission.
+   - Backpressure frame-drop policy: when client network throughput lags, oldest unconsumed frames are evicted so the consumer always receives the lowest-latency frame.
+   - Zero-residual memory erasure: every `StreamFrame` implements `Drop` and `zeroize()`, unconditionally wiping frame pixel memory (`payload.fill(0)`) upon eviction, completion, or error.
+3. **Sliding Session Lease (`StreamSessionLease`)**:
+   - Explicit session lease duration (`DEFAULT_STREAM_LEASE_MS = 10,000`, `MAX_STREAM_LEASE_MS = 60,000`) requiring active client engagement and valid JWT scope (`Scope::Video`).
+   - Sliding lease renewal on successful frame delivery; auto-expiring if client stalls or fails to heartbeat.
+4. **Continuous Binary Streaming Endpoint (`GET /video/stream`)**:
+   - Authenticated HTTPS endpoint in `onyx-kvmd` streaming consecutive binary frame packets over a persistent TLS connection.
+   - Fail-closed gate enforcement: checks `/run/onyx-kvm/video-enabled` on every frame iteration; immediately breaks and clears ring memory if gate is removed.
+   - Clean client disconnect handling (`BrokenPipe` / `ConnectionReset`) immediately stopping capture and releasing broker resources.
+5. **Web Console Streaming Client**:
+   - Replaced polling `fetchFrame` loop with persistent `GET /video/stream` consumer using `ReadableStream` and `AbortController`.
+   - Assembles binary chunks across stream boundaries, parses 64-byte `StreamFrameHeader`, and renders live frames to WebGL canvas.
+   - Immediate cancellation upon "Stop stream" button click, navigation, or `pagehide`.
 
 ### Product release image v59: Onyx KVM rebranding and product assembly
 
