@@ -146,20 +146,21 @@ function initWebGL(canvas) {
     gl.vertexAttribPointer(aTex, 2, gl.FLOAT, false, 16, 8);
   }
 
-  function makeTex() {
+  function makeTex(filter) {
+    const f = filter || gl.LINEAR;
     const t = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D, t);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, f);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, f);
     return t;
   }
 
-  const texUyvy = makeTex();
-  const texY = makeTex();
-  const texU = makeTex();
-  const texV = makeTex();
+  const texUyvy = makeTex(gl.NEAREST);
+  const texY = makeTex(gl.LINEAR);
+  const texU = makeTex(gl.LINEAR);
+  const texV = makeTex(gl.LINEAR);
 
   return {
     gl,
@@ -206,18 +207,21 @@ function renderCanvas2D(canvas, u8Array, width, height) {
   ctx.putImageData(imgData, 0, 0);
 }
 
-function renderCanvas2DYuv420p(canvas, u8Array, width, height) {
+function renderCanvas2DYuv(canvas, u8Array, width, height, is422) {
   const ctx = canvas.getContext('2d');
   const imgData = ctx.createImageData(width, height);
   const data32 = new Uint32Array(imgData.data.buffer);
   const yLen = width * height;
   const uvStride = width >> 1;
+  const uvHeight = is422 ? height : (height >> 1);
+  const uvLen = uvStride * uvHeight;
   const uOffset = yLen;
-  const vOffset = yLen + (yLen >> 2);
+  const vOffset = yLen + uvLen;
+  if (u8Array.byteLength < vOffset + uvLen) return;
   let dst = 0;
   for (let y = 0; y < height; ++y) {
     const yRow = y * width;
-    const uvRow = (y >> 1) * uvStride;
+    const uvRow = (is422 ? y : (y >> 1)) * uvStride;
     for (let x = 0; x < width; ++x) {
       const yVal = u8Array[yRow + x];
       const uvIdx = uvRow + (x >> 1);
@@ -261,7 +265,7 @@ function renderUyvy(canvas, u8Array, width, height) {
   }
 }
 
-function renderYuv420p(canvas, u8Array, width, height) {
+function renderYuvPlanar(canvas, u8Array, width, height, is422) {
   if (canvas.width !== width || canvas.height !== height) {
     canvas.width = width;
     canvas.height = height;
@@ -269,19 +273,20 @@ function renderYuv420p(canvas, u8Array, width, height) {
   if (!glState) {
     glState = initWebGL(canvas);
   }
+  const yLen = width * height;
+  const uvStride = width >> 1;
+  const uvHeight = is422 ? height : (height >> 1);
+  const uvLen = uvStride * uvHeight;
+  const uOffset = yLen;
+  const vOffset = yLen + uvLen;
+  if (u8Array.byteLength < vOffset + uvLen) return;
+
   if (glState && glState.progYuv) {
     const { gl, progYuv, texY, texU, texV, uYLoc, uULLoc, uVLoc, setupAttribs } = glState;
     gl.viewport(0, 0, width, height);
     gl.useProgram(progYuv);
     setupAttribs(progYuv);
     gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
-
-    const yLen = width * height;
-    const uvStride = width >> 1;
-    const uvHeight = height >> 1;
-    const uvLen = uvStride * uvHeight;
-    const uOffset = yLen;
-    const vOffset = yLen + uvLen;
 
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, texY);
@@ -300,16 +305,12 @@ function renderYuv420p(canvas, u8Array, width, height) {
 
     gl.drawArrays(gl.TRIANGLES, 0, 6);
   } else {
-    renderCanvas2DYuv420p(canvas, u8Array, width, height);
+    renderCanvas2DYuv(canvas, u8Array, width, height, is422);
   }
 }
 
 function renderFrame(canvas, u8Array, width, height, format) {
-  if (format === 'yuv420p' || u8Array.byteLength === Math.floor(width * height * 1.5)) {
-    renderYuv420p(canvas, u8Array, width, height);
-  } else {
-    renderUyvy(canvas, u8Array, width, height);
-  }
+  renderUyvy(canvas, u8Array, width, height);
 }
 
 let streaming = false;
@@ -330,7 +331,7 @@ async function toggleStream() {
   streamAbort = new AbortController();
   const signal = streamAbort.signal;
   try {
-    const response = await fetch('/video/stream', {
+    const response = await fetch('/video/stream?format=yuv422p', {
       headers: {'Authorization': `Bearer ${token}`},
       signal: signal,
     });
@@ -474,20 +475,20 @@ async function initSession() {
 }
 
 async function snapshot() {
-  const result = await mcp('tools/call', {name:'kvm.video.snapshot',arguments:{format:'yuv420p',deadlineMs:5000}});
+  const result = await mcp('tools/call', {name:'kvm.video.snapshot',arguments:{format:'yuv422p',deadlineMs:5000}});
   byId('snapshot-result').textContent = JSON.stringify(result.structuredContent, null, 2);
 }
 
 async function fetchFrame() {
   byId('snapshot-result').textContent = 'Fetching live frame from /video/frame...';
-  const response = await fetch('/video/frame', {
+  const response = await fetch('/video/frame?format=yuv422p', {
     headers: {'Authorization': `Bearer ${token}`}
   });
   if (!response.ok) throw new Error(`Frame request rejected (${response.status})`);
   const digest = response.headers.get('X-Frame-Digest') || '';
   const width = parseInt(response.headers.get('X-Frame-Width') || '1920', 10);
   const height = parseInt(response.headers.get('X-Frame-Height') || '1080', 10);
-  const format = response.headers.get('X-Frame-Format') || 'yuv420p';
+  const format = response.headers.get('X-Frame-Format') || 'yuv422p';
   const buffer = await response.arrayBuffer();
   renderFrame(byId('kvm-canvas'), new Uint8Array(buffer), width, height, format);
   byId('snapshot-result').textContent = JSON.stringify({

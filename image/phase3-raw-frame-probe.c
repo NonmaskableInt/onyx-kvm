@@ -234,8 +234,8 @@ int main(int argc, char **argv)
 	int stream_mode = 0;
 	struct sigaction sa;
 
-	if (argc > 7) {
-		fprintf(stderr, "usage: %s [lane-profile-0..%zu] [height] [hs_settle] [pn_swap] [lane_id] [mode]\n", argv[0],
+	if (argc > 8) {
+		fprintf(stderr, "usage: %s [lane-profile-0..%zu] [height] [hs_settle] [pn_swap] [lane_id] [mode] [output]\n", argv[0],
 			sizeof(lane_profiles) / sizeof(lane_profiles[0]) - 1);
 		return 2;
 	}
@@ -282,9 +282,12 @@ int main(int argc, char **argv)
 		} else if (strcmp(argv[6], "oneshot") == 0) {
 			stream_mode = 0;
 		} else {
-			fprintf(stderr, "invalid mode: %s\n", argv[6]);
-			return 2;
+			output = argv[6];
+			stream_mode = 0;
 		}
+	}
+	if (argc >= 8 && argv[7][0]) {
+		output = argv[7];
 	}
 	memset(&sa, 0, sizeof(sa));
 	sa.sa_handler = handle_sig;
@@ -297,7 +300,7 @@ int main(int argc, char **argv)
 	}
 	vb.u32MaxPoolCnt = 1;
 	vb.astCommPool[0].u32BlkSize = COMMON_GetPicBufferSize(
-		WIDTH, HEIGHT, PIXEL_FORMAT_YUV_PLANAR_422, DATA_BITWIDTH_8,
+		WIDTH, HEIGHT, PIXEL_FORMAT_UYVY, DATA_BITWIDTH_8,
 		COMPRESS_MODE_NONE, DEFAULT_ALIGN);
 	vb.astCommPool[0].u32BlkCnt = 4;
 	vb.astCommPool[0].enRemapMode = VB_REMAP_MODE_CACHED;
@@ -461,7 +464,7 @@ int main(int argc, char **argv)
 	pipe.bIspBypass = CVI_TRUE;
 	pipe.u32MaxW = WIDTH;
 	pipe.u32MaxH = HEIGHT;
-	pipe.enPixFmt = PIXEL_FORMAT_YUV_PLANAR_422;
+	pipe.enPixFmt = PIXEL_FORMAT_UYVY;
 	pipe.enCompressMode = COMPRESS_MODE_NONE;
 	pipe.enBitWidth = DATA_BITWIDTH_8;
 	pipe.bNrEn = CVI_FALSE;
@@ -478,7 +481,7 @@ int main(int argc, char **argv)
 
 	chn.stSize.u32Width = WIDTH;
 	chn.stSize.u32Height = target_height;
-	chn.enPixelFormat = PIXEL_FORMAT_YUV_PLANAR_422;
+	chn.enPixelFormat = PIXEL_FORMAT_UYVY;
 	chn.enDynamicRange = DYNAMIC_RANGE_SDR8;
 	chn.enVideoFormat = VIDEO_FORMAT_LINEAR;
 	chn.enCompressMode = COMPRESS_MODE_NONE;

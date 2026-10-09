@@ -182,12 +182,20 @@ fn serve(mut stream: UnixStream, config: &Config) -> io::Result<()> {
         let (snapshot, mut bytes) = if let Some(ref mut probe) = streaming_probe {
             match probe.capture_frame() {
                 Ok(bytes) => {
+                    eprintln!(
+                        "onyx-kvm-video-broker: captured frame bytes={}, requested format={:?}",
+                        bytes.len(),
+                        request.format
+                    );
                     let snapshot = summarize_frame_fast(
                         &bytes,
                         request.format,
                         operation != Operation::StreamFrame,
                     )
                     .map_err(|error| {
+                        eprintln!(
+                            "onyx-kvm-video-broker: summarize_frame_fast failed: {error:?}"
+                        );
                         io::Error::new(io::ErrorKind::InvalidData, error.to_string())
                     })?;
                     (snapshot, bytes)
@@ -342,7 +350,7 @@ fn capture_frame_payload(
     remove_if_exists(Path::new("/run/cleankvm-frame.yuv422p"))?;
     let probe_bin = resolve_probe_bin(config);
     let status = Command::new(probe_bin)
-        .args(["0", "1080", "8", "0,0,0,0,0", "2,4,3,1,0"])
+        .args(["0", "1080", "8", "0,0,0,0,0", "2,4,3,1,0", "oneshot"])
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())

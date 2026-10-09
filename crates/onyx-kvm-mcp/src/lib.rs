@@ -850,7 +850,7 @@ fn audio_tool(name: &str, title: &str, read_only: bool) -> Value {
 
 fn parse_snapshot_arguments(arguments: Option<&Value>) -> Option<SnapshotRequest> {
     let Some(arguments) = arguments else {
-        return SnapshotRequest::new(1920, 1080, SnapshotFormat::Yuv420p, 5_000).ok();
+        return SnapshotRequest::new(1920, 1080, SnapshotFormat::Yuv422p, 5_000).ok();
     };
     let object = arguments.as_object()?;
     for key in object.keys() {
@@ -874,7 +874,7 @@ fn parse_snapshot_arguments(arguments: Option<&Value>) -> Option<SnapshotRequest
             "yuv420p" => SnapshotFormat::Yuv420p,
             _ => return None,
         },
-        None => SnapshotFormat::Yuv420p,
+        None => SnapshotFormat::Yuv422p,
     };
     let deadline_ms = match object.get("deadlineMs") {
         Some(value) => u16::try_from(value.as_u64()?).ok()?,
@@ -1526,15 +1526,15 @@ mod tests {
         );
         assert_eq!(
             default_snapshot["result"]["structuredContent"]["format"],
-            "yuv420p"
+            "yuv422p"
         );
         assert_eq!(
             default_snapshot["result"]["structuredContent"]["byteLength"],
-            3_110_400
+            4_147_200
         );
         assert_eq!(
             video.last_request.get().map(|request| request.format),
-            Some(SnapshotFormat::Yuv420p)
+            Some(SnapshotFormat::Yuv422p)
         );
 
         let invalid = response(

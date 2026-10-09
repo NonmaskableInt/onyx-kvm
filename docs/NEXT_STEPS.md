@@ -2857,3 +2857,33 @@ A strictly sequential investigation was performed around `pn_swap=0,0,1,0,0`:
   - **Concurrent Responsiveness**: Submitting MCP requests (`initialize`, `kvm.status`) during active 1080p streaming completes in **35 ms**.
   - **Fail-Closed Invariants**: Upon stream disconnect or video gate removal, the probe terminates cleanly, `lsmod` is completely empty, and kernel taint returns to baseline clean state (`Tainted: G`). All 56 workspace tests pass.
 
+### UYVY 1080p Full-Resolution Pipeline & WebGL Artifact Elimination (2026-10-09)
+- **Problem Statement**:
+  - The live video stream exhibited a severe green overlay and visible vertical striping/artifacting.
+  - Video was truncated vertically (rendered only 810 scanlines instead of 1080), leaving bottom scanlines unpopulated or corrupted.
+- **Root Cause Analysis**:
+  1. **Kernel Driver Format Coercion (NV21 Truncation)**:
+     - The Sophgo VI driver (`vi_sdk_layer.c:348`) has an internal hardcoded override:
+       `if (pstChnAttr->enPixelFormat == PIXEL_FORMAT_YUV_PLANAR_420 || pstChnAttr->enPixelFormat == PIXEL_FORMAT_YUV_PLANAR_422) pstChnAttr->enPixelFormat = PIXEL_FORMAT_NV21;`
+     - When `PIXEL_FORMAT_YUV_PLANAR_422` was configured, the kernel driver silently changed the channel format to semi-planar NV21 (1.5 bytes/pixel), allocating only 1920 x 1080 x 1.5 = 3,110,400 bytes instead of the full 1920 x 1080 x 2 = 4,147,200 bytes needed for 1080p UYVY.
+     - With a 3,110,400-byte buffer, only 3,110,400 / 3840 = 810 lines of packed UYVY were written, truncating the lower 270 lines.
+  2. **Packed UYVY Misrouted as Planar YUV (Green Tint)**:
+     - In bypass mode (`bIspBypass = CVI_TRUE, bYuvBypassPath = CVI_TRUE`), the SG2002 VI engine bypasses the ISP entirely and writes interleaved packed UYVY (4:2:2) directly from MIPI CSI-2.
+     - The browser frontend's `renderFrame` checked `format === 'yuv420p' || u8Array.byteLength === Math.floor(width * height * 1.5)` and dispatched to `renderYuvPlanar()`. Because the truncated buffer was exactly 3,110,400 bytes, packed UYVY data was interpreted as planar Y, U, and V channels. Alternating U and Y bytes became luminance, and trailing image data was decoded as chroma, resulting in a dominant green overlay and chaotic color distortion.
+  3. **WebGL Texture Filtering Striping (Artifacting)**:
+     - In `initWebGL`, the UYVY texture `texUyvy` was configured with `gl.LINEAR` filtering (`gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR)`).
+     - Because packed UYVY stores 2 pixels per RGBA texel (texture width = 960 for 1920 pixels), linear filtering interpolated between adjacent RGBA texels during sampling, blending chroma (U, V) and luma (Y0, Y1) across pixel boundaries and causing visible vertical striping artifacts.
+- **Implemented Fixes**:
+  1. **Probe Pipeline Configured to `PIXEL_FORMAT_UYVY` (`image/phase3-raw-frame-probe.c`)**:
+     - Configured `vb.astCommPool[0].u32BlkSize`, `pipe.enPixFmt`, and `chn.enPixelFormat` to `PIXEL_FORMAT_UYVY`.
+     - This bypasses the driver's NV21 override and allocates a single 4,147,200-byte buffer (`u32MainStride = 3840`), capturing all 1080 lines of 1920x1080 packed UYVY cleanly.
+  2. **WebGL Nearest Filtering (`crates/onyx-kvmd/src/web.rs`)**:
+     - Configured `makeTex(gl.NEAREST)` for `texUyvy`. This ensures texel coordinates sample exact discrete pixel pairs without color blending or striping.
+  3. **Frontend & Daemon Format Alignment**:
+     - Updated `renderFrame()` to route to `renderUyvy()`.
+     - Updated streaming and frame endpoints in `crates/onyx-kvmd/src/https.rs`, `crates/onyx-kvmd/src/web.rs`, and `crates/onyx-kvm-mcp/src/lib.rs` to request and default to `format=yuv422p` (4,147,200 bytes).
+- **Target Verification (`192.168.2.110`)**:
+  - `GET /video/frame?format=yuv422p` returned HTTP 200 with `Content-Length: 4147200`, `X-Frame-Width: 1920`, `X-Frame-Height: 1080`, `X-Frame-Format: yuv422p`.
+  - Offline frame decoding verified 100% crystal-clear macOS desktop rendering with natural color fidelity, zero green tint, full 1080p scanlines, and zero striping artifacts.
+  - All 41 workspace unit tests pass (`cargo test --workspace --locked`).
+

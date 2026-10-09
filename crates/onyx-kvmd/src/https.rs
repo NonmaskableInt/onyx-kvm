@@ -653,10 +653,10 @@ fn handle_video_frame(
     if !claims.scopes.contains(&Scope::Video) {
         return unauthorized(stream);
     }
-    let format = if request.path.contains("format=yuv422p") {
-        SnapshotFormat::Yuv422p
-    } else {
+    let format = if request.path.contains("format=yuv420p") {
         SnapshotFormat::Yuv420p
+    } else {
+        SnapshotFormat::Yuv422p
     };
     let Ok(snapshot_request) = SnapshotRequest::new(1920, 1080, format, 5000) else {
         return respond(stream, 500, "text/plain", b"invalid snapshot request", None);
@@ -709,10 +709,10 @@ fn handle_video_stream(
     if !claims.scopes.contains(&Scope::Video) {
         return unauthorized(stream);
     }
-    let format = if request.path.contains("format=yuv422p") {
-        SnapshotFormat::Yuv422p
-    } else {
+    let format = if request.path.contains("format=yuv420p") {
         SnapshotFormat::Yuv420p
+    } else {
+        SnapshotFormat::Yuv422p
     };
     let Ok(snapshot_request) = SnapshotRequest::new(1920, 1080, format, 5000) else {
         return respond(stream, 500, "text/plain", b"invalid snapshot request", None);

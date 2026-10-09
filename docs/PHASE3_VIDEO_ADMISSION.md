@@ -2213,3 +2213,36 @@ or speaker output.
   - Zero quarantine modules remained loaded (`MODULES=` empty).
   - Kernel taint: 4096.
 
+## UYVY 1080p full-resolution pipeline and WebGL artifact elimination (2026-10-09)
+
+### 1. Hardware & driver root-cause analysis
+
+1. **Kernel Driver NV21 Coercion**:
+   - In `vi_sdk_layer.c:348`, the Sophgo kernel driver executes:
+     `if (pstChnAttr->enPixelFormat == PIXEL_FORMAT_YUV_PLANAR_420 || pstChnAttr->enPixelFormat == PIXEL_FORMAT_YUV_PLANAR_422) pstChnAttr->enPixelFormat = PIXEL_FORMAT_NV21;`
+   - When channel format was set to `PIXEL_FORMAT_YUV_PLANAR_422`, the driver coerced it to NV21 (12-bit / 1.5 bytes per pixel), allocating only 3,110,400 bytes.
+   - For 1920x1080 packed UYVY requiring 4,147,200 bytes, this truncated frame output at 810 scanlines (3,110,400 / 3840 = 810).
+2. **Green Overlay Root Cause**:
+   - The VI pipeline runs in hardware bypass mode (`bIspBypass = CVI_TRUE, bYuvBypassPath = CVI_TRUE`), delivering raw packed UYVY (4:2:2) directly from MIPI.
+   - The web console mistook the 3,110,400-byte truncated buffer for planar YUV420P and routed it to `renderYuvPlanar()`, treating alternating U/Y bytes as luminance and image tail data as chroma.
+3. **WebGL Texture Interpolation Artifacting**:
+   - WebGL `initWebGL` used `gl.LINEAR` filtering on `texUyvy`. Because the UYVY texture is half-width (960 RGBA texels representing 1920 pixels with 2 pixels per texel), linear filtering interpolated between adjacent texels, blending discrete $U, Y_0, V, Y_1$ channels across pixel boundaries and creating vertical color striping.
+
+### 2. Implementation
+
+1. **Raw Frame Probe (`image/phase3-raw-frame-probe.c`)**:
+   - Configured `vb.astCommPool[0].u32BlkSize`, `pipe.enPixFmt`, and `chn.enPixelFormat` to `PIXEL_FORMAT_UYVY`.
+   - Bypasses the driver's NV21 coercion, allocating a single 4,147,200-byte plane with `u32MainStride = 3840` for full 1080p capture.
+2. **WebGL Nearest Filtering (`crates/onyx-kvmd/src/web.rs`)**:
+   - Updated `makeTex(gl.NEAREST)` for `texUyvy`, ensuring pixel-exact shader sampling with zero cross-texel interpolation.
+   - Updated `renderFrame()` to route to `renderUyvy()`.
+3. **Rust Workspace & MCP Alignment**:
+   - Defaulted frame capture endpoints and MCP tool arguments to `SnapshotFormat::Yuv422p` (4,147,200 bytes).
+
+### 3. Target hardware admission (`192.168.2.110`)
+
+- Captured live 1920x1080 frame: `Content-Length: 4147200`, `X-Frame-Width: 1920`, `X-Frame-Height: 1080`, `X-Frame-Format: yuv422p`.
+- Visual verification confirmed 100% natural color fidelity, zero green tint, full 1080 scanlines, and zero striping artifacts.
+- Zero residual modules at idle; taint intact; all tests pass.
+
+
