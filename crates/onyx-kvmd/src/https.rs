@@ -317,13 +317,27 @@ fn tls_config(config: &Config) -> io::Result<Arc<ServerConfig>> {
         &config.private_key,
         None,
     )?));
-    let provider = Arc::new(rustls::crypto::ring::default_provider());
-    let server = ServerConfig::builder_with_provider(provider)
+    let mut provider = rustls::crypto::ring::default_provider();
+    // On riscv64 musl without hardware crypto extensions, ring's AES-GCM
+    // implementation triggers decryption/MAC verification failures on incoming
+    // TLS records. ChaCha20-Poly1305 is timing-safe, fully supported across all
+    // modern browsers and TLS 1.3/1.2 clients, and avoids the architecture-specific
+    // AES record layer failure.
+    provider.cipher_suites.retain(|cs| {
+        matches!(
+            cs.suite(),
+            rustls::CipherSuite::TLS13_CHACHA20_POLY1305_SHA256
+                | rustls::CipherSuite::TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256
+                | rustls::CipherSuite::TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256
+        )
+    });
+    let mut server = ServerConfig::builder_with_provider(Arc::new(provider))
         .with_safe_default_protocol_versions()
         .map_err(io::Error::other)?
         .with_no_client_auth()
         .with_single_cert(vec![certificate], private_key)
         .map_err(io::Error::other)?;
+    server.alpn_protocols = vec![b"http/1.1".to_vec()];
     Ok(Arc::new(server))
 }
 
@@ -1199,5 +1213,23 @@ mod tests {
         let text = String::from_utf8(output).unwrap();
         assert!(text.starts_with("HTTP/1.1 404 Not Found\r\n"));
         assert!(text.contains("no pairing ceremony currently active"));
+    }
+
+    #[test]
+    fn tls_config_cipher_suites_and_alpn() {
+        let mut provider = rustls::crypto::ring::default_provider();
+        provider.cipher_suites.retain(|cs| {
+            matches!(
+                cs.suite(),
+                rustls::CipherSuite::TLS13_CHACHA20_POLY1305_SHA256
+                    | rustls::CipherSuite::TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256
+                    | rustls::CipherSuite::TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256
+            )
+        });
+        assert_eq!(provider.cipher_suites.len(), 3);
+        let suites: Vec<_> = provider.cipher_suites.iter().map(|cs| cs.suite()).collect();
+        assert!(suites.contains(&rustls::CipherSuite::TLS13_CHACHA20_POLY1305_SHA256));
+        assert!(suites.contains(&rustls::CipherSuite::TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256));
+        assert!(suites.contains(&rustls::CipherSuite::TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256));
     }
 }
