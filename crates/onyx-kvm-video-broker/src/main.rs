@@ -1,6 +1,6 @@
 use onyx_kvm_media_protocol::{Operation, SNAPSHOT_RESPONSE_BYTES, WireHeader};
 use onyx_kvm_video_broker::{
-    EXPECTED_YUV422P_1080P_BYTES, FRAME_LEN, decode_and_authorize, summarize_frame_fast,
+    FRAME_LEN, decode_and_authorize, summarize_frame_fast,
 };
 use std::env;
 use std::fs::{self, File, Permissions};
@@ -146,13 +146,7 @@ fn serve(mut stream: UnixStream, config: &Config) -> io::Result<()> {
     load_quarantine_modules(&config.module_dir)?;
 
     let probe_bin = resolve_probe_bin(config);
-    let mut streaming_probe = match StreamingProbe::spawn(probe_bin) {
-        Ok(p) => Some(p),
-        Err(err) => {
-            eprintln!("onyx-kvm-video-broker: streaming probe spawn note: {err}");
-            None
-        }
-    };
+    let mut streaming_probe: Option<StreamingProbe> = None;
 
     let mut is_first = true;
     loop {
@@ -179,12 +173,27 @@ fn serve(mut stream: UnixStream, config: &Config) -> io::Result<()> {
         let enabled = File::open(&config.enable).is_ok();
         let (operation, request) = decode_and_authorize(&frame, enabled)
             .map_err(|error| io::Error::new(io::ErrorKind::PermissionDenied, error.to_string()))?;
+        if streaming_probe
+            .as_ref()
+            .map_or(true, |p| p.width != request.width || p.height != request.height)
+        {
+            streaming_probe = match StreamingProbe::spawn(probe_bin, request.width, request.height)
+            {
+                Ok(p) => Some(p),
+                Err(err) => {
+                    eprintln!("onyx-kvm-video-broker: streaming probe spawn note: {err}");
+                    None
+                }
+            };
+        }
         let (snapshot, mut bytes) = if let Some(ref mut probe) = streaming_probe {
             match probe.capture_frame(request.format) {
                 Ok(bytes) => {
                     let snapshot = summarize_frame_fast(
                         &bytes,
                         request.format,
+                        request.width,
+                        request.height,
                         operation != Operation::StreamFrame,
                     )
                     .map_err(|error| {
@@ -203,6 +212,8 @@ fn serve(mut stream: UnixStream, config: &Config) -> io::Result<()> {
                     capture_frame_payload(
                         config,
                         request.format,
+                        request.width,
+                        request.height,
                         operation != Operation::StreamFrame,
                     )?
                 }
@@ -211,6 +222,8 @@ fn serve(mut stream: UnixStream, config: &Config) -> io::Result<()> {
             capture_frame_payload(
                 config,
                 request.format,
+                request.width,
+                request.height,
                 operation != Operation::StreamFrame,
             )?
         };
@@ -276,12 +289,15 @@ struct StreamingProbe {
     child: Child,
     stdin: ChildStdin,
     stdout: ChildStdout,
+    width: u16,
+    height: u16,
 }
 
 impl StreamingProbe {
-    fn spawn(probe_bin: &Path) -> io::Result<Self> {
+    fn spawn(probe_bin: &Path, width: u16, height: u16) -> io::Result<Self> {
+        let height_str = height.to_string();
         let mut child = Command::new(probe_bin)
-            .args(["0", "1080", "8", "0,0,0,0,0", "2,4,3,1,0", "stream"])
+            .args(["0", &height_str, "8", "0,0,0,0,0", "2,4,3,1,0", "stream"])
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
@@ -306,6 +322,8 @@ impl StreamingProbe {
             child,
             stdin,
             stdout,
+            width,
+            height,
         })
     }
 
@@ -343,6 +361,8 @@ impl Drop for StreamingProbe {
 fn capture_frame_payload(
     config: &Config,
     format: onyx_kvm_media_protocol::SnapshotFormat,
+    width: u16,
+    height: u16,
     compute_digest: bool,
 ) -> io::Result<(onyx_kvm_media_protocol::VideoSnapshot, Vec<u8>)> {
     remove_if_exists(&config.frame_path)?;
@@ -352,10 +372,11 @@ fn capture_frame_payload(
         .frame_path
         .to_str()
         .unwrap_or("/run/cleankvm-frame.yuv422p");
+    let height_str = height.to_string();
     let status = Command::new(probe_bin)
         .args([
             "0",
-            "1080",
+            &height_str,
             "8",
             "0,0,0,0,0",
             "2,4,3,1,0",
@@ -377,12 +398,13 @@ fn capture_frame_payload(
         config.frame_path.as_path()
     };
     let file = File::open(actual_frame_path)?;
-    let mut bytes = Vec::with_capacity(EXPECTED_YUV422P_1080P_BYTES);
-    file.take((EXPECTED_YUV422P_1080P_BYTES + 1) as u64)
+    let expected_bytes = usize::from(width) * usize::from(height) * 2;
+    let mut bytes = Vec::with_capacity(expected_bytes);
+    file.take((expected_bytes + 1) as u64)
         .read_to_end(&mut bytes)?;
     remove_if_exists(&config.frame_path)?;
     remove_if_exists(Path::new("/run/cleankvm-frame.yuv422p"))?;
-    let snapshot = summarize_frame_fast(&bytes, format, compute_digest)
+    let snapshot = summarize_frame_fast(&bytes, format, width, height, compute_digest)
         .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error.to_string()))?;
     Ok((snapshot, bytes))
 }

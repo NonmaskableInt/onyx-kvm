@@ -11,6 +11,8 @@ use sha2::{Digest, Sha256};
 pub const FRAME_LEN: usize = WIRE_HEADER_BYTES + SNAPSHOT_REQUEST_BYTES;
 pub const EXPECTED_YUV420P_1080P_BYTES: usize = 1920 * 1080 * 3 / 2;
 pub const EXPECTED_YUV422P_1080P_BYTES: usize = 1920 * 1080 * 2;
+pub const EXPECTED_YUV420P_720P_BYTES: usize = 1280 * 720 * 3 / 2;
+pub const EXPECTED_YUV422P_720P_BYTES: usize = 1280 * 720 * 2;
 
 #[derive(Debug, Eq, PartialEq)]
 pub enum BrokerError {
@@ -67,24 +69,31 @@ pub fn decode_and_authorize(
     ) {
         return Err(BrokerError::UnsupportedFormat);
     }
-    if request.width != 1920 || request.height != 1080 {
+    if !((request.width == 1920 && request.height == 1080)
+        || (request.width == 1280 && request.height == 720))
+    {
         return Err(BrokerError::UnsupportedDimensions);
     }
     Ok((header.operation, request))
 }
 
-/// Validate a captured 1920x1080 planar YUV or tile-delta frame buffer and construct its wire response.
+/// Validate a captured planar YUV or tile-delta frame buffer and construct its wire response.
 ///
 /// # Errors
-/// Rejects a buffer unless its length matches the requested pixel format.
+/// Rejects a buffer unless its dimensions are supported and its length matches the requested pixel format.
 pub fn summarize_frame_fast(
     bytes: &[u8],
     format: SnapshotFormat,
+    width: u16,
+    height: u16,
     compute_digest: bool,
 ) -> Result<VideoSnapshot, BrokerError> {
+    if !((width == 1920 && height == 1080) || (width == 1280 && height == 720)) {
+        return Err(BrokerError::UnsupportedDimensions);
+    }
     let expected = match format {
-        SnapshotFormat::Yuv420p => Some(EXPECTED_YUV420P_1080P_BYTES),
-        SnapshotFormat::Yuv422p => Some(EXPECTED_YUV422P_1080P_BYTES),
+        SnapshotFormat::Yuv420p => Some(usize::from(width) * usize::from(height) * 3 / 2),
+        SnapshotFormat::Yuv422p => Some(usize::from(width) * usize::from(height) * 2),
         SnapshotFormat::TileDeltaYuv422 => None,
         SnapshotFormat::Jpeg | SnapshotFormat::Rgb565 => {
             return Err(BrokerError::UnsupportedFormat);
@@ -102,15 +111,20 @@ pub fn summarize_frame_fast(
         let digest = Sha256::digest(bytes);
         sha256.copy_from_slice(&digest);
     }
-    VideoSnapshot::new(1920, 1080, format, byte_length, sha256).map_err(BrokerError::Validation)
+    VideoSnapshot::new(width, height, format, byte_length, sha256).map_err(BrokerError::Validation)
 }
 
-/// Validate a captured 1920x1080 planar YUV frame buffer and construct its wire response with SHA-256 digest.
+/// Validate a captured planar YUV frame buffer and construct its wire response with SHA-256 digest.
 ///
 /// # Errors
 /// Rejects a buffer unless its length exactly matches the requested pixel format.
-pub fn summarize_frame(bytes: &[u8], format: SnapshotFormat) -> Result<VideoSnapshot, BrokerError> {
-    summarize_frame_fast(bytes, format, true)
+pub fn summarize_frame(
+    bytes: &[u8],
+    format: SnapshotFormat,
+    width: u16,
+    height: u16,
+) -> Result<VideoSnapshot, BrokerError> {
+    summarize_frame_fast(bytes, format, width, height, true)
 }
 
 #[cfg(test)]
@@ -140,7 +154,7 @@ mod tests {
     }
 
     #[test]
-    fn decodes_only_1080p_planar_yuv_requests() {
+    fn decodes_only_1080p_and_720p_requests() {
         let valid = valid_wire_frame(SnapshotFormat::Yuv420p, 1920, 1080);
         let (op, request) = decode_and_authorize(&valid, true)
             .unwrap_or_else(|error| panic!("valid frame rejected: {error}"));
@@ -148,6 +162,13 @@ mod tests {
         assert_eq!(request.width, 1920);
         assert_eq!(request.height, 1080);
         assert_eq!(request.format, SnapshotFormat::Yuv420p);
+
+        let valid_720p = valid_wire_frame(SnapshotFormat::Yuv422p, 1280, 720);
+        let (op720, req720) = decode_and_authorize(&valid_720p, true)
+            .unwrap_or_else(|error| panic!("valid 720p frame rejected: {error}"));
+        assert_eq!(op720, Operation::Snapshot);
+        assert_eq!(req720.width, 1280);
+        assert_eq!(req720.height, 720);
 
         let yuv422 = valid_wire_frame(SnapshotFormat::Yuv422p, 1920, 1080);
         assert!(decode_and_authorize(&yuv422, true).is_ok());
@@ -169,7 +190,7 @@ mod tests {
             Err(BrokerError::UnsupportedFormat)
         );
 
-        let wrong_dims = valid_wire_frame(SnapshotFormat::Yuv422p, 1280, 720);
+        let wrong_dims = valid_wire_frame(SnapshotFormat::Yuv422p, 800, 600);
         assert_eq!(
             decode_and_authorize(&wrong_dims, true),
             Err(BrokerError::UnsupportedDimensions)
@@ -179,26 +200,33 @@ mod tests {
     #[test]
     fn summarizes_exact_frame_and_rejects_truncated_buffers() {
         let buffer = vec![0x42_u8; EXPECTED_YUV422P_1080P_BYTES];
-        let summary = summarize_frame(&buffer, SnapshotFormat::Yuv422p)
+        let summary = summarize_frame(&buffer, SnapshotFormat::Yuv422p, 1920, 1080)
             .unwrap_or_else(|error| panic!("valid 1080p buffer failed: {error}"));
         assert_eq!(summary.width, 1920);
         assert_eq!(summary.height, 1080);
         assert_eq!(summary.byte_length, 4_147_200);
         assert_eq!(summary.sha256_hex().len(), 64);
 
+        let buffer_720 = vec![0x42_u8; EXPECTED_YUV422P_720P_BYTES];
+        let summary_720 = summarize_frame(&buffer_720, SnapshotFormat::Yuv422p, 1280, 720)
+            .unwrap_or_else(|error| panic!("valid 720p buffer failed: {error}"));
+        assert_eq!(summary_720.width, 1280);
+        assert_eq!(summary_720.height, 720);
+        assert_eq!(summary_720.byte_length, 1_843_200);
+
         let two_plane_buffer = vec![0x24_u8; EXPECTED_YUV420P_1080P_BYTES];
-        let two_plane_summary = summarize_frame(&two_plane_buffer, SnapshotFormat::Yuv420p)
+        let two_plane_summary = summarize_frame(&two_plane_buffer, SnapshotFormat::Yuv420p, 1920, 1080)
             .unwrap_or_else(|error| panic!("valid 2-plane 1080p buffer failed: {error}"));
         assert_eq!(two_plane_summary.byte_length, 3_110_400);
         assert_eq!(two_plane_summary.format, SnapshotFormat::Yuv420p);
 
         assert_eq!(
-            summarize_frame(&two_plane_buffer, SnapshotFormat::Yuv422p),
+            summarize_frame(&two_plane_buffer, SnapshotFormat::Yuv422p, 1920, 1080),
             Err(BrokerError::Validation(ValidationError::InvalidLength))
         );
 
         assert_eq!(
-            summarize_frame(&[0_u8; 1024], SnapshotFormat::Yuv420p),
+            summarize_frame(&[0_u8; 1024], SnapshotFormat::Yuv420p, 1920, 1080),
             Err(BrokerError::Validation(ValidationError::InvalidLength))
         );
     }

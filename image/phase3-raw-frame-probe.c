@@ -53,12 +53,41 @@ static void handle_sig(int sig)
 #include "cvi_sys.h"
 #include "cvi_vb.h"
 #include "cvi_vi.h"
+#include "cvi_vpss.h"
 
 extern CVI_S32 get_vi_fd(CVI_VOID);
 
 #define WIDTH 1920U
 #define HEIGHT 1080U
 #define OUTPUT_LIMIT (WIDTH * HEIGHT * 2U)
+
+static int acquire_output_frame(int vpss_up, VIDEO_FRAME_INFO_S *out_frame, unsigned int timeout_ms)
+{
+	VIDEO_FRAME_INFO_S vi_frame = {0};
+	if (CVI_VI_GetChnFrame(0, 0, &vi_frame, timeout_ms) != CVI_SUCCESS)
+		return -1;
+	if (!vpss_up) {
+		*out_frame = vi_frame;
+		return 0;
+	}
+	if (CVI_VPSS_SendFrame(0, &vi_frame, 1000) != CVI_SUCCESS) {
+		(void)CVI_VI_ReleaseChnFrame(0, 0, &vi_frame);
+		return -1;
+	}
+	(void)CVI_VI_ReleaseChnFrame(0, 0, &vi_frame);
+	if (CVI_VPSS_GetChnFrame(0, 0, out_frame, 1000) != CVI_SUCCESS)
+		return -1;
+	return 0;
+}
+
+static void release_output_frame(int vpss_up, VIDEO_FRAME_INFO_S *out_frame)
+{
+	if (vpss_up) {
+		(void)CVI_VPSS_ReleaseChnFrame(0, 0, out_frame);
+	} else {
+		(void)CVI_VI_ReleaseChnFrame(0, 0, out_frame);
+	}
+}
 
 /* cvi_vi.o also contains optional GDC/register-dump entry points. The probe
  * never calls them; fail-closed stubs keep those unrelated implementations
@@ -224,9 +253,12 @@ int main(int argc, char **argv)
 	struct combo_dev_attr_s mipi = {0};
 	CVI_U32 mipi_dev = 0;
 	int mipi_fd = -1, out_fd = -1, rc = 1;
-	int sys_up = 0, dev_up = 0, pipe_created = 0, pipe_up = 0, chn_up = 0;
+	int sys_up = 0, dev_up = 0, pipe_created = 0, pipe_up = 0, chn_up = 0, vpss_up = 0;
 	unsigned int i, lane_profile = 0;
 	CVI_U32 target_height = HEIGHT;
+	CVI_U32 out_width = WIDTH;
+	CVI_U32 out_height = HEIGHT;
+	int vpss_needed = 0;
 	uint8_t target_hs_settle = 16;
 	const char *override_pn = NULL;
 	const char *override_lanes = NULL;
@@ -254,11 +286,20 @@ int main(int argc, char **argv)
 		char *end = NULL;
 		unsigned long selected = strtoul(argv[2], &end, 10);
 
-		if (!argv[2][0] || !end || *end || selected < 100 || selected > 2160) {
-			fprintf(stderr, "invalid height: %s\n", argv[2]);
+		if (!argv[2][0] || !end || *end || (selected != 1080 && selected != 720)) {
+			fprintf(stderr, "invalid height: %s (must be 1080 or 720)\n", argv[2]);
 			return 2;
 		}
 		target_height = (CVI_U32)selected;
+	}
+	if (target_height == 720) {
+		out_width = 1280;
+		out_height = 720;
+		vpss_needed = 1;
+	} else {
+		out_width = 1920;
+		out_height = 1080;
+		vpss_needed = 0;
 	}
 	if (argc >= 4) {
 		char *end = NULL;
@@ -298,12 +339,26 @@ int main(int argc, char **argv)
 		perror("install syscall boundary");
 		return 1;
 	}
-	vb.u32MaxPoolCnt = 1;
-	vb.astCommPool[0].u32BlkSize = COMMON_GetPicBufferSize(
-		WIDTH, HEIGHT, PIXEL_FORMAT_UYVY, DATA_BITWIDTH_8,
-		COMPRESS_MODE_NONE, DEFAULT_ALIGN);
-	vb.astCommPool[0].u32BlkCnt = 4;
-	vb.astCommPool[0].enRemapMode = VB_REMAP_MODE_CACHED;
+	if (vpss_needed) {
+		vb.u32MaxPoolCnt = 2;
+		vb.astCommPool[0].u32BlkSize = COMMON_GetPicBufferSize(
+			WIDTH, HEIGHT, PIXEL_FORMAT_UYVY, DATA_BITWIDTH_8,
+			COMPRESS_MODE_NONE, DEFAULT_ALIGN);
+		vb.astCommPool[0].u32BlkCnt = 4;
+		vb.astCommPool[0].enRemapMode = VB_REMAP_MODE_CACHED;
+		vb.astCommPool[1].u32BlkSize = COMMON_GetPicBufferSize(
+			out_width, out_height, PIXEL_FORMAT_UYVY, DATA_BITWIDTH_8,
+			COMPRESS_MODE_NONE, DEFAULT_ALIGN);
+		vb.astCommPool[1].u32BlkCnt = 4;
+		vb.astCommPool[1].enRemapMode = VB_REMAP_MODE_CACHED;
+	} else {
+		vb.u32MaxPoolCnt = 1;
+		vb.astCommPool[0].u32BlkSize = COMMON_GetPicBufferSize(
+			WIDTH, HEIGHT, PIXEL_FORMAT_UYVY, DATA_BITWIDTH_8,
+			COMPRESS_MODE_NONE, DEFAULT_ALIGN);
+		vb.astCommPool[0].u32BlkCnt = 4;
+		vb.astCommPool[0].enRemapMode = VB_REMAP_MODE_CACHED;
+	}
 	(void)CVI_SYS_Exit();
 	(void)CVI_VB_Exit();
 	if (check("CVI_VB_SetConfig", CVI_VB_SetConfig(&vb)) ||
@@ -353,7 +408,7 @@ int main(int argc, char **argv)
 	mipi.mipi_attr.dphy.hs_settle = target_hs_settle;
 	mipi.devno = mipi_dev;
 	mipi.img_size.width = WIDTH;
-	mipi.img_size.height = target_height;
+	mipi.img_size.height = HEIGHT;
 	if (!stream_mode) {
 		printf("CLEANKVM_LANE_PROFILE=%u DEV=%u TARGET_HEIGHT=%u HS_SETTLE=%u PN=%u,%u,%u,%u,%u LANES=%d,%d,%d,%d,%d\n",
 			lane_profile, mipi_dev, target_height, target_hs_settle,
@@ -390,11 +445,11 @@ int main(int argc, char **argv)
 	dev.stSynCfg.enVsyncValid = VI_VSYNC_VALID_SIGNAL;
 	dev.stSynCfg.enVsyncValidNeg = VI_VSYNC_VALID_NEG_HIGH;
 	dev.stSynCfg.stTimingBlank.u32HsyncAct = WIDTH;
-	dev.stSynCfg.stTimingBlank.u32VsyncVact = target_height;
+	dev.stSynCfg.stTimingBlank.u32VsyncVact = HEIGHT;
 	dev.stSize.u32Width = WIDTH;
-	dev.stSize.u32Height = target_height;
+	dev.stSize.u32Height = HEIGHT;
 	dev.stWDRAttr.enWDRMode = WDR_MODE_NONE;
-	dev.stWDRAttr.u32CacheLine = target_height;
+	dev.stWDRAttr.u32CacheLine = HEIGHT;
 	dev.enBayerFormat = BAYER_FORMAT_BG;
 	dev.snrFps = 60;
 	if (check("CVI_VI_SetDevAttr", CVI_VI_SetDevAttr(0, &dev)) ||
@@ -403,7 +458,7 @@ int main(int argc, char **argv)
 	dev_up = 1;
 
 	/* Step 1b: Configure sensor geometry on the VI kernel driver so the CSI bridge
-	 * registers (CH0_SIZE) receive width=1920, height=target_height rather than 0x0.
+	 * registers (CH0_SIZE) receive width=1920, height=1080 rather than 0x0.
 	 * Without active_w/active_h configured, csibdg_width and csibdg_height
 	 * default to 0, causing the CSI bridge to never assert FRAME_DONE_FE0. */
 	{
@@ -416,11 +471,11 @@ int main(int argc, char **argv)
 		snr.pixel_rate = 148500;
 		snr.snr_fmt.frm_num = 1;
 		snr.snr_fmt.img_size[0].width = WIDTH;
-		snr.snr_fmt.img_size[0].height = target_height;
+		snr.snr_fmt.img_size[0].height = HEIGHT;
 		snr.snr_fmt.img_size[0].active_w = WIDTH;
-		snr.snr_fmt.img_size[0].active_h = target_height;
+		snr.snr_fmt.img_size[0].active_h = HEIGHT;
 		snr.snr_fmt.img_size[0].max_width = WIDTH;
-		snr.snr_fmt.img_size[0].max_height = target_height;
+		snr.snr_fmt.img_size[0].max_height = HEIGHT;
 		snr.snr_fmt.img_size[0].start_x = 0;
 		snr.snr_fmt.img_size[0].start_y = 0;
 
@@ -480,7 +535,7 @@ int main(int argc, char **argv)
 	pipe_up = 1;
 
 	chn.stSize.u32Width = WIDTH;
-	chn.stSize.u32Height = target_height;
+	chn.stSize.u32Height = HEIGHT;
 	chn.enPixelFormat = PIXEL_FORMAT_UYVY;
 	chn.enDynamicRange = DYNAMIC_RANGE_SDR8;
 	chn.enVideoFormat = VIDEO_FORMAT_LINEAR;
@@ -493,6 +548,36 @@ int main(int argc, char **argv)
 	    check("CVI_VI_EnableChn", CVI_VI_EnableChn(0, 0)))
 		goto cleanup;
 	chn_up = 1;
+
+	if (vpss_needed) {
+		VPSS_GRP_ATTR_S grp_attr = {0};
+		VPSS_CHN_ATTR_S chn_attr = {0};
+
+		grp_attr.u32MaxW = WIDTH;
+		grp_attr.u32MaxH = HEIGHT;
+		grp_attr.enPixelFormat = PIXEL_FORMAT_UYVY;
+		grp_attr.stFrameRate.s32SrcFrameRate = -1;
+		grp_attr.stFrameRate.s32DstFrameRate = -1;
+		grp_attr.u8VpssDev = 0;
+
+		chn_attr.u32Width = out_width;
+		chn_attr.u32Height = out_height;
+		chn_attr.enVideoFormat = VIDEO_FORMAT_LINEAR;
+		chn_attr.enPixelFormat = PIXEL_FORMAT_UYVY;
+		chn_attr.stFrameRate.s32SrcFrameRate = -1;
+		chn_attr.stFrameRate.s32DstFrameRate = -1;
+		chn_attr.u32Depth = 1;
+		chn_attr.bMirror = CVI_FALSE;
+		chn_attr.bFlip = CVI_FALSE;
+		chn_attr.stAspectRatio.enMode = ASPECT_RATIO_NONE;
+
+		if (check("CVI_VPSS_CreateGrp", CVI_VPSS_CreateGrp(0, &grp_attr)) ||
+		    check("CVI_VPSS_SetChnAttr", CVI_VPSS_SetChnAttr(0, 0, &chn_attr)) ||
+		    check("CVI_VPSS_EnableChn", CVI_VPSS_EnableChn(0, 0)) ||
+		    check("CVI_VPSS_StartGrp", CVI_VPSS_StartGrp(0)))
+			goto cleanup;
+		vpss_up = 1;
+	}
 	if (stream_mode) {
 		uint8_t *buf_a = NULL;
 		uint8_t *buf_b = NULL;
@@ -502,17 +587,17 @@ int main(int argc, char **argv)
 		int first_delta_frame = 1;
 		uint8_t ready_byte = 0;
 
-		if (check("CVI_VI_GetChnFrame", CVI_VI_GetChnFrame(0, 0, &frame, 5000))) {
+		if (acquire_output_frame(vpss_up, &frame, 5000) != 0) {
 			fprintf(stderr, "initial frame lock failed\n");
 			goto cleanup;
 		}
-		if (frame.stVFrame.u32Width != WIDTH || frame.stVFrame.u32Height != target_height ||
+		if (frame.stVFrame.u32Width != out_width || frame.stVFrame.u32Height != out_height ||
 		    frame.stVFrame.enCompressMode != COMPRESS_MODE_NONE) {
 			fprintf(stderr, "unexpected frame geometry or compression\n");
-			(void)CVI_VI_ReleaseChnFrame(0, 0, &frame);
+			release_output_frame(vpss_up, &frame);
 			goto cleanup;
 		}
-		(void)CVI_VI_ReleaseChnFrame(0, 0, &frame);
+		release_output_frame(vpss_up, &frame);
 
 		buf_a = malloc(OUTPUT_LIMIT);
 		buf_b = malloc(OUTPUT_LIMIT);
@@ -543,14 +628,14 @@ int main(int argc, char **argv)
 			if (cmd == 'Q') {
 				break;
 			}
-			if (CVI_VI_GetChnFrame(0, 0, &frame, 2000) != CVI_SUCCESS) {
+			if (acquire_output_frame(vpss_up, &frame, 2000) != 0) {
 				uint8_t err_status = 1;
 				if (write_all(STDOUT_FILENO, &err_status, 1) != 0)
 					break;
 				continue;
 			}
-			if (frame.stVFrame.u32Width != WIDTH || frame.stVFrame.u32Height != target_height) {
-				(void)CVI_VI_ReleaseChnFrame(0, 0, &frame);
+			if (frame.stVFrame.u32Width != out_width || frame.stVFrame.u32Height != out_height) {
+				release_output_frame(vpss_up, &frame);
 				uint8_t err_status = 1;
 				if (write_all(STDOUT_FILENO, &err_status, 1) != 0)
 					break;
@@ -576,7 +661,7 @@ int main(int argc, char **argv)
 				}
 				curr_offset += length;
 			}
-			(void)CVI_VI_ReleaseChnFrame(0, 0, &frame);
+			release_output_frame(vpss_up, &frame);
 			if (copy_err || curr_offset != total_bytes) {
 				uint8_t err_status = 1;
 				if (write_all(STDOUT_FILENO, &err_status, 1) != 0)
@@ -619,10 +704,11 @@ int main(int argc, char **argv)
 
 			uint16_t dirty_count = 0;
 			uint8_t *delta_payload = delta_buf + 8;
-			const uint16_t tile_cols = WIDTH / 64;
-			const uint16_t tile_rows = target_height / 40;
+			const uint16_t tile_cols = (uint16_t)(out_width / 64);
+			const uint16_t tile_rows = (uint16_t)(out_height / 40);
 			const uint16_t total_tiles = tile_cols * tile_rows;
-			const uint32_t stride = WIDTH * 2;
+			const uint16_t keyframe_threshold = total_tiles / 2;
+			const uint32_t stride = out_width * 2;
 
 			for (uint16_t t = 0; t < total_tiles; ++t) {
 				uint16_t col = t % tile_cols;
@@ -641,8 +727,8 @@ int main(int argc, char **argv)
 						break;
 				}
 				if (dirty) {
-					if (dirty_count >= 400) {
-						dirty_count = 401;
+					if (dirty_count >= keyframe_threshold) {
+						dirty_count = keyframe_threshold + 1;
 						break;
 					}
 					delta_payload[0] = (uint8_t)((t >> 8) & 0xff);
@@ -657,7 +743,7 @@ int main(int argc, char **argv)
 				}
 			}
 
-			if (dirty_count > 400) {
+			if (dirty_count > keyframe_threshold) {
 				uint8_t ok_header[5];
 				ok_header[0] = 0;
 				ok_header[1] = (uint8_t)((total_bytes >> 24) & 0xff);
@@ -711,14 +797,14 @@ int main(int argc, char **argv)
 	(void)snapshot_proc("/proc/cvitek/vi", "VI_DEV");
 	(void)snapshot_proc("/proc/cvitek/vi_dbg", "VI_DBG_PRE");
 
-	if (check("CVI_VI_GetChnFrame", CVI_VI_GetChnFrame(0, 0, &frame, 5000))) {
+	if (acquire_output_frame(vpss_up, &frame, 5000) != 0) {
 		(void)snapshot_proc("/proc/cvitek/vi_dbg", "VI_DBG_POST_ERR");
 		(void)snapshot_mipi(5000);
 		goto cleanup;
 	}
 	(void)snapshot_proc("/proc/cvitek/vi_dbg", "VI_DBG_POST_OK");
 	(void)snapshot_mipi(500);
-	if (frame.stVFrame.u32Width != WIDTH || frame.stVFrame.u32Height != target_height ||
+	if (frame.stVFrame.u32Width != out_width || frame.stVFrame.u32Height != out_height ||
 	    frame.stVFrame.enCompressMode != COMPRESS_MODE_NONE) {
 		fprintf(stderr, "unexpected frame geometry or compression\n");
 		goto release;
@@ -762,15 +848,20 @@ int main(int argc, char **argv)
 		perror("fsync frame");
 		goto release;
 	}
-	printf("captured=%ux%u format=%d bytes<=%u output=%s\n", WIDTH, HEIGHT,
+	printf("captured=%ux%u format=%d bytes<=%u output=%s\n", out_width, out_height,
 	       frame.stVFrame.enPixelFormat, OUTPUT_LIMIT, output);
 	rc = 0;
 
 release:
-	(void)CVI_VI_ReleaseChnFrame(0, 0, &frame);
+	release_output_frame(vpss_up, &frame);
 cleanup:
 	if (out_fd >= 0)
 		close(out_fd);
+	if (vpss_up) {
+		(void)CVI_VPSS_StopGrp(0);
+		(void)CVI_VPSS_DisableChn(0, 0);
+		(void)CVI_VPSS_DestroyGrp(0);
+	}
 	if (chn_up)
 		(void)CVI_VI_DisableChn(0, 0);
 	if (pipe_up)

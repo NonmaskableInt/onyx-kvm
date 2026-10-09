@@ -30,6 +30,10 @@ pub const INDEX_HTML: &[u8] = br#"<!doctype html>
         <button id="snapshot" disabled>Capture verified snapshot</button>
         <button id="fetch-frame" disabled>Fetch live frame</button>
         <button id="stream-frame" disabled>Start stream</button>
+        <select id="video-res" style="background:#182028;color:#eef4f7;border:1px solid #60717d;border-radius:.35rem;padding:.65rem">
+          <option value="1080p">1080p (Native)</option>
+          <option value="720p">720p (Hardware Scaler)</option>
+        </select>
       </div>
       <pre id="snapshot-result">No snapshot captured.</pre>
       <p class="notice">Snapshots return verified metadata. Fetch live frame streams raw video binary pixels directly to the interactive display canvas via authenticated HTTPS.</p>
@@ -373,7 +377,8 @@ async function toggleStream() {
   streamAbort = new AbortController();
   const signal = streamAbort.signal;
   try {
-    const response = await fetch('/video/stream?format=tile_delta', {
+    const res = byId('video-res') ? byId('video-res').value : '1080p';
+    const response = await fetch('/video/stream?format=tile_delta&res=' + res, {
       headers: {'Authorization': `Bearer ${token}`},
       signal: signal,
     });
@@ -527,19 +532,23 @@ async function initSession() {
 }
 
 async function snapshot() {
-  const result = await mcp('tools/call', {name:'kvm.video.snapshot',arguments:{format:'yuv422p',deadlineMs:5000}});
+  const res = byId('video-res') ? byId('video-res').value : '1080p';
+  const width = res === '720p' ? 1280 : 1920;
+  const height = res === '720p' ? 720 : 1080;
+  const result = await mcp('tools/call', {name:'kvm.video.snapshot',arguments:{width,height,format:'yuv422p',deadlineMs:5000}});
   byId('snapshot-result').textContent = JSON.stringify(result.structuredContent, null, 2);
 }
 
 async function fetchFrame() {
-  byId('snapshot-result').textContent = 'Fetching live frame from /video/frame...';
-  const response = await fetch('/video/frame?format=yuv422p', {
+  const res = byId('video-res') ? byId('video-res').value : '1080p';
+  byId('snapshot-result').textContent = `Fetching live frame (${res}) from /video/frame...`;
+  const response = await fetch(`/video/frame?format=yuv422p&res=${res}`, {
     headers: {'Authorization': `Bearer ${token}`}
   });
   if (!response.ok) throw new Error(`Frame request rejected (${response.status})`);
   const digest = response.headers.get('X-Frame-Digest') || '';
-  const width = parseInt(response.headers.get('X-Frame-Width') || '1920', 10);
-  const height = parseInt(response.headers.get('X-Frame-Height') || '1080', 10);
+  const width = parseInt(response.headers.get('X-Frame-Width') || (res === '720p' ? '1280' : '1920'), 10);
+  const height = parseInt(response.headers.get('X-Frame-Height') || (res === '720p' ? '720' : '1080'), 10);
   const format = response.headers.get('X-Frame-Format') || 'yuv422p';
   const buffer = await response.arrayBuffer();
   renderFrame(byId('kvm-canvas'), new Uint8Array(buffer), width, height, format);

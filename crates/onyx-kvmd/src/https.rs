@@ -654,12 +654,18 @@ fn handle_video_frame(
     if !claims.scopes.contains(&Scope::Video) {
         return unauthorized(stream);
     }
+    let (width, height) =
+        if request.path.contains("res=720p") || request.path.contains("height=720") {
+            (1280, 720)
+        } else {
+            (1920, 1080)
+        };
     let format = if request.path.contains("format=yuv420p") {
         SnapshotFormat::Yuv420p
     } else {
         SnapshotFormat::Yuv422p
     };
-    let Ok(snapshot_request) = SnapshotRequest::new(1920, 1080, format, 5000) else {
+    let Ok(snapshot_request) = SnapshotRequest::new(width, height, format, 5000) else {
         return respond(stream, 500, "text/plain", b"invalid snapshot request", None);
     };
     let (snapshot, mut frame_bytes) = match BrokerVideo::capture_frame(snapshot_request) {
@@ -710,6 +716,12 @@ fn handle_video_stream(
     if !claims.scopes.contains(&Scope::Video) {
         return unauthorized(stream);
     }
+    let (width, height) =
+        if request.path.contains("res=720p") || request.path.contains("height=720") {
+            (1280, 720)
+        } else {
+            (1920, 1080)
+        };
     let format = if request.path.contains("format=tile_delta")
         || request.path.contains("mode=delta")
     {
@@ -719,7 +731,7 @@ fn handle_video_stream(
     } else {
         SnapshotFormat::Yuv422p
     };
-    let Ok(snapshot_request) = SnapshotRequest::new(1920, 1080, format, 5000) else {
+    let Ok(snapshot_request) = SnapshotRequest::new(width, height, format, 5000) else {
         return respond(stream, 500, "text/plain", b"invalid snapshot request", None);
     };
 

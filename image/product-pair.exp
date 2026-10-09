@@ -96,6 +96,8 @@ expect -re {# }
 send -s -- "echo __PAIR_STAGED__\r"
 expect { -re {__PAIR_STAGED__} {} timeout { log_user 1; exit 6 } }
 catch {exec /usr/bin/sudo -n /usr/bin/killall -9 cu}
+catch close
+catch wait
 log_user 1
 
 puts "\n==================================================="

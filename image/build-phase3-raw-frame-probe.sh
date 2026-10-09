@@ -35,6 +35,8 @@ test ! -e "$output_dir/cleankvm-raw-frame-probe"
             /repo/image/phase3-raw-frame-probe.c \
             middleware/v2/modules/vpu/src/cvi_vi.o \
             middleware/v2/modules/vpu/src/vi_ioctl.o \
+            middleware/v2/modules/vpu/src/cvi_vpss.o \
+            middleware/v2/modules/vpu/src/vpss_ioctl.o \
             -Wl,--gc-sections \
             -Wl,--start-group middleware/v2/lib/libsys.a -Wl,--end-group \
             -lpthread -latomic -Wl,-Map,/output/LINK-MAP.txt \
