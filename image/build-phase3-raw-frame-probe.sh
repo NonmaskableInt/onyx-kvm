@@ -4,7 +4,8 @@ set -eu
 repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 engine=${CONTAINER_ENGINE:-podman}
 builder=${CLEANKVM_BUILDER_TAG:-localhost/cleankvm-builder:ubuntu-22.04-amd64}
-work_volume=${CLEANKVM_WORK_VOLUME:-cleankvm-work-v22}
+work_volume=${CLEANKVM_WORK_VOLUME:-cleankvm-work-v50}
+host_tools_volume=${CLEANKVM_HOST_TOOLS_VOLUME:-cleankvm-host-tools}
 output_dir=${CLEANKVM_RAW_FRAME_OUTPUT_DIR:-$repo_root/out/phase3-raw-frame-probe-v1}
 
 mkdir -p "$output_dir"
@@ -12,11 +13,13 @@ test ! -e "$output_dir/cleankvm-raw-frame-probe"
 
 "$engine" run --rm --arch amd64 --network none \
     -v "$work_volume:/work:rw" \
+    -v "$host_tools_volume:/host-tools:ro" \
     -v "$repo_root:/repo:ro" \
     -v "$output_dir:/output:rw" \
     -w /work/sdk \
     "$builder" bash -lc '
         set -e
+        export PATH="/host-tools/repo/gcc/riscv64-linux-musl-x86_64/bin:$PATH"
         source build/cvisetup.sh
         defconfig sg2002_licheervnano_sd >/dev/null
         test "$(riscv64-unknown-linux-musl-ar t middleware/v2/lib/libsys.a | wc -l)" -gt 5

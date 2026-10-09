@@ -2,6 +2,15 @@ diff --git a/u-boot-2021.10/include/configs/mars-asic.h b/u-boot-2021.10/include
 index 74c61fb..e84147a 100644
 --- a/u-boot-2021.10/include/configs/mars-asic.h
 +++ b/u-boot-2021.10/include/configs/mars-asic.h
+@@ -211,7 +211,7 @@
+ 			#define ROOTARGS "ubi.mtd=ROOTFS ubi.block=0,0"
+ 		#endif /* CONFIG_SKIP_RAMDISK */
+ 	#elif defined(CONFIG_SD_BOOT)
+-		#define ROOTARGS "root=" ROOTFS_DEV " rootwait rw"
++		#define ROOTARGS "root=" ROOTFS_DEV " rootwait ro"
+ 	#else
+ 		#define ROOTARGS "rootfstype=squashfs rootwait ro root=" ROOTFS_DEV
+ 	#endif
 @@ -312,7 +312,11 @@
  	#ifdef CONFIG_ENABLE_ALIOS_UPDATE
  		#define CONFIG_BOOTCOMMAND	"cvi_update_rtos"

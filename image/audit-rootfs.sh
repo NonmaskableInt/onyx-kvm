@@ -97,6 +97,23 @@ if test -z "$expected_video_broker"; then
     fi
 fi
 
+test -f "$rootfs/etc/fstab" || {
+    printf '%s\n' 'missing /etc/fstab configuration' >&2
+    exit 1
+}
+grep -qE '^/dev/root[[:space:]]+/[[:space:]]+ext[24][[:space:]]+[^[:space:]]*ro' "$rootfs/etc/fstab" || {
+    printf '%s\n' '/etc/fstab does not mount / as read-only (ro)' >&2
+    exit 1
+}
+grep -qE '^tmpfs[[:space:]]+/tmp[[:space:]]+tmpfs[[:space:]]+[^[:space:]]*nosuid' "$rootfs/etc/fstab" || {
+    printf '%s\n' '/etc/fstab does not mount /tmp on tmpfs with nosuid' >&2
+    exit 1
+}
+grep -qE '^tmpfs[[:space:]]+/run[[:space:]]+tmpfs[[:space:]]+[^[:space:]]*nosuid' "$rootfs/etc/fstab" || {
+    printf '%s\n' '/etc/fstab does not mount /run on tmpfs with nosuid' >&2
+    exit 1
+}
+
 test -f "$rootfs/etc/network/interfaces" || {
     printf '%s\n' 'missing wired network configuration' >&2
     exit 1
@@ -118,6 +135,10 @@ test -n "$carrier_helper" && test -x "$carrier_helper" || {
 grep -qE 'pre-up /usr/sbin/(onyx-kvm|cleankvm)-wait-carrier eth0 10' \
     "$rootfs/etc/network/interfaces" || {
     printf '%s\n' 'missing bounded pre-DHCP carrier wait' >&2
+    exit 1
+}
+test -x "$rootfs/etc/init.d/S05ro-root" || {
+    printf '%s\n' 'missing read-only root remount init script' >&2
     exit 1
 }
 

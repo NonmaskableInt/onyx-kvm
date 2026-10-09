@@ -4,14 +4,17 @@ use std::{
     net::{TcpListener, TcpStream},
     os::unix::net::UnixStream,
     path::{Path, PathBuf},
-    sync::Arc,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, AtomicUsize, Ordering},
+    },
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 use onyx_kvm_mcp::{
     AudioCaptureTransport, AudioOutputTransport, Ed25519JwtValidator, HidTransport, HttpAuthError,
     HttpRequestAuthError, MAX_MESSAGE_BYTES, Scope, Server, VideoTransport,
-    authenticate_http_request, bearer_challenge, protected_resource_metadata,
+    authenticate_http_request, bearer_challenge, protected_resource_metadata, validate_origin,
 };
 use onyx_kvm_media_protocol::{
     AUDIO_REQUEST_BYTES, BoundedFrameRing, CAPTURE_METRICS_BYTES, CaptureMetrics,
@@ -37,6 +40,13 @@ const AUDIO_CAPTURE_SOCKET: &str = "/run/onyx-kvm/audio-capture.sock";
 const AUDIO_CAPTURE_ENABLED_PATH: &str = "/run/onyx-kvm/audio-capture-enabled";
 const AUDIO_OUTPUT_SOCKET: &str = "/run/onyx-kvm/audio-output.sock";
 const AUDIO_OUTPUT_ENABLED_PATH: &str = "/run/onyx-kvm/audio-output-enabled";
+const PAIRING_CODE_PATH: &str = "/run/onyx-kvm/pairing-code";
+const PAIRING_CODE_FALLBACK: &str = "/run/cleankvm/pairing-code";
+const PENDING_SESSION_TOKEN_PATH: &str = "/run/onyx-kvm/pending-session-token";
+const PENDING_SESSION_TOKEN_FALLBACK: &str = "/run/cleankvm/pending-session-token";
+
+static PAIRING_ATTEMPTS: AtomicUsize = AtomicUsize::new(0);
+const MAX_PAIRING_ATTEMPTS: usize = 3;
 
 struct BrokerHid;
 
@@ -99,6 +109,48 @@ impl BrokerVideo {
             .map_err(|_| invalid("frame byte length overflow"))?;
         let mut frame_bytes = vec![0_u8; expected_frame_bytes];
         stream.read_exact(&mut frame_bytes)?;
+        Ok((snapshot, frame_bytes))
+    }
+}
+
+struct VideoStreamSession {
+    stream: UnixStream,
+}
+
+impl VideoStreamSession {
+    fn connect(timeout: Duration) -> io::Result<Self> {
+        let stream = UnixStream::connect(VIDEO_SOCKET)?;
+        stream.set_read_timeout(Some(timeout))?;
+        stream.set_write_timeout(Some(timeout))?;
+        Ok(Self { stream })
+    }
+
+    fn capture_next(&mut self, request: SnapshotRequest) -> io::Result<(VideoSnapshot, Vec<u8>)> {
+        let payload = request.encode();
+        let payload_bytes =
+            u32::try_from(payload.len()).map_err(|_| invalid("invalid snapshot request length"))?;
+        let header = WireHeader {
+            operation: Operation::StreamFrame,
+            payload_bytes,
+        };
+        self.stream.write_all(&header.encode())?;
+        self.stream.write_all(&payload)?;
+        self.stream.flush()?;
+        let mut header_response = [0_u8; WIRE_HEADER_BYTES];
+        self.stream.read_exact(&mut header_response)?;
+        let wire_header = WireHeader::decode(header_response)
+            .map_err(|_| invalid("invalid video broker wire header"))?;
+        if wire_header.operation != Operation::StreamFrame {
+            return Err(invalid("unexpected operation in broker response"));
+        }
+        let mut snapshot_bytes = [0_u8; SNAPSHOT_RESPONSE_BYTES];
+        self.stream.read_exact(&mut snapshot_bytes)?;
+        let snapshot = VideoSnapshot::decode(snapshot_bytes)
+            .map_err(|_| invalid("invalid video broker snapshot response"))?;
+        let expected_frame_bytes = usize::try_from(snapshot.byte_length)
+            .map_err(|_| invalid("frame byte length overflow"))?;
+        let mut frame_bytes = vec![0_u8; expected_frame_bytes];
+        self.stream.read_exact(&mut frame_bytes)?;
         Ok((snapshot, frame_bytes))
     }
 }
@@ -171,6 +223,7 @@ impl AudioOutputTransport for BrokerAudioOutput {
     }
 }
 
+#[derive(Clone)]
 struct Config {
     bind: String,
     origin: String,
@@ -276,28 +329,190 @@ fn tls_config(config: &Config) -> io::Result<Arc<ServerConfig>> {
 
 fn serve(config: &Config) -> io::Result<()> {
     let tls = tls_config(config)?;
-    let issuer_key = read_identity(&config.issuer_public_key, Some(32))?;
+    let issuer_key = Arc::new(read_identity(&config.issuer_public_key, Some(32))?);
     let listener = TcpListener::bind(&config.bind)?;
-    let mut initialized = false;
+    let initialized = Arc::new(AtomicBool::new(false));
+    let config = Arc::new(config.clone());
     for socket in listener.incoming() {
         let socket = socket?;
         socket.set_read_timeout(Some(TIMEOUT))?;
         socket.set_write_timeout(Some(TIMEOUT))?;
-        let session = ServerConnection::new(Arc::clone(&tls)).map_err(io::Error::other)?;
-        let mut stream = StreamOwned::new(session, socket);
-        if let Err(error) = handle(&mut stream, config, &issuer_key, &mut initialized) {
-            let _ = respond(&mut stream, 400, "text/plain", b"bad request", None);
-            eprintln!("rejected HTTPS request: {error}");
-        }
+        let tls = Arc::clone(&tls);
+        let config = Arc::clone(&config);
+        let issuer_key = Arc::clone(&issuer_key);
+        let initialized = Arc::clone(&initialized);
+        std::thread::spawn(move || {
+            let session = match ServerConnection::new(tls) {
+                Ok(s) => s,
+                Err(err) => {
+                    eprintln!("failed to establish TLS session: {err}");
+                    return;
+                }
+            };
+            let mut stream = StreamOwned::new(session, socket);
+            if let Err(error) = handle(&mut stream, &config, &issuer_key, &initialized) {
+                let _ = respond(&mut stream, 400, "text/plain", b"bad request", None);
+                eprintln!("rejected HTTPS request: {error}");
+            }
+        });
     }
     Ok(())
+}
+
+struct PairingPaths<'a> {
+    code: &'a str,
+    code_fallback: &'a str,
+    token: &'a str,
+    token_fallback: &'a str,
+}
+
+fn wipe_pairing_state_paths(paths: &PairingPaths<'_>) {
+    let _ = fs::write(paths.code, b"");
+    let _ = fs::write(paths.code_fallback, b"");
+    let _ = fs::write(paths.token, b"");
+    let _ = fs::write(paths.token_fallback, b"");
+    let _ = fs::remove_file(paths.code);
+    let _ = fs::remove_file(paths.code_fallback);
+    let _ = fs::remove_file(paths.token);
+    let _ = fs::remove_file(paths.token_fallback);
+}
+
+fn read_file_with_fallback(path: &str, fallback: &str) -> Option<String> {
+    if let Ok(content) = fs::read_to_string(path) {
+        return Some(content);
+    }
+    fs::read_to_string(fallback).ok()
+}
+
+fn handle_pair_with_paths<W: Write>(
+    stream: &mut W,
+    config_origin: &str,
+    request: &Request,
+    paths: &PairingPaths<'_>,
+    attempts_counter: &AtomicUsize,
+) -> io::Result<()> {
+    if validate_origin(request.origin.as_deref(), config_origin).is_err() {
+        return respond(
+            stream,
+            403,
+            "application/json",
+            b"{\"error\":\"forbidden\"}",
+            None,
+        );
+    }
+
+    let value: serde_json::Value = match serde_json::from_slice(&request.body) {
+        Ok(v) => v,
+        Err(_) => {
+            return respond(
+                stream,
+                400,
+                "application/json",
+                b"{\"error\":\"invalid JSON payload\"}",
+                None,
+            );
+        }
+    };
+    let Some(code_val) = value.get("code").and_then(serde_json::Value::as_str) else {
+        return respond(
+            stream,
+            400,
+            "application/json",
+            b"{\"error\":\"missing 'code' field in payload\"}",
+            None,
+        );
+    };
+
+    let Some(expected_code) = read_file_with_fallback(paths.code, paths.code_fallback) else {
+        return respond(
+            stream,
+            404,
+            "application/json",
+            b"{\"error\":\"no pairing ceremony currently active\"}",
+            None,
+        );
+    };
+
+    let expected_trimmed = expected_code.trim();
+    let code_trimmed = code_val.trim();
+
+    let mut diff = expected_trimmed.len() ^ code_trimmed.len();
+    for (a, b) in expected_trimmed.bytes().zip(code_trimmed.bytes()) {
+        diff |= (a ^ b) as usize;
+    }
+
+    if diff != 0 {
+        let attempts = attempts_counter.fetch_add(1, Ordering::SeqCst) + 1;
+        if attempts >= MAX_PAIRING_ATTEMPTS {
+            wipe_pairing_state_paths(paths);
+            attempts_counter.store(0, Ordering::SeqCst);
+            return respond(
+                stream,
+                403,
+                "application/json",
+                b"{\"error\":\"maximum pairing attempts exceeded; pairing code invalidated\"}",
+                None,
+            );
+        }
+        return respond(
+            stream,
+            401,
+            "application/json",
+            b"{\"error\":\"invalid pairing code\"}",
+            None,
+        );
+    }
+
+    attempts_counter.store(0, Ordering::SeqCst);
+    let Some(token) = read_file_with_fallback(paths.token, paths.token_fallback) else {
+        wipe_pairing_state_paths(paths);
+        return respond(
+            stream,
+            500,
+            "application/json",
+            b"{\"error\":\"missing pending session token\"}",
+            None,
+        );
+    };
+
+    wipe_pairing_state_paths(paths);
+
+    let response_body = serde_json::json!({
+        "token": token.trim(),
+        "tokenType": "Bearer",
+        "expiresIn": 14400,
+    });
+    let body_bytes = serde_json::to_vec(&response_body)
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+
+    respond(stream, 200, "application/json", &body_bytes, None)
+}
+
+fn handle_pair<W: Write>(
+    stream: &mut W,
+    config: &Config,
+    request: &Request,
+) -> io::Result<()> {
+    let paths = PairingPaths {
+        code: PAIRING_CODE_PATH,
+        code_fallback: PAIRING_CODE_FALLBACK,
+        token: PENDING_SESSION_TOKEN_PATH,
+        token_fallback: PENDING_SESSION_TOKEN_FALLBACK,
+    };
+    handle_pair_with_paths(
+        stream,
+        &config.origin,
+        request,
+        &paths,
+        &PAIRING_ATTEMPTS,
+    )
 }
 
 fn handle(
     stream: &mut StreamOwned<ServerConnection, TcpStream>,
     config: &Config,
     issuer_key: &[u8],
-    initialized: &mut bool,
+    initialized: &AtomicBool,
 ) -> io::Result<()> {
     let request = read_request(stream)?;
     if request.method == "GET" && request.path == METADATA_PATH {
@@ -322,6 +537,9 @@ fn handle(
             "/app.js" => respond(stream, 200, "text/javascript; charset=utf-8", APP_JS, None),
             _ => respond(stream, 404, "text/plain", b"not found", None),
         };
+    }
+    if request.method == "POST" && (request.path == "/pair" || request.path == "/enroll") {
+        return handle_pair(stream, config, &request);
     }
     if request.method != "POST" || request.path != "/mcp" {
         return respond(stream, 404, "text/plain", b"not found", None);
@@ -356,7 +574,7 @@ fn handle(
         .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
     let method = message.get("method").and_then(serde_json::Value::as_str);
     if method == Some("notifications/initialized") {
-        *initialized = true;
+        initialized.store(true, Ordering::Relaxed);
         return respond(stream, 202, "application/json", b"", None);
     }
     let grant = claims.as_grant();
@@ -364,7 +582,8 @@ fn handle(
     let video = BrokerVideo;
     let audio_capture = BrokerAudioCapture;
     let audio_output = BrokerAudioOutput;
-    let mut server = if method == Some("initialize") || !*initialized {
+    let is_init = initialized.load(Ordering::Relaxed);
+    let mut server = if method == Some("initialize") || !is_init {
         Server::remote(&claims.audience, now, grant)
     } else {
         Server::remote_ready_with_hid(&claims.audience, now, grant, &hid)
@@ -520,6 +739,14 @@ fn stream_frames_loop(
         .map_err(|_| invalid("invalid stream lease"))?;
     let mut ring = BoundedFrameRing::new(2);
     let mut sequence = 0_u32;
+    let timeout = TIMEOUT.max(Duration::from_millis(u64::from(snapshot_request.deadline_ms)));
+    let mut broker_session = match VideoStreamSession::connect(timeout) {
+        Ok(s) => s,
+        Err(err) => {
+            eprintln!("failed to connect to video broker: {err}");
+            return Ok(());
+        }
+    };
 
     loop {
         if !Path::new(VIDEO_ENABLED_PATH).exists() {
@@ -534,7 +761,7 @@ fn stream_frames_loop(
             break;
         }
 
-        let (snapshot, frame_bytes) = match BrokerVideo::capture_frame(snapshot_request) {
+        let (snapshot, frame_bytes) = match broker_session.capture_next(snapshot_request) {
             Ok(res) => res,
             Err(err) => {
                 eprintln!("failed to capture video frame in stream: {err}");
@@ -798,5 +1025,179 @@ mod tests {
         assert!(text.contains("Content-Security-Policy: default-src 'none';"));
         assert!(text.contains("Permissions-Policy: camera=(), geolocation=(), microphone=()"));
         assert!(text.contains("X-Frame-Options: DENY\r\n"));
+    }
+
+    #[test]
+    fn pair_succeeds_with_valid_pin_and_wipes_state() {
+        let temp_dir = std::env::temp_dir().join(format!("onyx-pair-test-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&temp_dir);
+        let pin_file = temp_dir.join("pairing-code");
+        let token_file = temp_dir.join("pending-session-token");
+        std::fs::write(&pin_file, "123456\n").unwrap();
+        std::fs::write(&token_file, "valid-jwt-token-xyz\n").unwrap();
+
+        let req = super::Request {
+            method: "POST".to_string(),
+            path: "/pair".to_string(),
+            origin: Some("https://kvm".to_string()),
+            authorization: None,
+            body: b"{\"code\":\"123456\"}".to_vec(),
+        };
+
+        let attempts = std::sync::atomic::AtomicUsize::new(0);
+        let mut output = Vec::new();
+        let paths = super::PairingPaths {
+            code: pin_file.to_str().unwrap(),
+            code_fallback: "/nonexistent/code",
+            token: token_file.to_str().unwrap(),
+            token_fallback: "/nonexistent/token",
+        };
+        let res = super::handle_pair_with_paths(
+            &mut output,
+            "https://kvm",
+            &req,
+            &paths,
+            &attempts,
+        );
+        assert!(res.is_ok());
+        let text = String::from_utf8(output).unwrap();
+        assert!(text.starts_with("HTTP/1.1 200 OK\r\n"));
+        assert!(text.contains("\"token\":\"valid-jwt-token-xyz\""));
+        assert!(text.contains("\"tokenType\":\"Bearer\""));
+
+        assert!(!pin_file.exists());
+        assert!(!token_file.exists());
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn pair_rejects_invalid_pin_and_locks_out_after_max_attempts() {
+        let temp_dir =
+            std::env::temp_dir().join(format!("onyx-pair-lockout-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&temp_dir);
+        let pin_file = temp_dir.join("pairing-code");
+        let token_file = temp_dir.join("pending-session-token");
+        std::fs::write(&pin_file, "654321\n").unwrap();
+        std::fs::write(&token_file, "valid-jwt-token-xyz\n").unwrap();
+
+        let req = super::Request {
+            method: "POST".to_string(),
+            path: "/pair".to_string(),
+            origin: Some("https://kvm".to_string()),
+            authorization: None,
+            body: b"{\"code\":\"000000\"}".to_vec(),
+        };
+
+        let attempts = std::sync::atomic::AtomicUsize::new(0);
+        let paths = super::PairingPaths {
+            code: pin_file.to_str().unwrap(),
+            code_fallback: "/nonexistent/code",
+            token: token_file.to_str().unwrap(),
+            token_fallback: "/nonexistent/token",
+        };
+
+        let mut out1 = Vec::new();
+        super::handle_pair_with_paths(
+            &mut out1,
+            "https://kvm",
+            &req,
+            &paths,
+            &attempts,
+        )
+        .unwrap();
+        let t1 = String::from_utf8(out1).unwrap();
+        assert!(t1.starts_with("HTTP/1.1 401 Unauthorized\r\n"));
+        assert!(pin_file.exists());
+
+        let mut out2 = Vec::new();
+        super::handle_pair_with_paths(
+            &mut out2,
+            "https://kvm",
+            &req,
+            &paths,
+            &attempts,
+        )
+        .unwrap();
+        let t2 = String::from_utf8(out2).unwrap();
+        assert!(t2.starts_with("HTTP/1.1 401 Unauthorized\r\n"));
+        assert!(pin_file.exists());
+
+        let mut out3 = Vec::new();
+        super::handle_pair_with_paths(
+            &mut out3,
+            "https://kvm",
+            &req,
+            &paths,
+            &attempts,
+        )
+        .unwrap();
+        let t3 = String::from_utf8(out3).unwrap();
+        assert!(t3.starts_with("HTTP/1.1 403 Forbidden\r\n"));
+        assert!(t3.contains("maximum pairing attempts exceeded"));
+
+        assert!(!pin_file.exists());
+        assert!(!token_file.exists());
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn pair_rejects_origin_mismatch() {
+        let req = super::Request {
+            method: "POST".to_string(),
+            path: "/pair".to_string(),
+            origin: Some("https://evil.com".to_string()),
+            authorization: None,
+            body: b"{\"code\":\"123456\"}".to_vec(),
+        };
+
+        let attempts = std::sync::atomic::AtomicUsize::new(0);
+        let paths = super::PairingPaths {
+            code: "/nonexistent/code",
+            code_fallback: "/nonexistent/code",
+            token: "/nonexistent/token",
+            token_fallback: "/nonexistent/token",
+        };
+        let mut output = Vec::new();
+        super::handle_pair_with_paths(
+            &mut output,
+            "https://kvm",
+            &req,
+            &paths,
+            &attempts,
+        )
+        .unwrap();
+        let text = String::from_utf8(output).unwrap();
+        assert!(text.starts_with("HTTP/1.1 403 Forbidden\r\n"));
+    }
+
+    #[test]
+    fn pair_returns_404_when_no_ceremony_active() {
+        let req = super::Request {
+            method: "POST".to_string(),
+            path: "/pair".to_string(),
+            origin: Some("https://kvm".to_string()),
+            authorization: None,
+            body: b"{\"code\":\"123456\"}".to_vec(),
+        };
+
+        let attempts = std::sync::atomic::AtomicUsize::new(0);
+        let paths = super::PairingPaths {
+            code: "/nonexistent/code",
+            code_fallback: "/nonexistent/code",
+            token: "/nonexistent/token",
+            token_fallback: "/nonexistent/token",
+        };
+        let mut output = Vec::new();
+        super::handle_pair_with_paths(
+            &mut output,
+            "https://kvm",
+            &req,
+            &paths,
+            &attempts,
+        )
+        .unwrap();
+        let text = String::from_utf8(output).unwrap();
+        assert!(text.starts_with("HTTP/1.1 404 Not Found\r\n"));
+        assert!(text.contains("no pairing ceremony currently active"));
     }
 }

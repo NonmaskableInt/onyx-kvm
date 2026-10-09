@@ -1,0 +1,4 @@
+#!/bin/sh
+# Remount root filesystem read-only as declared in /etc/fstab.
+# Bootloader cmdline passes rootwait rw; this ensures fail-closed immutability.
+mount -o remount,ro /

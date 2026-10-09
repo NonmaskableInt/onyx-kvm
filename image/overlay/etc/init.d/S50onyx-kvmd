@@ -18,8 +18,21 @@ case "${1:-}" in
         test -r "$identity_dir/tls-certificate.der"
         test -r "$identity_dir/tls-private-key.pkcs8.der"
         test -r "$identity_dir/oauth-issuer-public-key.raw"
+        mkdir -p /run/onyx-kvm
+        chown root:900 /run/onyx-kvm
+        chmod 2770 /run/onyx-kvm
         export ONYX_KVM_HTTPS_BIND=0.0.0.0:8443
-        export ONYX_KVM_HTTPS_ORIGIN=https://onyx-kvm-recovery:8443,https://cleankvm-recovery:8443
+        eth0_ip=""
+        for _ in 1 2 3 4 5; do
+            eth0_ip=$(ip -4 addr show eth0 2>/dev/null | awk '/inet / {print $2}' | cut -d/ -f1 || true)
+            if [ -n "$eth0_ip" ]; then break; fi
+            sleep 1
+        done
+        origins="https://onyx-kvm-recovery:8443,https://cleankvm-recovery:8443"
+        if [ -n "$eth0_ip" ]; then
+            origins="$origins,https://$eth0_ip:8443"
+        fi
+        export ONYX_KVM_HTTPS_ORIGIN="$origins"
         export ONYX_KVM_MCP_RESOURCE=https://onyx-kvm-recovery:8443/mcp,https://cleankvm-recovery:8443/mcp
         export ONYX_KVM_AUTHORIZATION_SERVER=https://onyx-kvm-owner
         export ONYX_KVM_TOKEN_ISSUER=https://onyx-kvm-owner,https://cleankvm-owner

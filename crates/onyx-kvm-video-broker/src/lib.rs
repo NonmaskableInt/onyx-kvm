@@ -49,7 +49,10 @@ pub fn decode_and_authorize(
     let mut header_bytes = [0_u8; WIRE_HEADER_BYTES];
     header_bytes.copy_from_slice(&frame[..WIRE_HEADER_BYTES]);
     let header = WireHeader::decode(header_bytes).map_err(BrokerError::Validation)?;
-    if header.operation != Operation::Snapshot && header.operation != Operation::SnapshotFrame {
+    if header.operation != Operation::Snapshot
+        && header.operation != Operation::SnapshotFrame
+        && header.operation != Operation::StreamFrame
+    {
         return Err(BrokerError::Validation(ValidationError::UnknownOperation));
     }
     if usize::try_from(header.payload_bytes).ok() != Some(SNAPSHOT_REQUEST_BYTES) {
@@ -74,7 +77,11 @@ pub fn decode_and_authorize(
 ///
 /// # Errors
 /// Rejects a buffer unless its length exactly matches the requested pixel format.
-pub fn summarize_frame(bytes: &[u8], format: SnapshotFormat) -> Result<VideoSnapshot, BrokerError> {
+pub fn summarize_frame_fast(
+    bytes: &[u8],
+    format: SnapshotFormat,
+    compute_digest: bool,
+) -> Result<VideoSnapshot, BrokerError> {
     let expected = match format {
         SnapshotFormat::Yuv420p => EXPECTED_YUV420P_1080P_BYTES,
         SnapshotFormat::Yuv422p => EXPECTED_YUV422P_1080P_BYTES,
@@ -87,10 +94,20 @@ pub fn summarize_frame(bytes: &[u8], format: SnapshotFormat) -> Result<VideoSnap
     }
     let byte_length = u32::try_from(bytes.len())
         .map_err(|_| BrokerError::Validation(ValidationError::InvalidLength))?;
-    let digest = Sha256::digest(bytes);
     let mut sha256 = [0_u8; 32];
-    sha256.copy_from_slice(&digest);
+    if compute_digest {
+        let digest = Sha256::digest(bytes);
+        sha256.copy_from_slice(&digest);
+    }
     VideoSnapshot::new(1920, 1080, format, byte_length, sha256).map_err(BrokerError::Validation)
+}
+
+/// Validate a captured 1920x1080 planar YUV frame buffer and construct its wire response with SHA-256 digest.
+///
+/// # Errors
+/// Rejects a buffer unless its length exactly matches the requested pixel format.
+pub fn summarize_frame(bytes: &[u8], format: SnapshotFormat) -> Result<VideoSnapshot, BrokerError> {
+    summarize_frame_fast(bytes, format, true)
 }
 
 #[cfg(test)]

@@ -14,7 +14,7 @@ case "${1:-}" in
         test -c /dev/hidg1
         mkdir -p /run/onyx-kvm
         chown root:900 /run/onyx-kvm
-        chmod 2750 /run/onyx-kvm
+        chmod 2770 /run/onyx-kvm
         if [ ! -e /run/cleankvm ]; then
             ln -s /run/onyx-kvm /run/cleankvm
         fi

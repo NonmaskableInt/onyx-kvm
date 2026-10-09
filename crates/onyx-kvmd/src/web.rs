@@ -10,9 +10,14 @@ pub const INDEX_HTML: &[u8] = br#"<!doctype html>
   <main>
     <header><h1>Onyx KVM</h1><p>Local, authenticated KVM control</p></header>
     <section id="session" aria-labelledby="session-title">
-      <h2 id="session-title">Session</h2>
-      <label for="token">Short-lived access token</label>
-      <div class="row"><input id="token" type="password" autocomplete="off" spellcheck="false"><button id="connect">Connect</button></div>
+      <h2 id="session-title">Session & Pairing</h2>
+      <label for="pair-code">Pairing PIN (from local console)</label>
+      <div class="row"><input id="pair-code" type="text" placeholder="e.g. 123456" autocomplete="off" spellcheck="false"><button id="pair-btn">Pair</button></div>
+      <details style="margin-top:.8rem">
+        <summary style="cursor:pointer;color:#8b949e">Manual token entry</summary>
+        <label for="token" style="margin-top:.4rem">Short-lived access token</label>
+        <div class="row"><input id="token" type="password" autocomplete="off" spellcheck="false"><button id="connect">Connect</button></div>
+      </details>
       <p id="message" role="status">Disconnected</p>
     </section>
     <section aria-labelledby="state-title">
@@ -76,8 +81,17 @@ async function mcp(method, params) {
 function initWebGL(canvas) {
   const gl = canvas.getContext('webgl');
   if (!gl) return null;
+
+  function createShader(type, source) {
+    const s = gl.createShader(type);
+    gl.shaderSource(s, source);
+    gl.compileShader(s);
+    return s;
+  }
+
   const vsSource = 'attribute vec2 a_pos;attribute vec2 a_tex;varying vec2 v_tex;void main(){gl_Position=vec4(a_pos,0.0,1.0);v_tex=a_tex;}';
-  const fsSource = 'precision mediump float;' +
+
+  const fsSourceUyvy = 'precision mediump float;' +
     'varying vec2 v_tex;' +
     'uniform sampler2D u_tex;' +
     'uniform float u_width;' +
@@ -92,37 +106,74 @@ function initWebGL(canvas) {
     'float b=y+1.772*u;' +
     'gl_FragColor=vec4(r,g,b,1.0);' +
     '}';
-  function createShader(gl, type, source) {
-    const s = gl.createShader(type);
-    gl.shaderSource(s, source);
-    gl.compileShader(s);
-    return s;
-  }
-  const program = gl.createProgram();
-  gl.attachShader(program, createShader(gl, gl.VERTEX_SHADER, vsSource));
-  gl.attachShader(program, createShader(gl, gl.FRAGMENT_SHADER, fsSource));
-  gl.linkProgram(program);
-  gl.useProgram(program);
+
+  const fsSourceYuv = 'precision mediump float;' +
+    'varying vec2 v_tex;' +
+    'uniform sampler2D u_y;' +
+    'uniform sampler2D u_u;' +
+    'uniform sampler2D u_v;' +
+    'void main(){' +
+    'float y=texture2D(u_y,v_tex).r;' +
+    'float u=texture2D(u_u,v_tex).r-(128.0/255.0);' +
+    'float v=texture2D(u_v,v_tex).r-(128.0/255.0);' +
+    'float r=y+1.402*v;' +
+    'float g=y-0.344136*u-0.714136*v;' +
+    'float b=y+1.772*u;' +
+    'gl_FragColor=vec4(r,g,b,1.0);' +
+    '}';
+
+  const progUyvy = gl.createProgram();
+  gl.attachShader(progUyvy, createShader(gl.VERTEX_SHADER, vsSource));
+  gl.attachShader(progUyvy, createShader(gl.FRAGMENT_SHADER, fsSourceUyvy));
+  gl.linkProgram(progUyvy);
+
+  const progYuv = gl.createProgram();
+  gl.attachShader(progYuv, createShader(gl.VERTEX_SHADER, vsSource));
+  gl.attachShader(progYuv, createShader(gl.FRAGMENT_SHADER, fsSourceYuv));
+  gl.linkProgram(progYuv);
+
   const quad = new Float32Array([-1,-1,0,1, 1,-1,1,1, -1,1,0,0, -1,1,0,0, 1,-1,1,1, 1,1,1,0]);
   const buf = gl.createBuffer();
   gl.bindBuffer(gl.ARRAY_BUFFER, buf);
   gl.bufferData(gl.ARRAY_BUFFER, quad, gl.STATIC_DRAW);
-  const aPos = gl.getAttribLocation(program, 'a_pos');
-  const aTex = gl.getAttribLocation(program, 'a_tex');
-  gl.enableVertexAttribArray(aPos);
-  gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 16, 0);
-  gl.enableVertexAttribArray(aTex);
-  gl.vertexAttribPointer(aTex, 2, gl.FLOAT, false, 16, 8);
-  const tex = gl.createTexture();
-  gl.bindTexture(gl.TEXTURE_2D, tex);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-  const uWidthLoc = gl.getUniformLocation(program, 'u_width');
-  const uTexLoc = gl.getUniformLocation(program, 'u_tex');
-  gl.uniform1i(uTexLoc, 0);
-  return { gl, tex, program, uWidthLoc };
+
+  function setupAttribs(prog) {
+    const aPos = gl.getAttribLocation(prog, 'a_pos');
+    const aTex = gl.getAttribLocation(prog, 'a_tex');
+    gl.enableVertexAttribArray(aPos);
+    gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 16, 0);
+    gl.enableVertexAttribArray(aTex);
+    gl.vertexAttribPointer(aTex, 2, gl.FLOAT, false, 16, 8);
+  }
+
+  function makeTex() {
+    const t = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, t);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    return t;
+  }
+
+  const texUyvy = makeTex();
+  const texY = makeTex();
+  const texU = makeTex();
+  const texV = makeTex();
+
+  return {
+    gl,
+    progUyvy,
+    uWidthLoc: gl.getUniformLocation(progUyvy, 'u_width'),
+    uTexLoc: gl.getUniformLocation(progUyvy, 'u_tex'),
+    texUyvy,
+    progYuv,
+    uYLoc: gl.getUniformLocation(progYuv, 'u_y'),
+    uULLoc: gl.getUniformLocation(progYuv, 'u_u'),
+    uVLoc: gl.getUniformLocation(progYuv, 'u_v'),
+    texY, texU, texV,
+    setupAttribs,
+  };
 }
 
 function renderCanvas2D(canvas, u8Array, width, height) {
@@ -155,30 +206,109 @@ function renderCanvas2D(canvas, u8Array, width, height) {
   ctx.putImageData(imgData, 0, 0);
 }
 
+function renderCanvas2DYuv420p(canvas, u8Array, width, height) {
+  const ctx = canvas.getContext('2d');
+  const imgData = ctx.createImageData(width, height);
+  const data32 = new Uint32Array(imgData.data.buffer);
+  const yLen = width * height;
+  const uvStride = width >> 1;
+  const uOffset = yLen;
+  const vOffset = yLen + (yLen >> 2);
+  let dst = 0;
+  for (let y = 0; y < height; ++y) {
+    const yRow = y * width;
+    const uvRow = (y >> 1) * uvStride;
+    for (let x = 0; x < width; ++x) {
+      const yVal = u8Array[yRow + x];
+      const uvIdx = uvRow + (x >> 1);
+      const u = u8Array[uOffset + uvIdx] - 128;
+      const v = u8Array[vOffset + uvIdx] - 128;
+      const r = Math.min(255, Math.max(0, (yVal + 1.402 * v) | 0));
+      const g = Math.min(255, Math.max(0, (yVal - 0.344136 * u - 0.714136 * v) | 0));
+      const b = Math.min(255, Math.max(0, (yVal + 1.772 * u) | 0));
+      data32[dst++] = (255 << 24) | (b << 16) | (g << 8) | r;
+    }
+  }
+  ctx.putImageData(imgData, 0, 0);
+}
+
 function renderUyvy(canvas, u8Array, width, height) {
   const actualHeight = Math.min(height, Math.floor(u8Array.byteLength / (width * 2)));
   if (actualHeight <= 0) return;
   if (!glState) {
     glState = initWebGL(canvas);
   }
-  if (glState) {
-    const { gl, tex, program, uWidthLoc } = glState;
+  if (glState && glState.progUyvy) {
+    const { gl, progUyvy, texUyvy, uWidthLoc, uTexLoc, setupAttribs } = glState;
     if (canvas.width !== width || canvas.height !== actualHeight) {
       canvas.width = width;
       canvas.height = actualHeight;
     }
     gl.viewport(0, 0, width, actualHeight);
-    gl.useProgram(program);
+    gl.useProgram(progUyvy);
+    setupAttribs(progUyvy);
     gl.uniform1f(uWidthLoc, width);
     gl.activeTexture(gl.TEXTURE0);
-    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.bindTexture(gl.TEXTURE_2D, texUyvy);
     gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
     const texWidth = width >> 1;
     const uploadBytes = u8Array.subarray(0, texWidth * actualHeight * 4);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, texWidth, actualHeight, 0, gl.RGBA, gl.UNSIGNED_BYTE, uploadBytes);
+    gl.uniform1i(uTexLoc, 0);
     gl.drawArrays(gl.TRIANGLES, 0, 6);
   } else {
     renderCanvas2D(canvas, u8Array, width, actualHeight);
+  }
+}
+
+function renderYuv420p(canvas, u8Array, width, height) {
+  if (canvas.width !== width || canvas.height !== height) {
+    canvas.width = width;
+    canvas.height = height;
+  }
+  if (!glState) {
+    glState = initWebGL(canvas);
+  }
+  if (glState && glState.progYuv) {
+    const { gl, progYuv, texY, texU, texV, uYLoc, uULLoc, uVLoc, setupAttribs } = glState;
+    gl.viewport(0, 0, width, height);
+    gl.useProgram(progYuv);
+    setupAttribs(progYuv);
+    gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+
+    const yLen = width * height;
+    const uvStride = width >> 1;
+    const uvHeight = height >> 1;
+    const uvLen = uvStride * uvHeight;
+    const uOffset = yLen;
+    const vOffset = yLen + uvLen;
+
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, texY);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.LUMINANCE, width, height, 0, gl.LUMINANCE, gl.UNSIGNED_BYTE, u8Array.subarray(0, yLen));
+    gl.uniform1i(uYLoc, 0);
+
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, texU);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.LUMINANCE, uvStride, uvHeight, 0, gl.LUMINANCE, gl.UNSIGNED_BYTE, u8Array.subarray(uOffset, uOffset + uvLen));
+    gl.uniform1i(uULLoc, 1);
+
+    gl.activeTexture(gl.TEXTURE2);
+    gl.bindTexture(gl.TEXTURE_2D, texV);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.LUMINANCE, uvStride, uvHeight, 0, gl.LUMINANCE, gl.UNSIGNED_BYTE, u8Array.subarray(vOffset, vOffset + uvLen));
+    gl.uniform1i(uVLoc, 2);
+
+    gl.drawArrays(gl.TRIANGLES, 0, 6);
+  } else {
+    renderCanvas2DYuv420p(canvas, u8Array, width, height);
+  }
+}
+
+function renderFrame(canvas, u8Array, width, height, format) {
+  if (format === 'yuv420p' || u8Array.byteLength === Math.floor(width * height * 1.5)) {
+    renderYuv420p(canvas, u8Array, width, height);
+  } else {
+    renderUyvy(canvas, u8Array, width, height);
   }
 }
 
@@ -216,34 +346,66 @@ async function toggleStream() {
       chunks.push(value);
       totalLen += value.length;
 
-      while (totalLen >= HEADER_LEN) {
-        let buffer;
-        if (chunks.length === 1) {
-          buffer = chunks[0];
+      while (true) {
+        if (totalLen < HEADER_LEN) break;
+
+        let headerView;
+        if (chunks[0].length >= HEADER_LEN) {
+          headerView = new DataView(chunks[0].buffer, chunks[0].byteOffset, HEADER_LEN);
         } else {
-          buffer = new Uint8Array(totalLen);
-          let offset = 0;
+          const hdrBuf = new Uint8Array(HEADER_LEN);
+          let copied = 0;
           for (const c of chunks) {
-            buffer.set(c, offset);
-            offset += c.length;
+            const n = Math.min(c.length, HEADER_LEN - copied);
+            hdrBuf.set(c.subarray(0, n), copied);
+            copied += n;
+            if (copied === HEADER_LEN) break;
           }
-          chunks = [buffer];
+          headerView = new DataView(hdrBuf.buffer, 0, HEADER_LEN);
         }
 
-        const view = new DataView(buffer.buffer, buffer.byteOffset, HEADER_LEN);
-        const seq = view.getUint32(4, false);
-        const width = view.getUint16(16, false);
-        const height = view.getUint16(18, false);
-        const formatByte = buffer[20];
-        const payloadLen = view.getUint32(24, false);
+        const payloadLen = headerView.getUint32(24, false);
         const totalFrameLen = HEADER_LEN + payloadLen;
 
         if (totalLen < totalFrameLen) {
           break;
         }
 
-        const framePayload = buffer.subarray(HEADER_LEN, totalFrameLen);
-        renderUyvy(byId('kvm-canvas'), framePayload, width, height);
+        const fullBuffer = new Uint8Array(totalFrameLen);
+        let offset = 0;
+        let consumed = 0;
+        let remainder = null;
+
+        for (let i = 0; i < chunks.length; i++) {
+          const c = chunks[i];
+          const needed = totalFrameLen - offset;
+          if (c.length <= needed) {
+            fullBuffer.set(c, offset);
+            offset += c.length;
+            consumed++;
+            if (offset === totalFrameLen) break;
+          } else {
+            fullBuffer.set(c.subarray(0, needed), offset);
+            offset += needed;
+            consumed++;
+            remainder = c.subarray(needed);
+            break;
+          }
+        }
+
+        chunks.splice(0, consumed);
+        if (remainder && remainder.length > 0) {
+          chunks.unshift(remainder);
+        }
+        totalLen -= totalFrameLen;
+
+        const view = new DataView(fullBuffer.buffer, fullBuffer.byteOffset, HEADER_LEN);
+        const seq = view.getUint32(4, false);
+        const width = view.getUint16(16, false);
+        const height = view.getUint16(18, false);
+        const formatByte = fullBuffer[20];
+        const framePayload = fullBuffer.subarray(HEADER_LEN, totalFrameLen);
+        renderFrame(byId('kvm-canvas'), framePayload, width, height, formatByte === 3 ? 'yuv422p' : 'yuv420p');
 
         byId('snapshot-result').textContent = JSON.stringify({
           stream: true,
@@ -253,15 +415,6 @@ async function toggleStream() {
           format: formatByte === 3 ? 'yuv422p' : 'yuv420p',
           byteLength: payloadLen,
         }, null, 2);
-
-        if (totalLen === totalFrameLen) {
-          chunks = [];
-          totalLen = 0;
-        } else {
-          const remainder = buffer.subarray(totalFrameLen);
-          chunks = [remainder];
-          totalLen = remainder.length;
-        }
       }
     }
   } catch (e) {
@@ -275,10 +428,33 @@ async function toggleStream() {
   }
 }
 
+async function pair() {
+  const code = byId('pair-code').value.trim();
+  if (!code) throw new Error('Pairing code is required');
+  byId('message').textContent = 'Pairing...';
+  const response = await fetch('/pair', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({code})
+  });
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({error: 'Pairing failed'}));
+    throw new Error(err.error || `Pairing rejected (${response.status})`);
+  }
+  const data = await response.json();
+  byId('pair-code').value = '';
+  token = data.token;
+  await initSession();
+}
+
 async function connect() {
   token = byId('token').value;
   byId('token').value = '';
   if (!token) throw new Error('A short-lived access token is required');
+  await initSession();
+}
+
+async function initSession() {
   await mcp('initialize', {protocolVersion:'2025-11-25',capabilities:{},clientInfo:{name:'onyx-kvm-web',version:'0.1.0'}});
   await fetch('/mcp', {method:'POST',headers:{'Authorization':`Bearer ${token}`,'Content-Type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',method:'notifications/initialized'})});
   const status = await mcp('tools/call', {name:'kvm.status',arguments:{}});
@@ -311,9 +487,9 @@ async function fetchFrame() {
   const digest = response.headers.get('X-Frame-Digest') || '';
   const width = parseInt(response.headers.get('X-Frame-Width') || '1920', 10);
   const height = parseInt(response.headers.get('X-Frame-Height') || '1080', 10);
-  const format = response.headers.get('X-Frame-Format') || 'uyvy';
+  const format = response.headers.get('X-Frame-Format') || 'yuv420p';
   const buffer = await response.arrayBuffer();
-  renderUyvy(byId('kvm-canvas'), new Uint8Array(buffer), width, height);
+  renderFrame(byId('kvm-canvas'), new Uint8Array(buffer), width, height, format);
   byId('snapshot-result').textContent = JSON.stringify({
     width, height, format, byteLength: buffer.byteLength, sha256: digest
   }, null, 2);
@@ -418,6 +594,8 @@ byId('send-cad').addEventListener('click', async () => {
 byId('release-keys').addEventListener('click', releaseAll);
 
 function run(action) { action().catch((error) => { byId('message').textContent = error.message; }); }
+byId('pair-btn').addEventListener('click', () => run(pair));
+byId('pair-code').addEventListener('keydown', (e) => { if (e.key === 'Enter') run(pair); });
 byId('connect').addEventListener('click', () => run(connect));
 byId('snapshot').addEventListener('click', () => run(snapshot));
 byId('fetch-frame').addEventListener('click', () => run(fetchFrame));

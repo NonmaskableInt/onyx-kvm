@@ -7,12 +7,36 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <signal.h>
 #include <sys/prctl.h>
 #include <sys/socket.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <sys/syscall.h>
 #include <unistd.h>
+
+static int write_all(int fd, const void *buf, size_t count)
+{
+	const char *p = (const char *)buf;
+	while (count > 0) {
+		ssize_t written = write(fd, p, count);
+		if (written <= 0) {
+			if (written < 0 && (errno == EINTR || errno == EAGAIN))
+				continue;
+			return -1;
+		}
+		p += written;
+		count -= (size_t)written;
+	}
+	return 0;
+}
+
+static volatile sig_atomic_t g_stop = 0;
+static void handle_sig(int sig)
+{
+	(void)sig;
+	g_stop = 1;
+}
 
 #include <linux/audit.h>
 #include <linux/filter.h>
@@ -207,8 +231,11 @@ int main(int argc, char **argv)
 	const char *override_pn = NULL;
 	const char *override_lanes = NULL;
 
-	if (argc > 6) {
-		fprintf(stderr, "usage: %s [lane-profile-0..%zu] [height] [hs_settle] [pn_swap] [lane_id]\n", argv[0],
+	int stream_mode = 0;
+	struct sigaction sa;
+
+	if (argc > 7) {
+		fprintf(stderr, "usage: %s [lane-profile-0..%zu] [height] [hs_settle] [pn_swap] [lane_id] [mode]\n", argv[0],
 			sizeof(lane_profiles) / sizeof(lane_profiles[0]) - 1);
 		return 2;
 	}
@@ -249,6 +276,21 @@ int main(int argc, char **argv)
 	if (argc >= 6 && argv[5][0]) {
 		override_lanes = argv[5];
 	}
+	if (argc >= 7 && argv[6][0]) {
+		if (strcmp(argv[6], "stream") == 0) {
+			stream_mode = 1;
+		} else if (strcmp(argv[6], "oneshot") == 0) {
+			stream_mode = 0;
+		} else {
+			fprintf(stderr, "invalid mode: %s\n", argv[6]);
+			return 2;
+		}
+	}
+	memset(&sa, 0, sizeof(sa));
+	sa.sa_handler = handle_sig;
+	sigaction(SIGINT, &sa, NULL);
+	sigaction(SIGTERM, &sa, NULL);
+	signal(SIGPIPE, SIG_IGN);
 	if (install_boundary() < 0) {
 		perror("install syscall boundary");
 		return 1;
@@ -309,14 +351,25 @@ int main(int argc, char **argv)
 	mipi.devno = mipi_dev;
 	mipi.img_size.width = WIDTH;
 	mipi.img_size.height = target_height;
-	printf("CLEANKVM_LANE_PROFILE=%u DEV=%u TARGET_HEIGHT=%u HS_SETTLE=%u PN=%u,%u,%u,%u,%u LANES=%d,%d,%d,%d,%d\n",
-		lane_profile, mipi_dev, target_height, target_hs_settle,
-		mipi.mipi_attr.pn_swap[0], mipi.mipi_attr.pn_swap[1],
-		mipi.mipi_attr.pn_swap[2], mipi.mipi_attr.pn_swap[3],
-		mipi.mipi_attr.pn_swap[4],
-		mipi.mipi_attr.lane_id[0], mipi.mipi_attr.lane_id[1],
-		mipi.mipi_attr.lane_id[2], mipi.mipi_attr.lane_id[3],
-		mipi.mipi_attr.lane_id[4]);
+	if (!stream_mode) {
+		printf("CLEANKVM_LANE_PROFILE=%u DEV=%u TARGET_HEIGHT=%u HS_SETTLE=%u PN=%u,%u,%u,%u,%u LANES=%d,%d,%d,%d,%d\n",
+			lane_profile, mipi_dev, target_height, target_hs_settle,
+			mipi.mipi_attr.pn_swap[0], mipi.mipi_attr.pn_swap[1],
+			mipi.mipi_attr.pn_swap[2], mipi.mipi_attr.pn_swap[3],
+			mipi.mipi_attr.pn_swap[4],
+			mipi.mipi_attr.lane_id[0], mipi.mipi_attr.lane_id[1],
+			mipi.mipi_attr.lane_id[2], mipi.mipi_attr.lane_id[3],
+			mipi.mipi_attr.lane_id[4]);
+	} else {
+		fprintf(stderr, "CLEANKVM_LANE_PROFILE=%u DEV=%u TARGET_HEIGHT=%u HS_SETTLE=%u PN=%u,%u,%u,%u,%u LANES=%d,%d,%d,%d,%d\n",
+			lane_profile, mipi_dev, target_height, target_hs_settle,
+			mipi.mipi_attr.pn_swap[0], mipi.mipi_attr.pn_swap[1],
+			mipi.mipi_attr.pn_swap[2], mipi.mipi_attr.pn_swap[3],
+			mipi.mipi_attr.pn_swap[4],
+			mipi.mipi_attr.lane_id[0], mipi.mipi_attr.lane_id[1],
+			mipi.mipi_attr.lane_id[2], mipi.mipi_attr.lane_id[3],
+			mipi.mipi_attr.lane_id[4]);
+	}
 
 	/* Step 1: Configure VI Dev 0 before MIPI RX so that clk_csi_mac0
 	 * is enabled by CVI_VI_EnableDev before high-speed CSI packets arrive. */
@@ -437,6 +490,97 @@ int main(int argc, char **argv)
 	    check("CVI_VI_EnableChn", CVI_VI_EnableChn(0, 0)))
 		goto cleanup;
 	chn_up = 1;
+	if (stream_mode) {
+		void *copy_buf = NULL;
+		uint8_t ready_byte = 0;
+
+		if (check("CVI_VI_GetChnFrame", CVI_VI_GetChnFrame(0, 0, &frame, 5000))) {
+			fprintf(stderr, "initial frame lock failed\n");
+			goto cleanup;
+		}
+		if (frame.stVFrame.u32Width != WIDTH || frame.stVFrame.u32Height != target_height ||
+		    frame.stVFrame.enCompressMode != COMPRESS_MODE_NONE) {
+			fprintf(stderr, "unexpected frame geometry or compression\n");
+			(void)CVI_VI_ReleaseChnFrame(0, 0, &frame);
+			goto cleanup;
+		}
+		(void)CVI_VI_ReleaseChnFrame(0, 0, &frame);
+
+		copy_buf = malloc(OUTPUT_LIMIT);
+		if (!copy_buf) {
+			fprintf(stderr, "allocate copy buffer failed\n");
+			goto cleanup;
+		}
+
+		if (write_all(STDOUT_FILENO, &ready_byte, 1) != 0) {
+			free(copy_buf);
+			goto cleanup;
+		}
+
+		while (!g_stop) {
+			uint8_t cmd = 0;
+			ssize_t n = read(STDIN_FILENO, &cmd, 1);
+			if (n <= 0) {
+				break;
+			}
+			if (cmd == 'Q') {
+				break;
+			}
+			if (CVI_VI_GetChnFrame(0, 0, &frame, 2000) != CVI_SUCCESS) {
+				uint8_t err_status = 1;
+				if (write_all(STDOUT_FILENO, &err_status, 1) != 0)
+					break;
+				continue;
+			}
+			if (frame.stVFrame.u32Width != WIDTH || frame.stVFrame.u32Height != target_height) {
+				(void)CVI_VI_ReleaseChnFrame(0, 0, &frame);
+				uint8_t err_status = 1;
+				if (write_all(STDOUT_FILENO, &err_status, 1) != 0)
+					break;
+				continue;
+			}
+			CVI_U32 total_bytes = 0;
+			for (i = 0; i < 3; ++i) {
+				total_bytes += frame.stVFrame.u32Length[i];
+			}
+			uint8_t ok_header[5];
+			ok_header[0] = 0;
+			ok_header[1] = (uint8_t)((total_bytes >> 24) & 0xff);
+			ok_header[2] = (uint8_t)((total_bytes >> 16) & 0xff);
+			ok_header[3] = (uint8_t)((total_bytes >> 8) & 0xff);
+			ok_header[4] = (uint8_t)(total_bytes & 0xff);
+			if (write_all(STDOUT_FILENO, ok_header, 5) != 0) {
+				(void)CVI_VI_ReleaseChnFrame(0, 0, &frame);
+				break;
+			}
+			int write_err = 0;
+			for (i = 0; i < 3; ++i) {
+				CVI_U32 length = frame.stVFrame.u32Length[i];
+				if (length == 0)
+					continue;
+				if (length > OUTPUT_LIMIT ||
+				    CVI_VB_CopyBlock(frame.stVFrame.u64PhyAddr[0],
+					(CVI_U32)(frame.stVFrame.u64PhyAddr[i] -
+					 frame.stVFrame.u64PhyAddr[0]),
+					copy_buf, length) != CVI_SUCCESS) {
+					write_err = 1;
+					break;
+				}
+				if (write_all(STDOUT_FILENO, copy_buf, length) != 0) {
+					write_err = 1;
+					break;
+				}
+			}
+			(void)CVI_VI_ReleaseChnFrame(0, 0, &frame);
+			if (write_err)
+				break;
+		}
+
+		memset(copy_buf, 0, OUTPUT_LIMIT);
+		free(copy_buf);
+		rc = 0;
+		goto cleanup;
+	}
 
 	/* Observe receiver counters with active VI clocking and pipeline. */
 	(void)snapshot_mipi(0);

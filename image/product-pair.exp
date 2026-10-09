@@ -1,0 +1,109 @@
+#!/usr/bin/expect -f
+set timeout 30
+if {$argc < 1} {
+    puts stderr "usage: product-pair.exp SECRETS_DIRECTORY [PROFILE] [TTL_SECONDS]"
+    exit 1
+}
+set secrets_dir [lindex $argv 0]
+set profile [lindex $argv 1]
+if {$profile == ""} { set profile "operator" }
+set ttl_seconds [lindex $argv 2]
+if {$ttl_seconds == ""} { set ttl_seconds 14400 }
+
+set credential_path "$secrets_dir/recovery-credential.txt"
+set issuer_key "$secrets_dir/oauth-issuer-private-key.pem"
+if {![file exists $issuer_key] && [file exists "$secrets_dir/identity/oauth-issuer-private-key.pem"]} {
+    set issuer_key "$secrets_dir/identity/oauth-issuer-private-key.pem"
+}
+
+if {![file exists $credential_path]} {
+    puts stderr "missing recovery credential: $credential_path"
+    exit 2
+}
+if {![file exists $issuer_key]} {
+    puts stderr "missing issuer key: $issuer_key"
+    exit 2
+}
+
+set fh [open $credential_path r]
+set credential_text [read $fh]
+close $fh
+if {![regexp -line {^password=(.*)$} $credential_text -> password]} { exit 2 }
+
+# Generate 6-digit random PIN
+set pin [format "%06d" [expr {int(rand() * 900000) + 100000}]]
+
+# Mint session token
+set temp_token "/tmp/onyx-kvm-pair-token-[pid].jwt"
+catch {file delete $temp_token}
+set mint_script "image/mint-development-token.sh"
+set issuer "https://onyx-kvm-owner"
+set audience "https://onyx-kvm-recovery:8443/mcp"
+if {[catch {exec $mint_script $issuer_key $issuer $audience $temp_token $profile $ttl_seconds} mint_out]} {
+    puts stderr "failed to mint session token: $mint_out"
+    exit 3
+}
+
+set fh [open $temp_token r]
+set token [read $fh]
+close $fh
+catch {file delete $temp_token}
+set token [string trim $token]
+
+spawn /usr/bin/sudo /usr/bin/cu -l /dev/cu.usbserial-112440 -s 115200
+expect { -re {Connected\.} {} timeout { exit 7 } }
+after 300
+send "\r"
+set logged_in 0
+set tries 0
+while {$tries < 6} {
+    set timeout 2
+    expect {
+        -re {# } { set logged_in 1; break }
+        -re {login: *$} { break }
+        timeout { incr tries; send "\r" }
+    }
+}
+set timeout 30
+if {!$logged_in} {
+    send "root\r"
+    expect { -re {Password: *$} {} timeout { exit 4 } }
+    set send_slow {1 .02}
+    log_user 0
+    send -s -- "$password\r"
+    expect { -re {# } {} timeout { log_user 1; exit 5 } }
+}
+
+unset password
+unset credential_text
+log_user 1
+
+set send_slow {10 .002}
+send -s -- "mkdir -p /run/onyx-kvm\r"
+expect -re {# }
+send -s -- "echo '$pin' > /run/onyx-kvm/pairing-code\r"
+expect -re {# }
+send -s -- "chmod 0640 /run/onyx-kvm/pairing-code\r"
+expect -re {# }
+send -s -- "chown root:900 /run/onyx-kvm/pairing-code\r"
+expect -re {# }
+send -s -- "echo '$token' > /run/onyx-kvm/pending-session-token\r"
+expect -re {# }
+send -s -- "chmod 0640 /run/onyx-kvm/pending-session-token\r"
+expect -re {# }
+send -s -- "chown root:900 /run/onyx-kvm/pending-session-token\r"
+expect -re {# }
+send -s -- "echo __PAIR_STAGED__\r"
+expect { -re {__PAIR_STAGED__} {} timeout { log_user 1; exit 6 } }
+catch {exec /usr/bin/sudo -n /usr/bin/killall -9 cu}
+log_user 1
+
+puts "\n==================================================="
+puts "           Onyx KVM Pairing Ceremony"
+puts "==================================================="
+puts "Pairing PIN:  $pin"
+puts "TTL:          $ttl_seconds seconds ($profile profile)"
+puts "Status:       Staged on device in /run/onyx-kvm"
+puts "==================================================="
+puts "Enter this PIN in the Onyx KVM web console to pair.\n"
+exit 0

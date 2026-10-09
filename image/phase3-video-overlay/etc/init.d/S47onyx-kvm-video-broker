@@ -17,6 +17,8 @@ case "${1:-}" in
         if [ ! -e /run/cleankvm ]; then
             ln -s /run/onyx-kvm /run/cleankvm
         fi
+        export ONYX_KVM_VIDEO_FRAME_PATH=/run/cleankvm-frame.yuv422p
+        export ONYX_KVM_VIDEO_PROBE_BIN=/usr/libexec/cleankvm-raw-frame-probe
         start-stop-daemon -S -b -m -p "$pidfile" -x "$daemon"
         ;;
     stop)

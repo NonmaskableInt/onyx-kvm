@@ -1,6 +1,6 @@
 use onyx_kvm_media_protocol::{Operation, SNAPSHOT_RESPONSE_BYTES, WireHeader};
 use onyx_kvm_video_broker::{
-    EXPECTED_YUV422P_1080P_BYTES, FRAME_LEN, decode_and_authorize, summarize_frame,
+    EXPECTED_YUV422P_1080P_BYTES, FRAME_LEN, decode_and_authorize, summarize_frame_fast,
 };
 use std::env;
 use std::fs::{self, File, Permissions};
@@ -8,7 +8,7 @@ use std::io::{self, Read, Write};
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
-use std::process::{Command, ExitCode, Stdio};
+use std::process::{Child, ChildStdin, ChildStdout, Command, ExitCode, Stdio};
 use std::time::Duration;
 
 const DEFAULT_SOCKET: &str = "/run/onyx-kvm/video.sock";
@@ -121,40 +121,122 @@ fn run(config: &Config) -> io::Result<()> {
     Ok(())
 }
 
+#[allow(clippy::too_many_lines)]
 fn serve(mut stream: UnixStream, config: &Config) -> io::Result<()> {
     authenticate_peer(&stream)?;
     stream.set_read_timeout(Some(Duration::from_secs(10)))?;
     stream.set_write_timeout(Some(Duration::from_secs(10)))?;
-    let mut frame = [0_u8; FRAME_LEN];
-    stream.read_exact(&mut frame)?;
-    let enabled = File::open(&config.enable).is_ok();
-    let (operation, request) = decode_and_authorize(&frame, enabled)
-        .map_err(|error| io::Error::new(io::ErrorKind::PermissionDenied, error.to_string()))?;
-    let (snapshot, mut bytes) = capture_bounded_frame(config, request.format)?;
-    match operation {
-        Operation::Snapshot => {
-            stream.write_all(&snapshot.encode())?;
+    if Path::new(DEVMEM_PATH).exists() {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "/dev/mem must be absent before video capture",
+        ));
+    }
+    if File::open(&config.enable).is_err() {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "video capture is disabled",
+        ));
+    }
+    remove_if_exists(&config.frame_path)?;
+    remove_if_exists(Path::new("/run/cleankvm-frame.yuv422p"))?;
+    let _guard = ModuleCleanupGuard {
+        frame_path: &config.frame_path,
+    };
+    load_quarantine_modules(&config.module_dir)?;
+
+    let probe_bin = resolve_probe_bin(config);
+    let mut streaming_probe = match StreamingProbe::spawn(probe_bin) {
+        Ok(p) => Some(p),
+        Err(err) => {
+            eprintln!("onyx-kvm-video-broker: streaming probe spawn note: {err}");
+            None
         }
-        Operation::SnapshotFrame => {
-            let payload_bytes = u32::try_from(SNAPSHOT_RESPONSE_BYTES + bytes.len())
-                .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "payload too large"))?;
-            let header = WireHeader {
-                operation: Operation::SnapshotFrame,
-                payload_bytes,
-            };
-            stream.write_all(&header.encode())?;
-            stream.write_all(&snapshot.encode())?;
-            stream.write_all(&bytes)?;
+    };
+
+    let mut is_first = true;
+    loop {
+        let mut frame = [0_u8; FRAME_LEN];
+        match stream.read_exact(&mut frame) {
+            Ok(()) => {}
+            Err(err) if err.kind() == io::ErrorKind::UnexpectedEof => {
+                break;
+            }
+            Err(err) => {
+                if !is_first {
+                    break;
+                }
+                return Err(err);
+            }
         }
-        _ => {
+        is_first = false;
+        if Path::new(DEVMEM_PATH).exists() {
             return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "unsupported operation",
+                io::ErrorKind::PermissionDenied,
+                "/dev/mem must be absent before video capture",
             ));
         }
+        let enabled = File::open(&config.enable).is_ok();
+        let (operation, request) = decode_and_authorize(&frame, enabled)
+            .map_err(|error| io::Error::new(io::ErrorKind::PermissionDenied, error.to_string()))?;
+        let (snapshot, mut bytes) = if let Some(ref mut probe) = streaming_probe {
+            match probe.capture_frame() {
+                Ok(bytes) => {
+                    let snapshot = summarize_frame_fast(
+                        &bytes,
+                        request.format,
+                        operation != Operation::StreamFrame,
+                    )
+                    .map_err(|error| {
+                        io::Error::new(io::ErrorKind::InvalidData, error.to_string())
+                    })?;
+                    (snapshot, bytes)
+                }
+                Err(err) => {
+                    eprintln!(
+                        "onyx-kvm-video-broker: streaming probe error: {err}, falling back to oneshot"
+                    );
+                    streaming_probe = None;
+                    capture_frame_payload(
+                        config,
+                        request.format,
+                        operation != Operation::StreamFrame,
+                    )?
+                }
+            }
+        } else {
+            capture_frame_payload(
+                config,
+                request.format,
+                operation != Operation::StreamFrame,
+            )?
+        };
+        match operation {
+            Operation::Snapshot => {
+                stream.write_all(&snapshot.encode())?;
+            }
+            Operation::SnapshotFrame | Operation::StreamFrame => {
+                let payload_bytes = u32::try_from(SNAPSHOT_RESPONSE_BYTES + bytes.len())
+                    .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "payload too large"))?;
+                let header = WireHeader {
+                    operation,
+                    payload_bytes,
+                };
+                stream.write_all(&header.encode())?;
+                stream.write_all(&snapshot.encode())?;
+                stream.write_all(&bytes)?;
+            }
+            _ => {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "unsupported operation",
+                ));
+            }
+        }
+        bytes.fill(0);
+        stream.flush()?;
     }
-    bytes.fill(0);
-    stream.flush()
+    Ok(())
 }
 
 #[cfg(target_os = "linux")]
@@ -177,28 +259,88 @@ fn authenticate_peer(_stream: &UnixStream) -> io::Result<()> {
     ))
 }
 
-fn capture_bounded_frame(
-    config: &Config,
-    format: onyx_kvm_media_protocol::SnapshotFormat,
-) -> io::Result<(onyx_kvm_media_protocol::VideoSnapshot, Vec<u8>)> {
-    if Path::new(DEVMEM_PATH).exists() {
-        return Err(io::Error::new(
-            io::ErrorKind::PermissionDenied,
-            "/dev/mem must be absent before video capture",
-        ));
-    }
-    remove_if_exists(&config.frame_path)?;
-    let _guard = ModuleCleanupGuard {
-        frame_path: &config.frame_path,
-    };
-    load_quarantine_modules(&config.module_dir)?;
-    let probe_bin = if config.probe_bin.exists() {
+fn resolve_probe_bin(config: &Config) -> &Path {
+    if config.probe_bin.exists() {
         config.probe_bin.as_path()
     } else if Path::new("/usr/libexec/cleankvm-raw-frame-probe").exists() {
         Path::new("/usr/libexec/cleankvm-raw-frame-probe")
     } else {
         config.probe_bin.as_path()
-    };
+    }
+}
+
+struct StreamingProbe {
+    child: Child,
+    stdin: ChildStdin,
+    stdout: ChildStdout,
+}
+
+impl StreamingProbe {
+    fn spawn(probe_bin: &Path) -> io::Result<Self> {
+        let mut child = Command::new(probe_bin)
+            .args(["0", "1080", "8", "0,0,0,0,0", "2,4,3,1,0", "stream"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()?;
+        let stdin = child
+            .stdin
+            .take()
+            .ok_or_else(|| io::Error::other("no stdin for probe"))?;
+        let mut stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| io::Error::other("no stdout for probe"))?;
+
+        let mut ready = [0_u8; 1];
+        stdout.read_exact(&mut ready)?;
+        if ready[0] != 0 {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(io::Error::other("probe returned non-zero ready byte"));
+        }
+        Ok(Self {
+            child,
+            stdin,
+            stdout,
+        })
+    }
+
+    fn capture_frame(&mut self) -> io::Result<Vec<u8>> {
+        self.stdin.write_all(&[1])?;
+        self.stdin.flush()?;
+        let mut header = [0_u8; 5];
+        self.stdout.read_exact(&mut header)?;
+        if header[0] != 0 {
+            return Err(io::Error::other("probe capture error"));
+        }
+        let length = u32::from_be_bytes([header[1], header[2], header[3], header[4]]) as usize;
+        if length > 5 * 1024 * 1024 {
+            return Err(io::Error::other("probe returned oversized frame"));
+        }
+        let mut bytes = vec![0_u8; length];
+        self.stdout.read_exact(&mut bytes)?;
+        Ok(bytes)
+    }
+}
+
+impl Drop for StreamingProbe {
+    fn drop(&mut self) {
+        let _ = self.stdin.write_all(b"Q");
+        let _ = self.stdin.flush();
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
+fn capture_frame_payload(
+    config: &Config,
+    format: onyx_kvm_media_protocol::SnapshotFormat,
+    compute_digest: bool,
+) -> io::Result<(onyx_kvm_media_protocol::VideoSnapshot, Vec<u8>)> {
+    remove_if_exists(&config.frame_path)?;
+    remove_if_exists(Path::new("/run/cleankvm-frame.yuv422p"))?;
+    let probe_bin = resolve_probe_bin(config);
     let status = Command::new(probe_bin)
         .args(["0", "1080", "8", "0,0,0,0,0", "2,4,3,1,0"])
         .stdin(Stdio::null())
@@ -221,7 +363,7 @@ fn capture_bounded_frame(
         .read_to_end(&mut bytes)?;
     remove_if_exists(&config.frame_path)?;
     remove_if_exists(Path::new("/run/cleankvm-frame.yuv422p"))?;
-    let snapshot = summarize_frame(&bytes, format)
+    let snapshot = summarize_frame_fast(&bytes, format, compute_digest)
         .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error.to_string()))?;
     Ok((snapshot, bytes))
 }

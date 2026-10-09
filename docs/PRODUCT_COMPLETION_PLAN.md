@@ -116,14 +116,27 @@ to continuous media streaming sessions and release hardening.
 
 ## Immediate execution order
 
-1. **Release Candidate v59 Rebranding & Hardware Acceptance** [COMPLETED]:
+1. **Release Candidate v59 Rebranding & Hardware Acceptance (Track #3 / Phase 4.3)** [COMPLETED]:
    - All crates rebranded to `onyx-kvm-*` and `onyx-kvmd`.
    - Built and assembled `out/product-v59/onyx-kvm-phase1.img` (79,692,288 bytes).
    - Verified on physical hardware `192.168.2.108`: cold boot baseline, HID forwarding,
      1080p live video streaming, audio capture metrics, audio tone playback, and fail-closed teardown.
-2. **Phase 4.1: Continuous Media & Low-Latency Streaming Session Architecture** [IN PROGRESS]:
-   - Design and implement bounded media streaming session management in `onyx-kvmd`.
-   - Single-producer/single-consumer frame queue with backpressure drop logic.
-   - Low-latency binary streaming endpoint with client heartbeat/keepalive.
-3. **Phase 4.2: Production Enrollment & Rootfs Hardening** [NEXT]:
-   - Read-only rootfs mount configuration and pairing enrollment.
+2. **Continuous Media & Low-Latency Streaming Session Architecture (Track #1 / Phase 4.1)** [COMPLETED]:
+   - Implemented bounded media streaming session management in `onyx-kvmd` and `onyx-kvm-media-protocol`.
+   - Designed single-producer/single-consumer frame queue with backpressure drop logic (`BoundedFrameRing`).
+   - Integrated `StreamSessionLease` with lease renewal and bounded timeouts.
+   - Built authenticated chunked HTTP/1.1 streaming endpoint (`GET /video/stream`) with zero-copy payload delivery.
+   - Implemented WebGL ReadableStream continuous frame consumer in web console UI (`web.rs`).
+3. **Production Hardening, Rootfs Integrity & Local Pairing Ceremony (Track #2 / Phase 4.2)** [COMPLETED]:
+   - Read-only rootfs mount configuration: `/etc/fstab` read-only mount, volatile `tmpfs` overlays for `/run` and `/tmp`, early init remount `S05ro-root`, and U-Boot `rootwait ro` boot arguments.
+   - Implemented physical local pairing ceremony: memory-only, single-use token release via `image/product-pair.exp` and `/usr/sbin/onyx-kvm-pair`.
+   - Implemented pairing endpoint `POST /pair` in `onyx-kvmd` with timing-safe comparison, origin validation, 3-attempt brute-force invalidation, and memory-only token release.
+   - Verified pairing ceremony end-to-end on live hardware (`192.168.2.110`): invalid PIN rejection (401), brute-force lockout (403), valid PIN pairing (200), single-use state purge (404), and authenticated MCP initialization with minted token.
+   - Authoring and verification of cryptographically signed offline update tooling: `image/sign-update.sh` and `image/verify-update.sh` supporting Ed25519 signatures and SHA-256 payload integrity.
+4. **Streaming Pipeline Acceleration & Low-Latency IPC Optimization (Track #1 / Phase 4.1)** [COMPLETED]:
+   - Eliminated per-frame module load/unload thrashing via session-scoped `ModuleCleanupGuard`.
+   - Protocol-level `Operation::StreamFrame` eliminates 310 ms CPU-intensive SHA-256 calculation per frame on 1GHz RISC-V.
+   - Multi-threaded connection accept loop in `onyx-kvmd` resolves thread starvation; concurrent MCP requests complete in 35 ms during active video streaming.
+   - Upgraded raw frame probe to v47 (`cleankvm-raw-frame-probe` with streaming IPC), preserving the active VI pipeline across frames and eliminating 2.15s MIPI RX resync penalty, artificial sleeps, and tmpfs disk writes.
+   - Web console WebGL shader acceleration for planar YUV420P eliminating CPU canvas rendering loop.
+   - Validated on target hardware (`192.168.2.110`): streaming throughput increased over 6x to 6.0 MB/s (~2.0 FPS uncompressed 1080p, saturating 60% of Fast Ethernet), single frame latency reduced from 3.15s to 1.02s, and clean zero-module idle state verified (`lsmod` empty, `Tainted: G`).

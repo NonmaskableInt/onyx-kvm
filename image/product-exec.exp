@@ -43,17 +43,7 @@ send "stty -echo\r"
 after 200
 send -- "$command; echo __CLEANKVM_EXEC_DONE__\r"
 expect { -re {__CLEANKVM_EXEC_DONE__} {} timeout { exit 6 } }
-expect { -re {# } {} timeout {} }
-send "stty echo\r"
-after 200
-send "\r"
-after 300
-send "~.\r"
-set timeout 2
-expect {
-    -re {Disconnected\.} {}
-    timeout { catch {exec kill -9 [exp_pid]} }
-}
+catch {exec /usr/bin/sudo -n /usr/bin/killall -9 cu}
 catch close
 catch wait
 exit 0
