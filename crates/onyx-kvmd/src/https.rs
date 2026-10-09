@@ -802,7 +802,9 @@ fn stream_frames_loop(
 
         let flags = match snapshot.format {
             SnapshotFormat::TileDeltaYuv422 => {
-                if snapshot.byte_length >= 1920 * 1080 * 2 {
+                let full_frame_bytes =
+                    (snapshot.width as u32).saturating_mul(snapshot.height as u32).saturating_mul(2);
+                if snapshot.byte_length >= full_frame_bytes {
                     STREAM_FLAG_KEYFRAME
                 } else {
                     STREAM_FLAG_DELTA
@@ -1260,5 +1262,33 @@ mod tests {
         assert!(suites.contains(&rustls::CipherSuite::TLS13_CHACHA20_POLY1305_SHA256));
         assert!(suites.contains(&rustls::CipherSuite::TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256));
         assert!(suites.contains(&rustls::CipherSuite::TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256));
+    }
+
+    #[test]
+    fn stream_flags_detect_keyframe_for_720p_and_1080p() {
+        fn check_flags(width: u16, height: u16, byte_len: u32) -> u8 {
+            let full = (width as u32).saturating_mul(height as u32).saturating_mul(2);
+            if byte_len >= full {
+                onyx_kvm_media_protocol::STREAM_FLAG_KEYFRAME
+            } else {
+                onyx_kvm_media_protocol::STREAM_FLAG_DELTA
+            }
+        }
+        assert_eq!(
+            check_flags(1280, 720, 1280 * 720 * 2),
+            onyx_kvm_media_protocol::STREAM_FLAG_KEYFRAME
+        );
+        assert_eq!(
+            check_flags(1280, 720, 5000),
+            onyx_kvm_media_protocol::STREAM_FLAG_DELTA
+        );
+        assert_eq!(
+            check_flags(1920, 1080, 1920 * 1080 * 2),
+            onyx_kvm_media_protocol::STREAM_FLAG_KEYFRAME
+        );
+        assert_eq!(
+            check_flags(1920, 1080, 10000),
+            onyx_kvm_media_protocol::STREAM_FLAG_DELTA
+        );
     }
 }

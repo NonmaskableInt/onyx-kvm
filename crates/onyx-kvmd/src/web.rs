@@ -22,7 +22,7 @@ pub const INDEX_HTML: &[u8] = br#"<!doctype html>
     </section>
     <section aria-labelledby="state-title">
       <h2 id="state-title">Capability state</h2>
-      <dl id="state"><dt>Video</dt><dd id="video">Disabled</dd><dt>Keyboard and pointer</dt><dd id="hid">Disabled</dd><dt>Microphone</dt><dd id="mic">Disabled</dd><dt>Speaker</dt><dd id="speaker">Disabled</dd></dl>
+      <dl id="state"><dt>Video</dt><dd id="video">Disabled</dd><dt>Active resolution</dt><dd id="active-res">1080p (Native)</dd><dt>Keyboard and pointer</dt><dd id="hid">Disabled</dd><dt>Microphone</dt><dd id="mic">Disabled</dd><dt>Speaker</dt><dd id="speaker">Disabled</dd></dl>
     </section>
     <section aria-labelledby="video-title">
       <h2 id="video-title">Video snapshot & live frame</h2>
@@ -30,9 +30,10 @@ pub const INDEX_HTML: &[u8] = br#"<!doctype html>
         <button id="snapshot" disabled>Capture verified snapshot</button>
         <button id="fetch-frame" disabled>Fetch live frame</button>
         <button id="stream-frame" disabled>Start stream</button>
-        <select id="video-res" style="background:#182028;color:#eef4f7;border:1px solid #60717d;border-radius:.35rem;padding:.65rem">
-          <option value="1080p">1080p (Native)</option>
-          <option value="720p">720p (Hardware Scaler)</option>
+        <label for="video-res" style="display:flex;align-items:center;font-weight:600;margin:0">Resolution:</label>
+        <select id="video-res" aria-label="Video resolution">
+          <option value="1080p" selected>1080p Native (1920x1080)</option>
+          <option value="720p">720p Scaled (1280x720)</option>
         </select>
       </div>
       <pre id="snapshot-result">No snapshot captured.</pre>
@@ -42,7 +43,10 @@ pub const INDEX_HTML: &[u8] = br#"<!doctype html>
       <h2 id="hid-title">Interactive control</h2>
       <div id="control-area" tabindex="0" role="application" aria-label="Interactive KVM control input area">
         <canvas id="kvm-canvas" width="1920" height="1080"></canvas>
-        <p id="control-status">Click display to focus input. When focused, keys and mouse are sent to host.</p>
+        <div id="canvas-overlay" style="display:flex;justify-content:space-between;align-items:center;padding:.4rem 0">
+          <p id="control-status" style="margin:0">Click display to focus input. When focused, keys and mouse are sent to host.</p>
+          <span id="stream-badge" style="background:#212b33;color:#7ee787;padding:.2rem .6rem;border-radius:.3rem;font-size:.85rem;font-weight:600">Idle (1080p)</span>
+        </div>
       </div>
       <div class="row">
         <button id="send-cad" disabled>Send Ctrl+Alt+Del</button>
@@ -62,7 +66,7 @@ pub const INDEX_HTML: &[u8] = br#"<!doctype html>
 </html>
 "#;
 
-pub const APP_CSS: &[u8] = br":root{color-scheme:dark;font-family:system-ui,sans-serif;background:#101418;color:#eef4f7}body{margin:0}main{max-width:52rem;margin:auto;padding:2rem}header{border-bottom:1px solid #33404a;margin-bottom:1.5rem}section{background:#182028;border:1px solid #34434e;border-radius:.6rem;margin:1rem 0;padding:1.2rem}.row{display:flex;gap:.6rem}input{min-width:0;flex:1}input,button{font:inherit;padding:.65rem;border-radius:.35rem;border:1px solid #60717d}button{background:#d0ecff;color:#07131b;font-weight:650}button:disabled{opacity:.45}dl{display:grid;grid-template-columns:1fr auto;gap:.7rem;margin:0}dt,dd{margin:0}dd{font-weight:650}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#0d1115;padding:1rem}.notice{color:#b9c8d1;font-size:.9rem}label{display:block;margin-bottom:.4rem}#control-area{background:#0d1115;border:2px dashed #34434e;border-radius:.4rem;padding:1rem;text-align:center;cursor:pointer;outline:none;user-select:none;margin-bottom:.8rem}#control-area:focus{border-color:#58a6ff;background:#131c24}#control-status{margin:0;color:#8b949e}#control-area:focus #control-status{color:#58a6ff;font-weight:600}#kvm-canvas{width:100%;height:auto;display:block;border-radius:.3rem;background:#05070a;margin-bottom:.8rem}";
+pub const APP_CSS: &[u8] = br":root{color-scheme:dark;font-family:system-ui,sans-serif;background:#101418;color:#eef4f7}body{margin:0}main{max-width:52rem;margin:auto;padding:2rem}header{border-bottom:1px solid #33404a;margin-bottom:1.5rem}section{background:#182028;border:1px solid #34434e;border-radius:.6rem;margin:1rem 0;padding:1.2rem}.row{display:flex;gap:.6rem;flex-wrap:wrap;align-items:center}input{min-width:0;flex:1}input,button,select{font:inherit;padding:.65rem;border-radius:.35rem;border:1px solid #60717d}select{background:#182028;color:#eef4f7;cursor:pointer}select:disabled{opacity:.45;cursor:not-allowed}button{background:#d0ecff;color:#07131b;font-weight:650;cursor:pointer}button:disabled{opacity:.45;cursor:not-allowed}dl{display:grid;grid-template-columns:1fr auto;gap:.7rem;margin:0}dt,dd{margin:0}dd{font-weight:650}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#0d1115;padding:1rem}.notice{color:#b9c8d1;font-size:.9rem}label{display:block;margin-bottom:.4rem}#control-area{background:#0d1115;border:2px dashed #34434e;border-radius:.4rem;padding:1rem;text-align:center;cursor:pointer;outline:none;user-select:none;margin-bottom:.8rem}#control-area:focus{border-color:#58a6ff;background:#131c24}#control-status{margin:0;color:#8b949e}#control-area:focus #control-status{color:#58a6ff;font-weight:600}#kvm-canvas{width:100%;height:auto;display:block;border-radius:.3rem;background:#05070a;margin-bottom:.8rem}";
 
 pub const APP_JS: &[u8] = br"'use strict';
 let token = '';
@@ -172,6 +176,8 @@ function initWebGL(canvas) {
     uWidthLoc: gl.getUniformLocation(progUyvy, 'u_width'),
     uTexLoc: gl.getUniformLocation(progUyvy, 'u_tex'),
     texUyvy,
+    texWidth: 0,
+    texHeight: 0,
     progYuv,
     uYLoc: gl.getUniformLocation(progYuv, 'u_y'),
     uULLoc: gl.getUniformLocation(progYuv, 'u_u'),
@@ -262,6 +268,8 @@ function renderUyvy(canvas, u8Array, width, height) {
     const texWidth = width >> 1;
     const uploadBytes = u8Array.subarray(0, texWidth * actualHeight * 4);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, texWidth, actualHeight, 0, gl.RGBA, gl.UNSIGNED_BYTE, uploadBytes);
+    glState.texWidth = texWidth;
+    glState.texHeight = actualHeight;
     gl.uniform1i(uTexLoc, 0);
     gl.drawArrays(gl.TRIANGLES, 0, 6);
   } else {
@@ -336,6 +344,12 @@ function renderTileDelta(canvas, u8Array, width, height) {
   gl.bindTexture(gl.TEXTURE_2D, texUyvy);
   gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
   const texTileW = tileW >> 1;
+  const texWidth = width >> 1;
+  if (glState.texWidth !== texWidth || glState.texHeight !== height) {
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, texWidth, height, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+    glState.texWidth = texWidth;
+    glState.texHeight = height;
+  }
   const tileBytes = tileW * tileH * 2;
   const tileRecordLen = 2 + tileBytes;
   let offset = 8;
@@ -465,6 +479,7 @@ async function toggleStream() {
         }
 
         const formatName = formatByte === 5 ? (flags & 1 ? 'tile-keyframe' : 'tile-delta') : (formatByte === 3 ? 'yuv422p' : 'yuv420p');
+        if (byId('stream-badge')) byId('stream-badge').textContent = `${width}x${height} (${formatName})`;
         byId('snapshot-result').textContent = JSON.stringify({
           stream: true,
           seq,
@@ -483,6 +498,7 @@ async function toggleStream() {
     streaming = false;
     streamAbort = null;
     byId('stream-frame').textContent = 'Start stream';
+    updateResDisplay();
   }
 }
 
@@ -524,6 +540,8 @@ async function initSession() {
   byId('snapshot').disabled = !state.videoEnabled;
   byId('fetch-frame').disabled = !state.videoEnabled;
   byId('stream-frame').disabled = !state.videoEnabled;
+  if (byId('video-res')) byId('video-res').disabled = !state.videoEnabled;
+  updateResDisplay();
   byId('send-cad').disabled = !state.mutatingOperationsEnabled;
   byId('release-keys').disabled = !state.mutatingOperationsEnabled;
   byId('capture-audio').disabled = !state.audioCaptureEnabled;
@@ -655,6 +673,21 @@ byId('send-cad').addEventListener('click', async () => {
 });
 byId('release-keys').addEventListener('click', releaseAll);
 
+function updateResDisplay() {
+  const resEl = byId('video-res');
+  const val = resEl ? resEl.value : '1080p';
+  const label = val === '720p' ? '720p (Hardware Scaler)' : '1080p (Native)';
+  if (byId('active-res')) byId('active-res').textContent = label;
+  if (!streaming && byId('stream-badge')) byId('stream-badge').textContent = `Idle (${val})`;
+}
+if (byId('video-res')) {
+  byId('video-res').addEventListener('change', () => {
+    updateResDisplay();
+    if (streaming) {
+      toggleStream().then(() => toggleStream());
+    }
+  });
+}
 function run(action) { action().catch((error) => { byId('message').textContent = error.message; }); }
 byId('pair-btn').addEventListener('click', () => run(pair));
 byId('pair-code').addEventListener('keydown', (e) => { if (e.key === 'Enter') run(pair); });
