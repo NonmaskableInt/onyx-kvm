@@ -309,6 +309,48 @@ function renderYuvPlanar(canvas, u8Array, width, height, is422) {
   }
 }
 
+function renderTileDelta(canvas, u8Array, width, height) {
+  if (u8Array.byteLength < 8) return;
+  const dirtyCount = (u8Array[0] << 8) | u8Array[1];
+  const tileW = (u8Array[2] << 8) | u8Array[3];
+  const tileH = (u8Array[4] << 8) | u8Array[5];
+  if (tileW !== 64 || tileH !== 40) return;
+  if (!glState) {
+    glState = initWebGL(canvas);
+  }
+  if (!glState || !glState.progUyvy) return;
+  const { gl, progUyvy, texUyvy, uWidthLoc, uTexLoc, setupAttribs } = glState;
+  if (canvas.width !== width || canvas.height !== height) {
+    canvas.width = width;
+    canvas.height = height;
+  }
+  gl.viewport(0, 0, width, height);
+  gl.useProgram(progUyvy);
+  setupAttribs(progUyvy);
+  gl.uniform1f(uWidthLoc, width);
+  gl.activeTexture(gl.TEXTURE0);
+  gl.bindTexture(gl.TEXTURE_2D, texUyvy);
+  gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+  const texTileW = tileW >> 1;
+  const tileBytes = tileW * tileH * 2;
+  const tileRecordLen = 2 + tileBytes;
+  let offset = 8;
+  const cols = Math.floor(width / tileW);
+  for (let i = 0; i < dirtyCount; ++i) {
+    if (offset + tileRecordLen > u8Array.byteLength) break;
+    const tileIdx = (u8Array[offset] << 8) | u8Array[offset + 1];
+    const col = tileIdx % cols;
+    const row = Math.floor(tileIdx / cols);
+    const xTexel = col * texTileW;
+    const yTexel = row * tileH;
+    const tileData = u8Array.subarray(offset + 2, offset + tileRecordLen);
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, xTexel, yTexel, texTileW, tileH, gl.RGBA, gl.UNSIGNED_BYTE, tileData);
+    offset += tileRecordLen;
+  }
+  gl.uniform1i(uTexLoc, 0);
+  gl.drawArrays(gl.TRIANGLES, 0, 6);
+}
+
 function renderFrame(canvas, u8Array, width, height, format) {
   renderUyvy(canvas, u8Array, width, height);
 }
@@ -331,7 +373,7 @@ async function toggleStream() {
   streamAbort = new AbortController();
   const signal = streamAbort.signal;
   try {
-    const response = await fetch('/video/stream?format=yuv422p', {
+    const response = await fetch('/video/stream?format=tile_delta', {
       headers: {'Authorization': `Bearer ${token}`},
       signal: signal,
     });
@@ -405,15 +447,25 @@ async function toggleStream() {
         const width = view.getUint16(16, false);
         const height = view.getUint16(18, false);
         const formatByte = fullBuffer[20];
+        const flags = fullBuffer[21];
         const framePayload = fullBuffer.subarray(HEADER_LEN, totalFrameLen);
-        renderFrame(byId('kvm-canvas'), framePayload, width, height, formatByte === 3 ? 'yuv422p' : 'yuv420p');
+        if (formatByte === 5) {
+          if (flags & 1) {
+            renderUyvy(byId('kvm-canvas'), framePayload, width, height);
+          } else {
+            renderTileDelta(byId('kvm-canvas'), framePayload, width, height);
+          }
+        } else {
+          renderFrame(byId('kvm-canvas'), framePayload, width, height, formatByte === 3 ? 'yuv422p' : 'yuv420p');
+        }
 
+        const formatName = formatByte === 5 ? (flags & 1 ? 'tile-keyframe' : 'tile-delta') : (formatByte === 3 ? 'yuv422p' : 'yuv420p');
         byId('snapshot-result').textContent = JSON.stringify({
           stream: true,
           seq,
           width,
           height,
-          format: formatByte === 3 ? 'yuv422p' : 'yuv420p',
+          format: formatName,
           byteLength: payloadLen,
         }, null, 2);
       }

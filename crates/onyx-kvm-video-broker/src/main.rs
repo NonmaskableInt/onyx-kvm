@@ -180,13 +180,8 @@ fn serve(mut stream: UnixStream, config: &Config) -> io::Result<()> {
         let (operation, request) = decode_and_authorize(&frame, enabled)
             .map_err(|error| io::Error::new(io::ErrorKind::PermissionDenied, error.to_string()))?;
         let (snapshot, mut bytes) = if let Some(ref mut probe) = streaming_probe {
-            match probe.capture_frame() {
+            match probe.capture_frame(request.format) {
                 Ok(bytes) => {
-                    eprintln!(
-                        "onyx-kvm-video-broker: captured frame bytes={}, requested format={:?}",
-                        bytes.len(),
-                        request.format
-                    );
                     let snapshot = summarize_frame_fast(
                         &bytes,
                         request.format,
@@ -314,8 +309,12 @@ impl StreamingProbe {
         })
     }
 
-    fn capture_frame(&mut self) -> io::Result<Vec<u8>> {
-        self.stdin.write_all(&[1])?;
+    fn capture_frame(&mut self, format: onyx_kvm_media_protocol::SnapshotFormat) -> io::Result<Vec<u8>> {
+        let cmd = match format {
+            onyx_kvm_media_protocol::SnapshotFormat::TileDeltaYuv422 => 2_u8,
+            _ => 1_u8,
+        };
+        self.stdin.write_all(&[cmd])?;
         self.stdin.flush()?;
         let mut header = [0_u8; 5];
         self.stdout.read_exact(&mut header)?;
@@ -349,8 +348,20 @@ fn capture_frame_payload(
     remove_if_exists(&config.frame_path)?;
     remove_if_exists(Path::new("/run/cleankvm-frame.yuv422p"))?;
     let probe_bin = resolve_probe_bin(config);
+    let out_path = config
+        .frame_path
+        .to_str()
+        .unwrap_or("/run/cleankvm-frame.yuv422p");
     let status = Command::new(probe_bin)
-        .args(["0", "1080", "8", "0,0,0,0,0", "2,4,3,1,0", "oneshot"])
+        .args([
+            "0",
+            "1080",
+            "8",
+            "0,0,0,0,0",
+            "2,4,3,1,0",
+            "oneshot",
+            out_path,
+        ])
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())

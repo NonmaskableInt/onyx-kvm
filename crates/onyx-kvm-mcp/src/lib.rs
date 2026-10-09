@@ -872,6 +872,7 @@ fn parse_snapshot_arguments(arguments: Option<&Value>) -> Option<SnapshotRequest
             "rgb565" => SnapshotFormat::Rgb565,
             "yuv422p" => SnapshotFormat::Yuv422p,
             "yuv420p" => SnapshotFormat::Yuv420p,
+            "tile-delta-yuv422" | "tile_delta" => SnapshotFormat::TileDeltaYuv422,
             _ => return None,
         },
         None => SnapshotFormat::Yuv422p,
@@ -1449,7 +1450,7 @@ mod tests {
             self.last_request.set(Some(request));
             let byte_length = match request.format {
                 SnapshotFormat::Yuv420p => 3_110_400,
-                SnapshotFormat::Yuv422p => 4_147_200,
+                SnapshotFormat::Yuv422p | SnapshotFormat::TileDeltaYuv422 => 4_147_200,
                 SnapshotFormat::Jpeg | SnapshotFormat::Rgb565 => {
                     return Err(io::Error::new(
                         io::ErrorKind::InvalidInput,

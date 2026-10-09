@@ -2887,3 +2887,26 @@ A strictly sequential investigation was performed around `pn_swap=0,0,1,0,0`:
   - Offline frame decoding verified 100% crystal-clear macOS desktop rendering with natural color fidelity, zero green tint, full 1080p scanlines, and zero striping artifacts.
   - All 41 workspace unit tests pass (`cargo test --workspace --locked`).
 
+## Phase 1 Tile Delta Streaming Acceleration (2026-10-09)
+
+- **Objective**: Implement high-efficiency tile delta streaming without violating the zero-binary-blob security boundary (bypassing the precompiled VPU/VENC proprietary blobs and `/dev/mem`).
+- **Implementation**:
+  1. **Protocol & Media Broker (`onyx-kvm-media-protocol`, `onyx-kvm-video-broker`)**:
+     - Defined `SnapshotFormat::TileDeltaYuv422` (enum tag 5) and `STREAM_FLAG_KEYFRAME = 0x01`, `STREAM_FLAG_DELTA = 0x02`.
+     - Specified tile geometry: 64x40 pixels (30 cols x 27 rows = 810 tiles for 1080p; 20 cols x 18 rows = 360 tiles for 720p).
+     - Defined 8-byte `TileDeltaHeader` + 5,122-byte dirty tile records `[tile_idx: u16_be, pixels: [u8; 5120]]`.
+  2. **Probe Diff Engine (`image/phase3-raw-frame-probe.c`)**:
+     - Candidate v50 probe implements command `2` tile delta in continuous `stream` mode.
+     - Maintains zero-copy ping-pong buffers (`curr_buf` and `prev_buf`).
+     - Scans 810 tiles using 16 64-bit word comparisons per line.
+     - Sends 4.15MB keyframe on first frame or if dirty tiles > 400; sends compact tile delta records when dirty <= 400.
+     - Swaps ping-pong buffer pointers after each frame without memory copy.
+  3. **WebGL Frontend (`crates/onyx-kvmd/src/web.rs`)**:
+     - Implemented `renderTileDelta()` using WebGL `gl.texSubImage2D(..., xTexel, yTexel, 32, 40, ...)` to upload dirty tiles directly to GPU texture without redrawing unaffected areas.
+  4. **Hardware Verification (`192.168.2.110`)**:
+     - Probe v50, video-broker, and onyx-kvmd deployed to target hardware.
+     - `GET /video/stream?format=tile_delta` streamed continuously at 5.6 MB/s for high-motion video and drops to minimal bandwidth for static/incremental changes.
+     - Physical pairing PIN `632290` staged in `/run/onyx-kvm/pairing-code`.
+     - `video-enabled` and `hid-enabled` gates active; audio/mic remain fail-closed.
+
+

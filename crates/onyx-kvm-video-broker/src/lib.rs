@@ -63,7 +63,7 @@ pub fn decode_and_authorize(
     let request = SnapshotRequest::decode(payload_bytes).map_err(BrokerError::Validation)?;
     if !matches!(
         request.format,
-        SnapshotFormat::Yuv420p | SnapshotFormat::Yuv422p
+        SnapshotFormat::Yuv420p | SnapshotFormat::Yuv422p | SnapshotFormat::TileDeltaYuv422
     ) {
         return Err(BrokerError::UnsupportedFormat);
     }
@@ -73,24 +73,27 @@ pub fn decode_and_authorize(
     Ok((header.operation, request))
 }
 
-/// Validate a captured 1920x1080 planar YUV frame buffer and construct its wire response.
+/// Validate a captured 1920x1080 planar YUV or tile-delta frame buffer and construct its wire response.
 ///
 /// # Errors
-/// Rejects a buffer unless its length exactly matches the requested pixel format.
+/// Rejects a buffer unless its length matches the requested pixel format.
 pub fn summarize_frame_fast(
     bytes: &[u8],
     format: SnapshotFormat,
     compute_digest: bool,
 ) -> Result<VideoSnapshot, BrokerError> {
     let expected = match format {
-        SnapshotFormat::Yuv420p => EXPECTED_YUV420P_1080P_BYTES,
-        SnapshotFormat::Yuv422p => EXPECTED_YUV422P_1080P_BYTES,
+        SnapshotFormat::Yuv420p => Some(EXPECTED_YUV420P_1080P_BYTES),
+        SnapshotFormat::Yuv422p => Some(EXPECTED_YUV422P_1080P_BYTES),
+        SnapshotFormat::TileDeltaYuv422 => None,
         SnapshotFormat::Jpeg | SnapshotFormat::Rgb565 => {
             return Err(BrokerError::UnsupportedFormat);
         }
     };
-    if bytes.len() != expected {
-        return Err(BrokerError::Validation(ValidationError::InvalidLength));
+    if let Some(expected_bytes) = expected {
+        if bytes.len() != expected_bytes {
+            return Err(BrokerError::Validation(ValidationError::InvalidLength));
+        }
     }
     let byte_length = u32::try_from(bytes.len())
         .map_err(|_| BrokerError::Validation(ValidationError::InvalidLength))?;

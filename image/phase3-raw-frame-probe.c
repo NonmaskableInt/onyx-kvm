@@ -494,7 +494,12 @@ int main(int argc, char **argv)
 		goto cleanup;
 	chn_up = 1;
 	if (stream_mode) {
-		void *copy_buf = NULL;
+		uint8_t *buf_a = NULL;
+		uint8_t *buf_b = NULL;
+		uint8_t *delta_buf = NULL;
+		uint8_t *curr_buf = NULL;
+		uint8_t *prev_buf = NULL;
+		int first_delta_frame = 1;
 		uint8_t ready_byte = 0;
 
 		if (check("CVI_VI_GetChnFrame", CVI_VI_GetChnFrame(0, 0, &frame, 5000))) {
@@ -509,14 +514,23 @@ int main(int argc, char **argv)
 		}
 		(void)CVI_VI_ReleaseChnFrame(0, 0, &frame);
 
-		copy_buf = malloc(OUTPUT_LIMIT);
-		if (!copy_buf) {
-			fprintf(stderr, "allocate copy buffer failed\n");
+		buf_a = malloc(OUTPUT_LIMIT);
+		buf_b = malloc(OUTPUT_LIMIT);
+		delta_buf = malloc(8 + 810 * 5122);
+		if (!buf_a || !buf_b || !delta_buf) {
+			fprintf(stderr, "allocate stream buffers failed\n");
+			if (buf_a) free(buf_a);
+			if (buf_b) free(buf_b);
+			if (delta_buf) free(delta_buf);
 			goto cleanup;
 		}
+		curr_buf = buf_a;
+		prev_buf = buf_b;
 
 		if (write_all(STDOUT_FILENO, &ready_byte, 1) != 0) {
-			free(copy_buf);
+			free(buf_a);
+			free(buf_b);
+			free(delta_buf);
 			goto cleanup;
 		}
 
@@ -546,41 +560,146 @@ int main(int argc, char **argv)
 			for (i = 0; i < 3; ++i) {
 				total_bytes += frame.stVFrame.u32Length[i];
 			}
-			uint8_t ok_header[5];
-			ok_header[0] = 0;
-			ok_header[1] = (uint8_t)((total_bytes >> 24) & 0xff);
-			ok_header[2] = (uint8_t)((total_bytes >> 16) & 0xff);
-			ok_header[3] = (uint8_t)((total_bytes >> 8) & 0xff);
-			ok_header[4] = (uint8_t)(total_bytes & 0xff);
-			if (write_all(STDOUT_FILENO, ok_header, 5) != 0) {
-				(void)CVI_VI_ReleaseChnFrame(0, 0, &frame);
-				break;
-			}
-			int write_err = 0;
+			CVI_U32 curr_offset = 0;
+			int copy_err = 0;
 			for (i = 0; i < 3; ++i) {
 				CVI_U32 length = frame.stVFrame.u32Length[i];
 				if (length == 0)
 					continue;
-				if (length > OUTPUT_LIMIT ||
+				if (curr_offset + length > OUTPUT_LIMIT ||
 				    CVI_VB_CopyBlock(frame.stVFrame.u64PhyAddr[0],
 					(CVI_U32)(frame.stVFrame.u64PhyAddr[i] -
 					 frame.stVFrame.u64PhyAddr[0]),
-					copy_buf, length) != CVI_SUCCESS) {
-					write_err = 1;
+					curr_buf + curr_offset, length) != CVI_SUCCESS) {
+					copy_err = 1;
 					break;
 				}
-				if (write_all(STDOUT_FILENO, copy_buf, length) != 0) {
-					write_err = 1;
+				curr_offset += length;
+			}
+			(void)CVI_VI_ReleaseChnFrame(0, 0, &frame);
+			if (copy_err || curr_offset != total_bytes) {
+				uint8_t err_status = 1;
+				if (write_all(STDOUT_FILENO, &err_status, 1) != 0)
+					break;
+				continue;
+			}
+
+			if (cmd != 2) {
+				uint8_t ok_header[5];
+				ok_header[0] = 0;
+				ok_header[1] = (uint8_t)((total_bytes >> 24) & 0xff);
+				ok_header[2] = (uint8_t)((total_bytes >> 16) & 0xff);
+				ok_header[3] = (uint8_t)((total_bytes >> 8) & 0xff);
+				ok_header[4] = (uint8_t)(total_bytes & 0xff);
+				if (write_all(STDOUT_FILENO, ok_header, 5) != 0 ||
+				    write_all(STDOUT_FILENO, curr_buf, total_bytes) != 0) {
+					break;
+				}
+				first_delta_frame = 1;
+				continue;
+			}
+
+			if (first_delta_frame) {
+				uint8_t ok_header[5];
+				ok_header[0] = 0;
+				ok_header[1] = (uint8_t)((total_bytes >> 24) & 0xff);
+				ok_header[2] = (uint8_t)((total_bytes >> 16) & 0xff);
+				ok_header[3] = (uint8_t)((total_bytes >> 8) & 0xff);
+				ok_header[4] = (uint8_t)(total_bytes & 0xff);
+				if (write_all(STDOUT_FILENO, ok_header, 5) != 0 ||
+				    write_all(STDOUT_FILENO, curr_buf, total_bytes) != 0) {
+					break;
+				}
+				uint8_t *tmp = curr_buf;
+				curr_buf = prev_buf;
+				prev_buf = tmp;
+				first_delta_frame = 0;
+				continue;
+			}
+
+			uint16_t dirty_count = 0;
+			uint8_t *delta_payload = delta_buf + 8;
+			const uint16_t tile_cols = WIDTH / 64;
+			const uint16_t tile_rows = target_height / 40;
+			const uint16_t total_tiles = tile_cols * tile_rows;
+			const uint32_t stride = WIDTH * 2;
+
+			for (uint16_t t = 0; t < total_tiles; ++t) {
+				uint16_t col = t % tile_cols;
+				uint16_t row = t / tile_cols;
+				int dirty = 0;
+				for (uint32_t r = 0; r < 40; ++r) {
+					const uint64_t *c = (const uint64_t *)(curr_buf + (row * 40 + r) * stride + col * 128);
+					const uint64_t *p = (const uint64_t *)(prev_buf + (row * 40 + r) * stride + col * 128);
+					for (int w = 0; w < 16; ++w) {
+						if (c[w] != p[w]) {
+							dirty = 1;
+							break;
+						}
+					}
+					if (dirty)
+						break;
+				}
+				if (dirty) {
+					if (dirty_count >= 400) {
+						dirty_count = 401;
+						break;
+					}
+					delta_payload[0] = (uint8_t)((t >> 8) & 0xff);
+					delta_payload[1] = (uint8_t)(t & 0xff);
+					for (uint32_t r = 0; r < 40; ++r) {
+						memcpy(delta_payload + 2 + r * 128,
+						       curr_buf + (row * 40 + r) * stride + col * 128,
+						       128);
+					}
+					delta_payload += (2 + 5120);
+					dirty_count++;
+				}
+			}
+
+			if (dirty_count > 400) {
+				uint8_t ok_header[5];
+				ok_header[0] = 0;
+				ok_header[1] = (uint8_t)((total_bytes >> 24) & 0xff);
+				ok_header[2] = (uint8_t)((total_bytes >> 16) & 0xff);
+				ok_header[3] = (uint8_t)((total_bytes >> 8) & 0xff);
+				ok_header[4] = (uint8_t)(total_bytes & 0xff);
+				if (write_all(STDOUT_FILENO, ok_header, 5) != 0 ||
+				    write_all(STDOUT_FILENO, curr_buf, total_bytes) != 0) {
+					break;
+				}
+			} else {
+				delta_buf[0] = (uint8_t)((dirty_count >> 8) & 0xff);
+				delta_buf[1] = (uint8_t)(dirty_count & 0xff);
+				delta_buf[2] = 0;
+				delta_buf[3] = 64;
+				delta_buf[4] = 0;
+				delta_buf[5] = 40;
+				delta_buf[6] = 0;
+				delta_buf[7] = 0;
+				uint32_t delta_len = 8 + (uint32_t)dirty_count * 5122;
+				uint8_t ok_header[5];
+				ok_header[0] = 0;
+				ok_header[1] = (uint8_t)((delta_len >> 24) & 0xff);
+				ok_header[2] = (uint8_t)((delta_len >> 16) & 0xff);
+				ok_header[3] = (uint8_t)((delta_len >> 8) & 0xff);
+				ok_header[4] = (uint8_t)(delta_len & 0xff);
+				if (write_all(STDOUT_FILENO, ok_header, 5) != 0 ||
+				    write_all(STDOUT_FILENO, delta_buf, delta_len) != 0) {
 					break;
 				}
 			}
-			(void)CVI_VI_ReleaseChnFrame(0, 0, &frame);
-			if (write_err)
-				break;
+			uint8_t *tmp = curr_buf;
+			curr_buf = prev_buf;
+			prev_buf = tmp;
 		}
 
-		memset(copy_buf, 0, OUTPUT_LIMIT);
-		free(copy_buf);
+		memset(buf_a, 0, OUTPUT_LIMIT);
+		memset(buf_b, 0, OUTPUT_LIMIT);
+		memset(delta_buf, 0, 8 + 810 * 5122);
+		free(buf_a);
+		free(buf_b);
+		free(delta_buf);
 		rc = 0;
 		goto cleanup;
 	}

@@ -22,7 +22,13 @@ fi
 video_module_dir=${CLEANKVM_VIDEO_MODULE_DIR:-$default_video_module_dir}
 
 default_raw_frame_probe=
-if test -f "$repo_root/out/phase3-raw-frame-probe-v47/cleankvm-raw-frame-probe"; then
+if test -f "$repo_root/out/phase3-raw-frame-probe-v50/cleankvm-raw-frame-probe"; then
+    case "$config_profile" in
+        phase3-video-foundation|product)
+            default_raw_frame_probe=$repo_root/out/phase3-raw-frame-probe-v50/cleankvm-raw-frame-probe
+            ;;
+    esac
+elif test -f "$repo_root/out/phase3-raw-frame-probe-v47/cleankvm-raw-frame-probe"; then
     case "$config_profile" in
         phase3-video-foundation|product)
             default_raw_frame_probe=$repo_root/out/phase3-raw-frame-probe-v47/cleankvm-raw-frame-probe

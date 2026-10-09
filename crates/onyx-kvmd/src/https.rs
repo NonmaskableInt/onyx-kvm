@@ -19,8 +19,9 @@ use onyx_kvm_mcp::{
 use onyx_kvm_media_protocol::{
     AUDIO_REQUEST_BYTES, BoundedFrameRing, CAPTURE_METRICS_BYTES, CaptureMetrics,
     DEFAULT_STREAM_LEASE_MS, Operation, PLAYBACK_RECEIPT_BYTES, PcmShape, PlaybackReceipt,
-    SNAPSHOT_RESPONSE_BYTES, SnapshotFormat, SnapshotRequest, StreamFrame, StreamFrameHeader,
-    StreamSessionLease, VideoSnapshot, WIRE_HEADER_BYTES, WireHeader,
+    SNAPSHOT_RESPONSE_BYTES, STREAM_FLAG_DELTA, STREAM_FLAG_KEYFRAME, SnapshotFormat,
+    SnapshotRequest, StreamFrame, StreamFrameHeader, StreamSessionLease, VideoSnapshot,
+    WIRE_HEADER_BYTES, WireHeader,
 };
 use rustls::{
     ServerConfig, ServerConnection, StreamOwned,
@@ -709,7 +710,11 @@ fn handle_video_stream(
     if !claims.scopes.contains(&Scope::Video) {
         return unauthorized(stream);
     }
-    let format = if request.path.contains("format=yuv420p") {
+    let format = if request.path.contains("format=tile_delta")
+        || request.path.contains("mode=delta")
+    {
+        SnapshotFormat::TileDeltaYuv422
+    } else if request.path.contains("format=yuv420p") {
         SnapshotFormat::Yuv420p
     } else {
         SnapshotFormat::Yuv422p
@@ -783,12 +788,24 @@ fn stream_frames_loop(
             }
         };
 
-        let Ok(header) = StreamFrameHeader::new(
+        let flags = match snapshot.format {
+            SnapshotFormat::TileDeltaYuv422 => {
+                if snapshot.byte_length >= 1920 * 1080 * 2 {
+                    STREAM_FLAG_KEYFRAME
+                } else {
+                    STREAM_FLAG_DELTA
+                }
+            }
+            _ => 0,
+        };
+
+        let Ok(header) = StreamFrameHeader::with_flags(
             sequence,
             current_ms,
             snapshot.width,
             snapshot.height,
             snapshot.format,
+            flags,
             snapshot.byte_length,
             snapshot.sha256,
         ) else {

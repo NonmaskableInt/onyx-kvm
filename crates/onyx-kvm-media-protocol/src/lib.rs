@@ -25,6 +25,18 @@ pub const MAX_STREAM_LEASE_MS: u32 = 60_000;
 pub const DEFAULT_STREAM_LEASE_MS: u32 = 10_000;
 pub const MAX_RING_BUFFER_FRAMES: usize = 4;
 
+pub const STREAM_FLAG_KEYFRAME: u8 = 0x01;
+pub const STREAM_FLAG_DELTA: u8 = 0x02;
+
+pub const TILE_WIDTH: u16 = 64;
+pub const TILE_HEIGHT: u16 = 40;
+pub const TILE_COLS: u16 = 30; // 1920 / 64
+pub const TILE_ROWS: u16 = 27; // 1080 / 40
+pub const TOTAL_TILES: u16 = 810; // 30 * 27
+pub const TILE_BYTES: usize = (TILE_WIDTH as usize) * (TILE_HEIGHT as usize) * 2; // 5120
+pub const TILE_RECORD_BYTES: usize = 2 + TILE_BYTES; // 5122
+pub const TILE_DELTA_HEADER_BYTES: usize = 8;
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[repr(u8)]
 pub enum Operation {
@@ -140,6 +152,7 @@ pub enum SnapshotFormat {
     Rgb565 = 2,
     Yuv422p = 3,
     Yuv420p = 4,
+    TileDeltaYuv422 = 5,
 }
 
 impl SnapshotFormat {
@@ -150,6 +163,7 @@ impl SnapshotFormat {
             Self::Rgb565 => "rgb565",
             Self::Yuv422p => "yuv422p",
             Self::Yuv420p => "yuv420p",
+            Self::TileDeltaYuv422 => "tile-delta-yuv422",
         }
     }
 }
@@ -163,6 +177,7 @@ impl TryFrom<u8> for SnapshotFormat {
             2 => Ok(Self::Rgb565),
             3 => Ok(Self::Yuv422p),
             4 => Ok(Self::Yuv420p),
+            5 => Ok(Self::TileDeltaYuv422),
             _ => Err(ValidationError::InvalidDimensions),
         }
     }
@@ -342,11 +357,43 @@ impl StreamFrameHeader {
         payload_bytes: u32,
         sha256: [u8; 32],
     ) -> Result<Self, ValidationError> {
+        Self::with_flags(
+            sequence,
+            timestamp_ms,
+            width,
+            height,
+            format,
+            0,
+            payload_bytes,
+            sha256,
+        )
+    }
+
+    /// Create and validate a stream frame header with explicit flags.
+    ///
+    /// # Errors
+    /// Rejects invalid flags, zero/oversized dimensions, or byte lengths exceeding [`MAX_SNAPSHOT_BYTES`].
+    pub fn with_flags(
+        sequence: u32,
+        timestamp_ms: u64,
+        width: u16,
+        height: u16,
+        format: SnapshotFormat,
+        flags: u8,
+        payload_bytes: u32,
+        sha256: [u8; 32],
+    ) -> Result<Self, ValidationError> {
+        if (flags & !(STREAM_FLAG_KEYFRAME | STREAM_FLAG_DELTA)) != 0 {
+            return Err(ValidationError::NonZeroFlags);
+        }
         if width == 0 || height == 0 || width > MAX_WIDTH || height > MAX_HEIGHT {
             return Err(ValidationError::InvalidDimensions);
         }
         let len = usize::try_from(payload_bytes).map_err(|_| ValidationError::InvalidLength)?;
-        if len == 0 || len > MAX_SNAPSHOT_BYTES {
+        if len > MAX_SNAPSHOT_BYTES {
+            return Err(ValidationError::InvalidLength);
+        }
+        if len == 0 && flags == 0 {
             return Err(ValidationError::InvalidLength);
         }
         Ok(Self {
@@ -355,7 +402,7 @@ impl StreamFrameHeader {
             width,
             height,
             format,
-            flags: 0,
+            flags,
             payload_bytes,
             sha256,
         })
@@ -426,18 +473,23 @@ impl StreamFrameHeader {
         let height = u16::from_be_bytes([bytes[18], bytes[19]]);
         let format = SnapshotFormat::try_from(bytes[20])?;
         let flags = bytes[21];
-        if flags != 0 || bytes[22] != 0 || bytes[23] != 0 || bytes[28..32] != [0, 0, 0, 0] {
+        if (flags & !(STREAM_FLAG_KEYFRAME | STREAM_FLAG_DELTA)) != 0
+            || bytes[22] != 0
+            || bytes[23] != 0
+            || bytes[28..32] != [0, 0, 0, 0]
+        {
             return Err(ValidationError::NonZeroFlags);
         }
         let payload_bytes = u32::from_be_bytes([bytes[24], bytes[25], bytes[26], bytes[27]]);
         let mut sha256 = [0_u8; 32];
         sha256.copy_from_slice(&bytes[32..64]);
-        Self::new(
+        Self::with_flags(
             sequence,
             timestamp_ms,
             width,
             height,
             format,
+            flags,
             payload_bytes,
             sha256,
         )
@@ -452,6 +504,57 @@ impl StreamFrameHeader {
             text.push(char::from(HEX[usize::from(byte & 0x0f)]));
         }
         text
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct TileDeltaHeader {
+    pub dirty_count: u16,
+    pub tile_width: u16,
+    pub tile_height: u16,
+    pub flags: u16,
+}
+
+impl TileDeltaHeader {
+    #[must_use]
+    pub const fn new(dirty_count: u16) -> Self {
+        Self {
+            dirty_count,
+            tile_width: TILE_WIDTH,
+            tile_height: TILE_HEIGHT,
+            flags: 0,
+        }
+    }
+
+    #[must_use]
+    pub const fn encode(self) -> [u8; TILE_DELTA_HEADER_BYTES] {
+        let dc = self.dirty_count.to_be_bytes();
+        let tw = self.tile_width.to_be_bytes();
+        let th = self.tile_height.to_be_bytes();
+        let fl = self.flags.to_be_bytes();
+        [dc[0], dc[1], tw[0], tw[1], th[0], th[1], fl[0], fl[1]]
+    }
+
+    pub fn decode(bytes: [u8; TILE_DELTA_HEADER_BYTES]) -> Result<Self, ValidationError> {
+        let dirty_count = u16::from_be_bytes([bytes[0], bytes[1]]);
+        let tile_width = u16::from_be_bytes([bytes[2], bytes[3]]);
+        let tile_height = u16::from_be_bytes([bytes[4], bytes[5]]);
+        let flags = u16::from_be_bytes([bytes[6], bytes[7]]);
+        if dirty_count > TOTAL_TILES {
+            return Err(ValidationError::InvalidLength);
+        }
+        if tile_width != TILE_WIDTH || tile_height != TILE_HEIGHT {
+            return Err(ValidationError::InvalidDimensions);
+        }
+        if flags != 0 {
+            return Err(ValidationError::NonZeroFlags);
+        }
+        Ok(Self {
+            dirty_count,
+            tile_width,
+            tile_height,
+            flags,
+        })
     }
 }
 
@@ -1012,13 +1115,36 @@ mod tests {
             Err(ValidationError::BadMagic)
         );
 
-        // Rejects non-zero flags
+        // Rejects invalid flags
         let mut bad_flags = encoded;
-        bad_flags[21] = 1;
+        bad_flags[21] = 0x80;
         assert_eq!(
             StreamFrameHeader::decode(bad_flags),
             Err(ValidationError::NonZeroFlags)
         );
+
+        // Accepts valid flags
+        let mut delta_flags = encoded;
+        delta_flags[21] = STREAM_FLAG_DELTA;
+        assert!(StreamFrameHeader::decode(delta_flags).is_ok());
+    }
+
+    #[test]
+    fn tile_delta_header_roundtrip_and_bounds() {
+        let header = TileDeltaHeader::new(42);
+        let encoded = header.encode();
+        assert_eq!(encoded.len(), TILE_DELTA_HEADER_BYTES);
+        let decoded = TileDeltaHeader::decode(encoded).expect("decode failed");
+        assert_eq!(decoded, header);
+        assert_eq!(decoded.dirty_count, 42);
+        assert_eq!(decoded.tile_width, 64);
+        assert_eq!(decoded.tile_height, 40);
+
+        // Rejects oversized dirty count
+        let mut bad = encoded;
+        bad[0] = 0x03;
+        bad[1] = 0x50; // 848 > 810
+        assert_eq!(TileDeltaHeader::decode(bad), Err(ValidationError::InvalidLength));
     }
 
     #[test]
