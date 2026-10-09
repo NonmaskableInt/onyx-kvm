@@ -1,6 +1,21 @@
 # Next steps
 
-Updated: 2026-10-06
+Updated: 2026-10-09
+
+## Hardware VPSS Scaler (720p) & Web Interface Fix [COMPLETED]
+
+Phase 2 hardware resolution scaling via VPSS and tile-delta streaming for both 1080p and 720p has been implemented, verified, and deployed to target `192.168.2.110`:
+- **Silicon VPSS Scaler**: Integrated VPSS hardware scaler (`soph_vpss`) into `image/phase3-raw-frame-probe.c`. Input VI pipe locks at native 1080p UYVY from LT6911 CSI-2; when 720p is requested, frames are downscaled in silicon by VPSS Grp 0 Chn 0 to 1280x720 UYVY (1,843,200 bytes, a 55.6% bandwidth saving). Tile grid dynamically shifts between 810 tiles (1080p) and 360 tiles (720p).
+- **Keyframe Stream Flag Fix**: In `crates/onyx-kvmd/src/https.rs`, fixed the hardcoded 1080p keyframe check to dynamically evaluate full-frame byte length `(width * height * 2)`. Frame 0 and full refreshes at 720p now correctly set `STREAM_FLAG_KEYFRAME (0x01)`.
+- **Web UI & WebGL Resolution Transitions**:
+  - `crates/onyx-kvmd/src/web.rs`: Added `<label>` and styled `<select id="video-res">` toolbar control.
+  - Added "Active resolution" status in Capability State.
+  - Added live status pill (`#stream-badge`) directly above the canvas reporting stream geometry and format.
+  - Responsive flex-wrap styling prevents button/select toolbar overflow.
+  - WebGL texture backing storage now dynamically preallocates and adapts when transitioning between 1080p and 720p, preventing `INVALID_OPERATION` GL errors and black canvas rendering.
+  - Resolution dropdown change event restarts active streams cleanly.
+- **Verification on Target**: Verified 720p stream captures 10 FPS with `flags=0x01` on Frame 0, and subsequent tile deltas render smoothly.
+
 
 ## Product completion plan
 
