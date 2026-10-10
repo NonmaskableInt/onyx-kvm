@@ -1,6 +1,19 @@
 # Next steps
 
-Updated: 2026-10-09
+Updated: 2026-10-10
+
+## Web UI Overhaul: Edge-Contracting Menu, Draggable Dock, Full-Screen Video [COMPLETED]
+
+The web console interface has been completely overhauled to satisfy all seven operational requirements:
+1. **Full-Screen Streaming Video**: `#viewport` is fixed full-screen (`inset: 0`), hosting `#kvm-canvas` with hardware-accelerated WebGL UYVY / tile-delta rendering. Background is blurred and input is disabled when unauthenticated.
+2. **Perimeter-Draggable Menu Dock**: A sleek floating dock with a drag grip allows users to drag and snap the menu control to any viewport edge (`left`, `right`, `top`, `bottom`) with percentage positioning. Snapping position persists in `localStorage` (`onyx_dock`).
+3. **Edge-Contracting Responsive Viewport**: Activating the menu causes the specific viewport edge where the dock resides to contract (e.g. `right: 360px` for right edge, `left: 360px`, `top: 280px`, `bottom: 280px`), scaling down the video display canvas via `object-fit: contain` so the streaming display is never covered or obscured by the menu controls.
+4. **Default Streaming and Input Forwarding**: Upon authentication, video streaming and HID keyboard/mouse forwarding are enabled by default. Pointer lock on click is supported with Esc release.
+5. **Persistent User Settings**: All preferences (`onyx_res`, `onyx_fit`, `onyx_autostream`, `onyx_autohid`, `onyx_pointerlock`, `onyx_dock`, `onyx_token`) persist in `localStorage` across reloads and reboots.
+6. **Clean Unauthenticated Modal**: When unauthenticated, the user is presented with a clean two-option card featuring segmented tabs: Pairing PIN (6-digit console PIN, active by default) and Access Token.
+7. **Unobtrusive Status Indicators**: The floating dock features a live pulsing LED heartbeat dot (green live pulse, amber stalled, red idle) and a compact 1000ms rolling network rate readout (e.g., `30 fps | 1.8 MB/s`).
+- **Target Deployment**: Deployed cross-compiled RISC-V release binary to `/usr/bin/onyx-kvmd` on target `192.168.2.110`. Staged new pairing PIN `588619`.
+
 
 ## Hardware VPSS Scaler (720p) & Web Interface Fix [COMPLETED]
 
