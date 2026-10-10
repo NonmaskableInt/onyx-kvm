@@ -6,72 +6,565 @@ pub const INDEX_HTML: &[u8] = br#"<!doctype html>
   <title>Onyx KVM</title>
   <link rel="stylesheet" href="/app.css">
 </head>
-<body>
-  <main>
-    <header><h1>Onyx KVM</h1><p>Local, authenticated KVM control</p></header>
-    <section id="session" aria-labelledby="session-title">
-      <h2 id="session-title">Session & Pairing</h2>
-      <label for="pair-code">Pairing PIN (from local console)</label>
-      <div class="row"><input id="pair-code" type="text" placeholder="e.g. 123456" autocomplete="off" spellcheck="false"><button id="pair-btn">Pair</button></div>
-      <details style="margin-top:.8rem">
-        <summary style="cursor:pointer;color:#8b949e">Manual token entry</summary>
-        <label for="token" style="margin-top:.4rem">Short-lived access token</label>
-        <div class="row"><input id="token" type="password" autocomplete="off" spellcheck="false"><button id="connect">Connect</button></div>
-      </details>
-      <p id="message" role="status">Disconnected</p>
-    </section>
-    <section aria-labelledby="state-title">
-      <h2 id="state-title">Capability state</h2>
-      <dl id="state"><dt>Video</dt><dd id="video">Disabled</dd><dt>Active resolution</dt><dd id="active-res">1080p (Native)</dd><dt>Keyboard and pointer</dt><dd id="hid">Disabled</dd><dt>Microphone</dt><dd id="mic">Disabled</dd><dt>Speaker</dt><dd id="speaker">Disabled</dd></dl>
-    </section>
-    <section aria-labelledby="video-title">
-      <h2 id="video-title">Video snapshot & live frame</h2>
-      <div class="row">
-        <button id="snapshot" disabled>Capture verified snapshot</button>
-        <button id="fetch-frame" disabled>Fetch live frame</button>
-        <button id="stream-frame" disabled>Start stream</button>
-        <label for="video-res" style="display:flex;align-items:center;font-weight:600;margin:0">Resolution:</label>
-        <select id="video-res" aria-label="Video resolution">
-          <option value="1080p" selected>1080p Native (1920x1080)</option>
-          <option value="720p">720p Scaled (1280x720)</option>
-        </select>
-      </div>
-      <pre id="snapshot-result">No snapshot captured.</pre>
-      <p class="notice">Snapshots return verified metadata. Fetch live frame streams raw video binary pixels directly to the interactive display canvas via authenticated HTTPS.</p>
-    </section>
-    <section aria-labelledby="hid-title">
-      <h2 id="hid-title">Interactive control</h2>
-      <div id="control-area" tabindex="0" role="application" aria-label="Interactive KVM control input area">
-        <canvas id="kvm-canvas" width="1920" height="1080"></canvas>
-        <div id="canvas-overlay" style="display:flex;justify-content:space-between;align-items:center;padding:.4rem 0">
-          <p id="control-status" style="margin:0">Click display to focus input. When focused, keys and mouse are sent to host.</p>
-          <span id="stream-badge" style="background:#212b33;color:#7ee787;padding:.2rem .6rem;border-radius:.3rem;font-size:.85rem;font-weight:600">Idle (1080p)</span>
+<body class="unauth">
+  <div id="viewport" tabindex="0" role="application" aria-label="KVM Display and Input Area">
+    <canvas id="kvm-canvas" width="1920" height="1080"></canvas>
+  </div>
+
+  <div id="menu-dock" class="dock-right" tabindex="0" aria-label="Menu and Status Dock">
+    <div id="dock-drag-handle" class="dock-handle" title="Drag to snap along edge">
+      <div class="grip-bar"></div>
+    </div>
+    <div id="dock-status" class="dock-status" title="Stream status and throughput">
+      <span id="heartbeat-dot" class="dot dot-idle"></span>
+      <span id="net-rate" class="rate-text">idle</span>
+    </div>
+    <button id="menu-toggle-btn" class="dock-toggle-btn" title="Toggle control menu" aria-label="Toggle control menu">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+        <line x1="3" y1="6" x2="21" y2="6"></line>
+        <line x1="3" y1="12" x2="21" y2="12"></line>
+        <line x1="3" y1="18" x2="21" y2="18"></line>
+      </svg>
+    </button>
+  </div>
+
+  <aside id="menu-drawer" class="drawer-right" aria-label="KVM Controls">
+    <div class="drawer-header">
+      <h2>Onyx KVM Controls</h2>
+      <button id="close-drawer-btn" class="close-btn" title="Close menu" aria-label="Close menu">&times;</button>
+    </div>
+    <div class="drawer-content">
+      <section class="drawer-section">
+        <div class="section-title">Stream &amp; Display</div>
+        <div class="drawer-row">
+          <label>Stream Control:</label>
+          <button id="stream-toggle-btn" class="btn-sm">Start Stream</button>
         </div>
+        <div class="drawer-row">
+          <label for="opt-res">Resolution:</label>
+          <select id="opt-res">
+            <option value="1080p">1080p Native (1920x1080)</option>
+            <option value="720p">720p Scaled (1280x720)</option>
+          </select>
+        </div>
+        <div class="drawer-row">
+          <label for="opt-fit">Display Fit:</label>
+          <select id="opt-fit">
+            <option value="contain">Aspect Ratio (Contain)</option>
+            <option value="fill">Fill Screen (Stretch)</option>
+          </select>
+        </div>
+        <div class="drawer-row-check">
+          <label><input type="checkbox" id="opt-autostream"> Auto-start stream on connect</label>
+        </div>
+      </section>
+
+      <section class="drawer-section">
+        <div class="section-title">Keyboard &amp; Mouse</div>
+        <div class="drawer-row-check">
+          <label><input type="checkbox" id="opt-autohid"> Forward keyboard &amp; mouse</label>
+        </div>
+        <div class="drawer-row-check">
+          <label><input type="checkbox" id="opt-pointerlock"> Lock pointer on click</label>
+        </div>
+        <div class="drawer-btns">
+          <button id="send-cad-btn" class="btn-sm">Ctrl + Alt + Del</button>
+          <button id="release-keys-btn" class="btn-sm">Release Keys</button>
+        </div>
+        <p class="section-hint">Click stream viewport to focus. Press Esc to release pointer lock.</p>
+      </section>
+
+      <section class="drawer-section">
+        <div class="section-title">Audio Hardware</div>
+        <div class="drawer-btns">
+          <button id="play-tone-btn" class="btn-sm" disabled>Play 1s Test Tone</button>
+          <button id="capture-mic-btn" class="btn-sm" disabled>Sample Mic</button>
+        </div>
+        <div id="audio-status" class="status-subtext">Requires physical gate on device.</div>
+      </section>
+
+      <section class="drawer-section">
+        <div class="section-title">Hardware Capabilities</div>
+        <div class="drawer-btns">
+          <button id="fetch-frame-btn" class="btn-sm">Capture Snapshot</button>
+        </div>
+        <div id="diag-summary" class="diag-table">
+          <div class="diag-row"><span>Video:</span><span id="stat-video" class="badge">--</span></div>
+          <div class="diag-row"><span>Input (HID):</span><span id="stat-hid" class="badge">--</span></div>
+          <div class="diag-row"><span>Speaker:</span><span id="stat-speaker" class="badge">--</span></div>
+          <div class="diag-row"><span>Microphone:</span><span id="stat-mic" class="badge">--</span></div>
+        </div>
+      </section>
+
+      <section class="drawer-section">
+        <div class="section-title">Session</div>
+        <button id="logout-btn" class="btn-danger btn-sm">Disconnect</button>
+      </section>
+    </div>
+  </aside>
+
+  <div id="auth-modal" class="auth-card" role="dialog" aria-modal="true" aria-labelledby="auth-title">
+    <div class="auth-brand">
+      <h1 id="auth-title">Onyx KVM</h1>
+      <p>Secure Hardware Remote Console</p>
+    </div>
+    <div class="auth-tabs" role="tablist">
+      <button id="tab-pin" class="tab-btn active" role="tab" aria-selected="true">Pairing PIN</button>
+      <button id="tab-token" class="tab-btn" role="tab" aria-selected="false">Access Token</button>
+    </div>
+    <div id="panel-pin" class="tab-panel active" role="tabpanel">
+      <p class="auth-hint">Enter the 6-digit pairing PIN shown on the target serial console.</p>
+      <div class="auth-input-group">
+        <input id="pair-code" type="text" placeholder="123456" maxlength="6" inputmode="numeric" autocomplete="one-time-code" autofocus>
+        <button id="pair-btn" class="btn-primary">Pair &amp; Connect</button>
       </div>
-      <div class="row">
-        <button id="send-cad" disabled>Send Ctrl+Alt+Del</button>
-        <button id="release-keys" disabled>Release input</button>
+    </div>
+    <div id="panel-token" class="tab-panel" role="tabpanel">
+      <p class="auth-hint">Enter a signed JWT access token for manual session authentication.</p>
+      <div class="auth-input-group">
+        <input id="token-input" type="password" placeholder="Paste access token..." autocomplete="off">
+        <button id="token-btn" class="btn-primary">Connect</button>
       </div>
-      <p class="notice">Input requires the hid-enabled gate and an authorized mutation token. Input automatically zeroizes on blur.</p>
-    </section>
-    <section aria-labelledby="audio-title">
-      <h2 id="audio-title">Audio</h2>
-      <div class="row"><button id="capture-audio" disabled>Measure microphone for one second</button><button id="play-audio" disabled>Play quiet test tone</button></div>
-      <pre id="audio-result">No audio operation completed.</pre>
-      <p class="notice">Microphone capture returns aggregate levels only. Output is a fixed, low-amplitude one-second tone; each direction has its own physical gate and authorization scope.</p>
-    </section>
-  </main>
+    </div>
+    <div id="auth-message" class="auth-status" role="status">Disconnected</div>
+  </div>
+
   <script src="/app.js" defer></script>
 </body>
 </html>
 "#;
 
-pub const APP_CSS: &[u8] = br":root{color-scheme:dark;font-family:system-ui,sans-serif;background:#101418;color:#eef4f7}body{margin:0}main{max-width:52rem;margin:auto;padding:2rem}header{border-bottom:1px solid #33404a;margin-bottom:1.5rem}section{background:#182028;border:1px solid #34434e;border-radius:.6rem;margin:1rem 0;padding:1.2rem}.row{display:flex;gap:.6rem;flex-wrap:wrap;align-items:center}input{min-width:0;flex:1}input,button,select{font:inherit;padding:.65rem;border-radius:.35rem;border:1px solid #60717d}select{background:#182028;color:#eef4f7;cursor:pointer}select:disabled{opacity:.45;cursor:not-allowed}button{background:#d0ecff;color:#07131b;font-weight:650;cursor:pointer}button:disabled{opacity:.45;cursor:not-allowed}dl{display:grid;grid-template-columns:1fr auto;gap:.7rem;margin:0}dt,dd{margin:0}dd{font-weight:650}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#0d1115;padding:1rem}.notice{color:#b9c8d1;font-size:.9rem}label{display:block;margin-bottom:.4rem}#control-area{background:#0d1115;border:2px dashed #34434e;border-radius:.4rem;padding:1rem;text-align:center;cursor:pointer;outline:none;user-select:none;margin-bottom:.8rem}#control-area:focus{border-color:#58a6ff;background:#131c24}#control-status{margin:0;color:#8b949e}#control-area:focus #control-status{color:#58a6ff;font-weight:600}#kvm-canvas{width:100%;height:auto;display:block;border-radius:.3rem;background:#05070a;margin-bottom:.8rem}";
+pub const APP_CSS: &[u8] = br#":root {
+  color-scheme: dark;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  background: #080b0e;
+  color: #e6edf3;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+  position: relative;
+  background: #000;
+}
 
-pub const APP_JS: &[u8] = br"'use strict';
+#viewport {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #000;
+  overflow: hidden;
+  transition: top 0.25s cubic-bezier(0.16, 1, 0.3, 1),
+              bottom 0.25s cubic-bezier(0.16, 1, 0.3, 1),
+              left 0.25s cubic-bezier(0.16, 1, 0.3, 1),
+              right 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  z-index: 10;
+  outline: none;
+  user-select: none;
+}
+#kvm-canvas {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+  background: #000;
+  pointer-events: none;
+}
+
+body.unauth #viewport {
+  filter: blur(8px) brightness(0.25);
+  pointer-events: none;
+}
+body.unauth #menu-dock,
+body.unauth #menu-drawer {
+  display: none !important;
+}
+body.auth #auth-modal {
+  display: none !important;
+}
+
+#auth-modal {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 90%;
+  max-width: 440px;
+  background: rgba(22, 27, 34, 0.95);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid #30363d;
+  border-radius: 12px;
+  padding: 24px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.8);
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.auth-brand h1 { font-size: 1.5rem; font-weight: 700; color: #f0f6fc; }
+.auth-brand p { font-size: 0.85rem; color: #8b949e; margin-top: 2px; }
+.auth-tabs {
+  display: flex;
+  background: #0d1117;
+  border-radius: 8px;
+  padding: 3px;
+  gap: 4px;
+  border: 1px solid #21262d;
+}
+.tab-btn {
+  flex: 1;
+  background: transparent;
+  color: #8b949e;
+  border: none;
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.tab-btn.active {
+  background: #21262d;
+  color: #f0f6fc;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+}
+.tab-panel { display: none; flex-direction: column; gap: 12px; }
+.tab-panel.active { display: flex; }
+.auth-hint { font-size: 0.82rem; color: #8b949e; line-height: 1.4; }
+.auth-input-group { display: flex; gap: 8px; }
+.auth-input-group input {
+  flex: 1;
+  background: #0d1117;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  color: #f0f6fc;
+  padding: 10px 14px;
+  font-size: 0.95rem;
+  outline: none;
+}
+.auth-input-group input:focus { border-color: #58a6ff; }
+.btn-primary {
+  background: #238636;
+  color: #ffffff;
+  border: 1px solid rgba(240,246,252,0.1);
+  border-radius: 6px;
+  padding: 10px 16px;
+  font-weight: 600;
+  font-size: 0.9rem;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s;
+}
+.btn-primary:hover { background: #2ea043; }
+.auth-status {
+  font-size: 0.82rem;
+  color: #8b949e;
+  min-height: 1.2rem;
+  text-align: center;
+}
+
+#menu-dock {
+  position: fixed;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 12px;
+  background: rgba(22, 27, 34, 0.88);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 9999px;
+  box-shadow: 0 6px 22px rgba(0, 0, 0, 0.6);
+  z-index: 60;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  transition: box-shadow 0.2s, background 0.2s, top 0.25s, bottom 0.25s, left 0.25s, right 0.25s;
+}
+#menu-dock.dragging {
+  cursor: grabbing;
+  background: rgba(30, 38, 48, 0.98);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.8);
+  transition: none !important;
+}
+.dock-handle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px;
+  cursor: grab;
+}
+.grip-bar {
+  width: 4px;
+  height: 14px;
+  border-radius: 2px;
+  background: #6e7681;
+}
+.dock-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+  flex-shrink: 0;
+}
+.dot-live {
+  background: #3fb950;
+  box-shadow: 0 0 8px #3fb950;
+  animation: pulse-dot 1.8s infinite;
+}
+.dot-stalled {
+  background: #d29922;
+  box-shadow: 0 0 6px #d29922;
+}
+.dot-idle {
+  background: #f85149;
+  box-shadow: 0 0 6px #f85149;
+}
+@keyframes pulse-dot {
+  0% { transform: scale(0.9); opacity: 0.8; }
+  50% { transform: scale(1.2); opacity: 1; }
+  100% { transform: scale(0.9); opacity: 0.8; }
+}
+.rate-text {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  color: #8b949e;
+  white-space: nowrap;
+}
+.dock-toggle-btn {
+  background: transparent;
+  border: none;
+  color: #c9d1d9;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  border-radius: 4px;
+  transition: color 0.15s, background 0.15s;
+}
+.dock-toggle-btn:hover {
+  color: #f0f6fc;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+body.menu-open-right #viewport { right: 360px; }
+body.menu-open-left #viewport { left: 360px; }
+body.menu-open-top #viewport { top: 280px; }
+body.menu-open-bottom #viewport { bottom: 280px; }
+
+body.menu-open-right #menu-dock.dock-right { right: 372px; }
+body.menu-open-left #menu-dock.dock-left { left: 372px; }
+body.menu-open-top #menu-dock.dock-top { top: 292px; }
+body.menu-open-bottom #menu-dock.dock-bottom { bottom: 292px; }
+
+#menu-drawer {
+  position: fixed;
+  background: rgba(18, 24, 32, 0.96);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  color: #e6edf3;
+  z-index: 50;
+  box-sizing: border-box;
+  overflow: hidden;
+  box-shadow: 0 0 35px rgba(0, 0, 0, 0.85);
+  transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  display: flex;
+  flex-direction: column;
+}
+.drawer-right {
+  top: 0;
+  right: 0;
+  width: 360px;
+  height: 100vh;
+  border-left: 1px solid #30363d;
+  transform: translateX(100%);
+}
+body.menu-open-right .drawer-right { transform: translateX(0); }
+
+.drawer-left {
+  top: 0;
+  left: 0;
+  width: 360px;
+  height: 100vh;
+  border-right: 1px solid #30363d;
+  transform: translateX(-100%);
+}
+body.menu-open-left .drawer-left { transform: translateX(0); }
+
+.drawer-top {
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 280px;
+  border-bottom: 1px solid #30363d;
+  transform: translateY(-100%);
+}
+body.menu-open-top .drawer-top { transform: translateY(0); }
+
+.drawer-bottom {
+  bottom: 0;
+  left: 0;
+  width: 100vw;
+  height: 280px;
+  border-top: 1px solid #30363d;
+  transform: translateY(100%);
+}
+body.menu-open-bottom .drawer-bottom { transform: translateY(0); }
+
+.drawer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid #21262d;
+  flex-shrink: 0;
+}
+.drawer-header h2 { font-size: 1.1rem; font-weight: 600; color: #f0f6fc; }
+.close-btn {
+  background: transparent;
+  border: none;
+  color: #8b949e;
+  font-size: 1.4rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+.close-btn:hover { color: #f0f6fc; background: #21262d; }
+
+.drawer-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.drawer-top .drawer-content,
+.drawer-bottom .drawer-content {
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 20px;
+}
+.drawer-section {
+  background: #0d1117;
+  border: 1px solid #21262d;
+  border-radius: 8px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.drawer-top .drawer-section,
+.drawer-bottom .drawer-section {
+  min-width: 220px;
+  flex: 1;
+}
+.section-title {
+  font-size: 0.8rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: #58a6ff;
+  border-bottom: 1px solid #161b22;
+  padding-bottom: 6px;
+}
+.drawer-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 0.85rem;
+}
+.drawer-row label { color: #c9d1d9; }
+.drawer-row-check {
+  display: flex;
+  align-items: center;
+  font-size: 0.85rem;
+  color: #c9d1d9;
+}
+.drawer-row-check label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+.drawer-btns {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+select, .btn-sm {
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  color: #c9d1d9;
+  padding: 6px 10px;
+  font-size: 0.85rem;
+  cursor: pointer;
+  outline: none;
+}
+select:focus, .btn-sm:focus { border-color: #58a6ff; }
+.btn-sm:hover:not(:disabled) {
+  background: #21262d;
+  color: #f0f6fc;
+}
+.btn-sm:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.btn-danger {
+  background: #21262d;
+  color: #f85149;
+  border-color: #da3633;
+}
+.btn-danger:hover {
+  background: #b62324 !important;
+  color: #fff !important;
+}
+.section-hint, .status-subtext {
+  font-size: 0.75rem;
+  color: #8b949e;
+  line-height: 1.3;
+}
+.diag-table {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.8rem;
+}
+.diag-row {
+  display: flex;
+  justify-content: space-between;
+  color: #8b949e;
+}
+.badge {
+  font-weight: 600;
+  color: #c9d1d9;
+}
+"#;
+
+pub const APP_JS: &[u8] = br#"'use strict';
 let token = '';
 let nextId = 1;
 let glState = null;
+let streaming = false;
+let streamAbort = null;
+let hidActive = true;
+let pointerLockPref = true;
+let menuOpen = false;
+let dockState = { edge: 'right', pct: 0.5 };
+
 const byId = (id) => document.getElementById(id);
 
 async function mcp(method, params) {
@@ -373,25 +866,48 @@ function renderFrame(canvas, u8Array, width, height, format) {
   renderUyvy(canvas, u8Array, width, height);
 }
 
-let streaming = false;
-let streamAbort = null;
-async function toggleStream() {
-  if (streaming) {
-    streaming = false;
-    if (streamAbort) {
-      streamAbort.abort();
-      streamAbort = null;
+let frameCounter = 0;
+let byteCounter = 0;
+let lastFrameTs = 0;
+let statsTimer = null;
+
+function startStatsTimer() {
+  if (statsTimer) clearInterval(statsTimer);
+  statsTimer = setInterval(() => {
+    const now = performance.now();
+    const dt = now - lastFrameTs;
+    const dot = byId('heartbeat-dot');
+    const rateEl = byId('net-rate');
+    if (streaming && dt < 2000) {
+      if (dot) dot.className = 'dot dot-live';
+      const fps = frameCounter;
+      let rateStr = '';
+      if (byteCounter >= 1048576) {
+        rateStr = (byteCounter / 1048576).toFixed(1) + ' MB/s';
+      } else {
+        rateStr = Math.round(byteCounter / 1024) + ' KB/s';
+      }
+      if (rateEl) rateEl.textContent = `${fps} fps | ${rateStr}`;
+    } else if (streaming && dt < 6000) {
+      if (dot) dot.className = 'dot dot-stalled';
+      if (rateEl) rateEl.textContent = 'stalled';
+    } else {
+      if (dot) dot.className = 'dot dot-idle';
+      if (rateEl) rateEl.textContent = streaming ? 'connecting...' : 'idle';
     }
-    byId('stream-frame').textContent = 'Start stream';
-    return;
-  }
-  if (!token) return;
+    frameCounter = 0;
+    byteCounter = 0;
+  }, 1000);
+}
+
+async function startStream() {
+  if (streaming || !token) return;
   streaming = true;
-  byId('stream-frame').textContent = 'Stop stream';
+  updateStreamButton();
   streamAbort = new AbortController();
   const signal = streamAbort.signal;
   try {
-    const res = byId('video-res') ? byId('video-res').value : '1080p';
+    const res = byId('opt-res') ? byId('opt-res').value : '1080p';
     const response = await fetch('/video/stream?format=tile_delta&res=' + res, {
       headers: {'Authorization': `Bearer ${token}`},
       signal: signal,
@@ -462,7 +978,6 @@ async function toggleStream() {
         totalLen -= totalFrameLen;
 
         const view = new DataView(fullBuffer.buffer, fullBuffer.byteOffset, HEADER_LEN);
-        const seq = view.getUint32(4, false);
         const width = view.getUint16(16, false);
         const height = view.getUint16(18, false);
         const formatByte = fullBuffer[20];
@@ -478,121 +993,163 @@ async function toggleStream() {
           renderFrame(byId('kvm-canvas'), framePayload, width, height, formatByte === 3 ? 'yuv422p' : 'yuv420p');
         }
 
-        const formatName = formatByte === 5 ? (flags & 1 ? 'tile-keyframe' : 'tile-delta') : (formatByte === 3 ? 'yuv422p' : 'yuv420p');
-        if (byId('stream-badge')) byId('stream-badge').textContent = `${width}x${height} (${formatName})`;
-        byId('snapshot-result').textContent = JSON.stringify({
-          stream: true,
-          seq,
-          width,
-          height,
-          format: formatName,
-          byteLength: payloadLen,
-        }, null, 2);
+        frameCounter++;
+        byteCounter += totalFrameLen;
+        lastFrameTs = performance.now();
       }
     }
   } catch (e) {
     if (!signal.aborted) {
-      byId('message').textContent = e.message;
+      console.warn('Stream interrupted:', e);
     }
   } finally {
     streaming = false;
     streamAbort = null;
-    byId('stream-frame').textContent = 'Start stream';
-    updateResDisplay();
+    updateStreamButton();
   }
 }
 
-async function pair() {
-  const code = byId('pair-code').value.trim();
-  if (!code) throw new Error('Pairing code is required');
-  byId('message').textContent = 'Pairing...';
-  const response = await fetch('/pair', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({code})
-  });
-  if (!response.ok) {
-    const err = await response.json().catch(() => ({error: 'Pairing failed'}));
-    throw new Error(err.error || `Pairing rejected (${response.status})`);
+async function stopStream() {
+  if (!streaming) return;
+  streaming = false;
+  if (streamAbort) {
+    streamAbort.abort();
+    streamAbort = null;
   }
-  const data = await response.json();
-  byId('pair-code').value = '';
-  token = data.token;
-  await initSession();
+  updateStreamButton();
 }
 
-async function connect() {
-  token = byId('token').value;
-  byId('token').value = '';
-  if (!token) throw new Error('A short-lived access token is required');
-  await initSession();
+async function toggleStream() {
+  if (streaming) await stopStream();
+  else await startStream();
 }
 
-async function initSession() {
-  await mcp('initialize', {protocolVersion:'2025-11-25',capabilities:{},clientInfo:{name:'onyx-kvm-web',version:'0.1.0'}});
-  await fetch('/mcp', {method:'POST',headers:{'Authorization':`Bearer ${token}`,'Content-Type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',method:'notifications/initialized'})});
-  const status = await mcp('tools/call', {name:'kvm.status',arguments:{}});
-  const state = status.structuredContent;
-  byId('video').textContent = state.videoEnabled ? 'Enabled' : 'Disabled';
-  byId('hid').textContent = state.mutatingOperationsEnabled ? 'Enabled' : 'Disabled';
-  byId('mic').textContent = state.audioCaptureEnabled ? 'Enabled' : 'Disabled';
-  byId('speaker').textContent = state.audioOutputEnabled ? 'Enabled' : 'Disabled';
-  byId('snapshot').disabled = !state.videoEnabled;
-  byId('fetch-frame').disabled = !state.videoEnabled;
-  byId('stream-frame').disabled = !state.videoEnabled;
-  if (byId('video-res')) byId('video-res').disabled = !state.videoEnabled;
-  updateResDisplay();
-  byId('send-cad').disabled = !state.mutatingOperationsEnabled;
-  byId('release-keys').disabled = !state.mutatingOperationsEnabled;
-  byId('capture-audio').disabled = !state.audioCaptureEnabled;
-  byId('play-audio').disabled = !state.audioOutputEnabled;
-  byId('message').textContent = 'Authenticated';
+function updateStreamButton() {
+  const btn = byId('stream-toggle-btn');
+  if (btn) btn.textContent = streaming ? 'Stop Stream' : 'Start Stream';
 }
 
-async function snapshot() {
-  const res = byId('video-res') ? byId('video-res').value : '1080p';
-  const width = res === '720p' ? 1280 : 1920;
-  const height = res === '720p' ? 720 : 1080;
-  const result = await mcp('tools/call', {name:'kvm.video.snapshot',arguments:{width,height,format:'yuv422p',deadlineMs:5000}});
-  byId('snapshot-result').textContent = JSON.stringify(result.structuredContent, null, 2);
+async function restartStream() {
+  if (streaming) {
+    await stopStream();
+    await startStream();
+  }
 }
 
-async function fetchFrame() {
-  const res = byId('video-res') ? byId('video-res').value : '1080p';
-  byId('snapshot-result').textContent = `Fetching live frame (${res}) from /video/frame...`;
-  const response = await fetch(`/video/frame?format=yuv422p&res=${res}`, {
-    headers: {'Authorization': `Bearer ${token}`}
-  });
-  if (!response.ok) throw new Error(`Frame request rejected (${response.status})`);
-  const digest = response.headers.get('X-Frame-Digest') || '';
-  const width = parseInt(response.headers.get('X-Frame-Width') || (res === '720p' ? '1280' : '1920'), 10);
-  const height = parseInt(response.headers.get('X-Frame-Height') || (res === '720p' ? '720' : '1080'), 10);
-  const format = response.headers.get('X-Frame-Format') || 'yuv422p';
-  const buffer = await response.arrayBuffer();
-  renderFrame(byId('kvm-canvas'), new Uint8Array(buffer), width, height, format);
-  byId('snapshot-result').textContent = JSON.stringify({
-    width, height, format, byteLength: buffer.byteLength, sha256: digest
-  }, null, 2);
-}
-
-async function captureAudio() {
-  byId('mic').textContent = 'Active';
+function loadDockState() {
   try {
-    const result = await mcp('tools/call', {name:'kvm.audio.capture',arguments:{}});
-    byId('audio-result').textContent = JSON.stringify(result.structuredContent, null, 2);
-  } finally {
-    byId('mic').textContent = 'Enabled';
+    const raw = localStorage.getItem('onyx_dock');
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (['left', 'right', 'top', 'bottom'].includes(parsed.edge) && typeof parsed.pct === 'number') {
+        dockState = parsed;
+      }
+    }
+  } catch (_) {}
+}
+
+function applyDockPosition() {
+  const dock = byId('menu-dock');
+  const drawer = byId('menu-drawer');
+  if (!dock) return;
+  dock.classList.remove('dock-left', 'dock-right', 'dock-top', 'dock-bottom');
+  dock.classList.add('dock-' + dockState.edge);
+  if (drawer) {
+    drawer.className = 'drawer-' + dockState.edge;
+  }
+  const pct = Math.max(0.08, Math.min(0.92, dockState.pct));
+  if (dockState.edge === 'left' || dockState.edge === 'right') {
+    dock.style.top = (pct * 100).toFixed(1) + '%';
+    dock.style.bottom = 'auto';
+    dock.style.left = dockState.edge === 'left' ? '12px' : 'auto';
+    dock.style.right = dockState.edge === 'right' ? '12px' : 'auto';
+    dock.style.transform = 'translateY(-50%)';
+  } else {
+    dock.style.left = (pct * 100).toFixed(1) + '%';
+    dock.style.right = 'auto';
+    dock.style.top = dockState.edge === 'top' ? '12px' : 'auto';
+    dock.style.bottom = dockState.edge === 'bottom' ? '12px' : 'auto';
+    dock.style.transform = 'translateX(-50%)';
   }
 }
 
-async function playAudio() {
-  byId('speaker').textContent = 'Active';
-  try {
-    const result = await mcp('tools/call', {name:'kvm.audio.play',arguments:{}});
-    byId('audio-result').textContent = JSON.stringify(result.structuredContent, null, 2);
-  } finally {
-    byId('speaker').textContent = 'Enabled';
+function toggleMenu() {
+  menuOpen = !menuOpen;
+  updateMenuOpenClass();
+}
+
+function updateMenuOpenClass() {
+  document.body.classList.remove('menu-open-left', 'menu-open-right', 'menu-open-top', 'menu-open-bottom');
+  if (menuOpen) {
+    document.body.classList.add('menu-open-' + dockState.edge);
   }
+}
+
+function initDockDrag() {
+  const dock = byId('menu-dock');
+  if (!dock) return;
+  let isDragging = false;
+  let startX = 0;
+  let startY = 0;
+
+  dock.addEventListener('pointerdown', (e) => {
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+    isDragging = false;
+    startX = e.clientX;
+    startY = e.clientY;
+    dock.setPointerCapture(e.pointerId);
+  });
+
+  dock.addEventListener('pointermove', (e) => {
+    if (!dock.hasPointerCapture(e.pointerId)) return;
+    const dx = e.clientX - startX;
+    const dy = e.clientY - startY;
+    if (!isDragging && Math.hypot(dx, dy) > 6) {
+      isDragging = true;
+      dock.classList.add('dragging');
+    }
+    if (isDragging) {
+      dock.style.left = (e.clientX - dock.offsetWidth / 2) + 'px';
+      dock.style.top = (e.clientY - dock.offsetHeight / 2) + 'px';
+      dock.style.right = 'auto';
+      dock.style.bottom = 'auto';
+      dock.style.transform = 'none';
+    }
+  });
+
+  dock.addEventListener('pointerup', (e) => {
+    if (!dock.hasPointerCapture(e.pointerId)) return;
+    dock.releasePointerCapture(e.pointerId);
+    dock.classList.remove('dragging');
+    if (isDragging) {
+      isDragging = false;
+      const w = window.innerWidth;
+      const h = window.innerHeight;
+      const dLeft = e.clientX;
+      const dRight = w - e.clientX;
+      const dTop = e.clientY;
+      const dBottom = h - e.clientY;
+      const minDist = Math.min(dLeft, dRight, dTop, dBottom);
+      if (minDist === dLeft) {
+        dockState.edge = 'left';
+        dockState.pct = e.clientY / h;
+      } else if (minDist === dRight) {
+        dockState.edge = 'right';
+        dockState.pct = e.clientY / h;
+      } else if (minDist === dTop) {
+        dockState.edge = 'top';
+        dockState.pct = e.clientX / w;
+      } else {
+        dockState.edge = 'bottom';
+        dockState.pct = e.clientX / w;
+      }
+      localStorage.setItem('onyx_dock', JSON.stringify(dockState));
+      applyDockPosition();
+      updateMenuOpenClass();
+    } else {
+      toggleMenu();
+    }
+  });
 }
 
 const KEY_MAP = {
@@ -613,12 +1170,14 @@ let modifiers = 0;
 let mouseButtons = 0;
 
 function sendKeyReport() {
+  if (!token) return;
   const keys = Array.from(pressedKeys).slice(0, 6);
   while (keys.length < 6) keys.push(0);
   mcp('tools/call', {name: 'kvm.keyboard.send', arguments: {report: [modifiers, 0, ...keys]}}).catch(() => {});
 }
 
 function sendPointerReport(dx, dy, wheel) {
+  if (!token) return;
   const clamp = (v) => Math.max(-127, Math.min(127, Math.round(v))) & 0xFF;
   mcp('tools/call', {name: 'kvm.pointer.send', arguments: {report: [mouseButtons & 0x07, clamp(dx), clamp(dy), clamp(wheel)]}}).catch(() => {});
 }
@@ -627,75 +1186,377 @@ function releaseAll() {
   pressedKeys.clear();
   modifiers = 0;
   mouseButtons = 0;
+  if (!token) return;
   mcp('tools/call', {name: 'kvm.keyboard.send', arguments: {report: [0,0,0,0,0,0,0,0]}}).catch(() => {});
   mcp('tools/call', {name: 'kvm.pointer.send', arguments: {report: [0,0,0,0]}}).catch(() => {});
 }
 
-const ctrl = byId('control-area');
-ctrl.addEventListener('keydown', (e) => {
-  e.preventDefault();
-  if (MOD_MAP[e.code]) modifiers |= MOD_MAP[e.code];
-  else if (KEY_MAP[e.code]) pressedKeys.add(KEY_MAP[e.code]);
-  sendKeyReport();
-});
-ctrl.addEventListener('keyup', (e) => {
-  e.preventDefault();
-  if (MOD_MAP[e.code]) modifiers &= ~MOD_MAP[e.code];
-  else if (KEY_MAP[e.code]) pressedKeys.delete(KEY_MAP[e.code]);
-  sendKeyReport();
-});
-ctrl.addEventListener('blur', releaseAll);
-ctrl.addEventListener('mousedown', (e) => {
-  const bit = e.button === 0 ? 1 : e.button === 2 ? 2 : e.button === 1 ? 4 : 0;
-  mouseButtons |= bit;
-  sendPointerReport(0, 0, 0);
-});
-ctrl.addEventListener('mouseup', (e) => {
-  const bit = e.button === 0 ? 1 : e.button === 2 ? 2 : e.button === 1 ? 4 : 0;
-  mouseButtons &= ~bit;
-  sendPointerReport(0, 0, 0);
-});
-ctrl.addEventListener('contextmenu', (e) => e.preventDefault());
-ctrl.addEventListener('mousemove', (e) => {
-  if (document.activeElement === ctrl && (e.movementX !== 0 || e.movementY !== 0)) {
-    sendPointerReport(e.movementX, e.movementY, 0);
-  }
-});
-ctrl.addEventListener('wheel', (e) => {
-  e.preventDefault();
-  sendPointerReport(0, 0, e.deltaY < 0 ? 1 : e.deltaY > 0 ? -1 : 0);
-});
-byId('send-cad').addEventListener('click', async () => {
-  await mcp('tools/call', {name: 'kvm.keyboard.send', arguments: {report: [0x05, 0, 0x4C, 0, 0, 0, 0, 0]}});
-  setTimeout(() => {
-    mcp('tools/call', {name: 'kvm.keyboard.send', arguments: {report: [0, 0, 0, 0, 0, 0, 0, 0]}}).catch(() => {});
-  }, 100);
-});
-byId('release-keys').addEventListener('click', releaseAll);
+function initInputHandlers() {
+  const vp = byId('viewport');
+  if (!vp) return;
 
-function updateResDisplay() {
-  const resEl = byId('video-res');
-  const val = resEl ? resEl.value : '1080p';
-  const label = val === '720p' ? '720p (Hardware Scaler)' : '1080p (Native)';
-  if (byId('active-res')) byId('active-res').textContent = label;
-  if (!streaming && byId('stream-badge')) byId('stream-badge').textContent = `Idle (${val})`;
-}
-if (byId('video-res')) {
-  byId('video-res').addEventListener('change', () => {
-    updateResDisplay();
-    if (streaming) {
-      toggleStream().then(() => toggleStream());
+  vp.addEventListener('keydown', (e) => {
+    if (!hidActive || !token) return;
+    e.preventDefault();
+    if (MOD_MAP[e.code]) modifiers |= MOD_MAP[e.code];
+    else if (KEY_MAP[e.code]) pressedKeys.add(KEY_MAP[e.code]);
+    sendKeyReport();
+  });
+
+  vp.addEventListener('keyup', (e) => {
+    if (!hidActive || !token) return;
+    e.preventDefault();
+    if (MOD_MAP[e.code]) modifiers &= ~MOD_MAP[e.code];
+    else if (KEY_MAP[e.code]) pressedKeys.delete(KEY_MAP[e.code]);
+    sendKeyReport();
+  });
+
+  vp.addEventListener('blur', releaseAll);
+
+  vp.addEventListener('mousedown', (e) => {
+    if (!hidActive || !token) return;
+    if (pointerLockPref && document.pointerLockElement !== vp) {
+      vp.requestPointerLock().catch(() => {});
+    }
+    const bit = e.button === 0 ? 1 : e.button === 2 ? 2 : e.button === 1 ? 4 : 0;
+    mouseButtons |= bit;
+    sendPointerReport(0, 0, 0);
+  });
+
+  vp.addEventListener('mouseup', (e) => {
+    if (!hidActive || !token) return;
+    const bit = e.button === 0 ? 1 : e.button === 2 ? 2 : e.button === 1 ? 4 : 0;
+    mouseButtons &= ~bit;
+    sendPointerReport(0, 0, 0);
+  });
+
+  vp.addEventListener('contextmenu', (e) => e.preventDefault());
+
+  vp.addEventListener('mousemove', (e) => {
+    if (!hidActive || !token) return;
+    if ((document.activeElement === vp || document.pointerLockElement === vp) && (e.movementX !== 0 || e.movementY !== 0)) {
+      sendPointerReport(e.movementX, e.movementY, 0);
     }
   });
+
+  vp.addEventListener('wheel', (e) => {
+    if (!hidActive || !token) return;
+    e.preventDefault();
+    sendPointerReport(0, 0, e.deltaY < 0 ? 1 : e.deltaY > 0 ? -1 : 0);
+  }, { passive: false });
 }
-function run(action) { action().catch((error) => { byId('message').textContent = error.message; }); }
-byId('pair-btn').addEventListener('click', () => run(pair));
-byId('pair-code').addEventListener('keydown', (e) => { if (e.key === 'Enter') run(pair); });
-byId('connect').addEventListener('click', () => run(connect));
-byId('snapshot').addEventListener('click', () => run(snapshot));
-byId('fetch-frame').addEventListener('click', () => run(fetchFrame));
-byId('stream-frame').addEventListener('click', () => run(toggleStream));
-byId('capture-audio').addEventListener('click', () => run(captureAudio));
-byId('play-audio').addEventListener('click', () => run(playAudio));
-window.addEventListener('pagehide', () => { if (streaming && streamAbort) streamAbort.abort(); streaming = false; token = ''; });
-";
+
+async function initSession() {
+  await mcp('initialize', {protocolVersion:'2025-11-25',capabilities:{},clientInfo:{name:'onyx-kvm-web',version:'0.1.0'}});
+  await fetch('/mcp', {method:'POST',headers:{'Authorization':`Bearer ${token}`,'Content-Type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',method:'notifications/initialized'})});
+  const status = await mcp('tools/call', {name:'kvm.status',arguments:{}});
+  const state = status.structuredContent;
+
+  const vEl = byId('stat-video'); if (vEl) vEl.textContent = state.videoEnabled ? 'Active' : 'Disabled';
+  const hEl = byId('stat-hid'); if (hEl) hEl.textContent = state.mutatingOperationsEnabled ? 'Active' : 'Disabled';
+  const sEl = byId('stat-speaker'); if (sEl) sEl.textContent = state.audioOutputEnabled ? 'Active' : 'Disabled';
+  const mEl = byId('stat-mic'); if (mEl) mEl.textContent = state.audioCaptureEnabled ? 'Active' : 'Disabled';
+
+  const toneBtn = byId('play-tone-btn'); if (toneBtn) toneBtn.disabled = !state.audioOutputEnabled;
+  const micBtn = byId('capture-mic-btn'); if (micBtn) micBtn.disabled = !state.audioCaptureEnabled;
+  const cadBtn = byId('send-cad-btn'); if (cadBtn) cadBtn.disabled = !state.mutatingOperationsEnabled;
+  const relBtn = byId('release-keys-btn'); if (relBtn) relBtn.disabled = !state.mutatingOperationsEnabled;
+  const snapBtn = byId('fetch-frame-btn'); if (snapBtn) snapBtn.disabled = !state.videoEnabled;
+
+  const audioStatus = byId('audio-status');
+  if (audioStatus) {
+    if (state.audioOutputEnabled && state.audioCaptureEnabled) {
+      audioStatus.textContent = 'Speaker and microphone physical gates active.';
+    } else if (state.audioOutputEnabled) {
+      audioStatus.textContent = 'Speaker gate active. Microphone disabled.';
+    } else if (state.audioCaptureEnabled) {
+      audioStatus.textContent = 'Microphone gate active. Speaker disabled.';
+    } else {
+      audioStatus.textContent = 'Audio gates disabled fail-closed.';
+    }
+  }
+
+  return state;
+}
+
+function setAuthenticated(isAuth) {
+  if (isAuth) {
+    document.body.classList.remove('unauth');
+    document.body.classList.add('auth');
+    const autoStream = byId('opt-autostream') ? byId('opt-autostream').checked : true;
+    if (autoStream) startStream();
+    byId('viewport').focus();
+  } else {
+    document.body.classList.remove('auth');
+    document.body.classList.add('unauth');
+    stopStream();
+    releaseAll();
+    menuOpen = false;
+    updateMenuOpenClass();
+  }
+}
+
+async function pair() {
+  const code = byId('pair-code').value.trim();
+  if (!code) throw new Error('Pairing PIN is required');
+  byId('auth-message').textContent = 'Pairing...';
+  const response = await fetch('/pair', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({code})
+  });
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({error: 'Pairing failed'}));
+    throw new Error(err.error || `Pairing rejected (${response.status})`);
+  }
+  const data = await response.json();
+  byId('pair-code').value = '';
+  token = data.token;
+  localStorage.setItem('onyx_token', token);
+  byId('auth-message').textContent = 'Authenticated. Initializing...';
+  await initSession();
+  setAuthenticated(true);
+}
+
+async function connectToken() {
+  const input = byId('token-input').value.trim();
+  if (!input) throw new Error('Access token is required');
+  token = input.startsWith('Bearer ') ? input.slice(7) : input;
+  byId('token-input').value = '';
+  byId('auth-message').textContent = 'Verifying token...';
+  localStorage.setItem('onyx_token', token);
+  await initSession();
+  setAuthenticated(true);
+}
+
+function disconnect() {
+  token = '';
+  localStorage.removeItem('onyx_token');
+  setAuthenticated(false);
+  byId('auth-message').textContent = 'Disconnected';
+}
+
+function initAuthTabs() {
+  const tabPin = byId('tab-pin');
+  const tabToken = byId('tab-token');
+  const panelPin = byId('panel-pin');
+  const panelToken = byId('panel-token');
+  if (!tabPin || !tabToken) return;
+
+  tabPin.addEventListener('click', () => {
+    tabPin.classList.add('active');
+    tabPin.setAttribute('aria-selected', 'true');
+    tabToken.classList.remove('active');
+    tabToken.setAttribute('aria-selected', 'false');
+    panelPin.classList.add('active');
+    panelToken.classList.remove('active');
+  });
+
+  tabToken.addEventListener('click', () => {
+    tabToken.classList.add('active');
+    tabToken.setAttribute('aria-selected', 'true');
+    tabPin.classList.remove('active');
+    tabPin.setAttribute('aria-selected', 'false');
+    panelToken.classList.add('active');
+    panelPin.classList.remove('active');
+  });
+}
+
+function initOptions() {
+  const optRes = byId('opt-res');
+  const savedRes = localStorage.getItem('onyx_res') || '1080p';
+  if (optRes) {
+    optRes.value = savedRes;
+    optRes.addEventListener('change', () => {
+      localStorage.setItem('onyx_res', optRes.value);
+      restartStream();
+    });
+  }
+
+  const optFit = byId('opt-fit');
+  const savedFit = localStorage.getItem('onyx_fit') || 'contain';
+  const canvas = byId('kvm-canvas');
+  if (optFit) {
+    optFit.value = savedFit;
+    if (canvas) canvas.style.objectFit = savedFit;
+    optFit.addEventListener('change', () => {
+      localStorage.setItem('onyx_fit', optFit.value);
+      if (canvas) canvas.style.objectFit = optFit.value;
+    });
+  }
+
+  const optAuto = byId('opt-autostream');
+  if (optAuto) {
+    optAuto.checked = localStorage.getItem('onyx_autostream') !== 'false';
+    optAuto.addEventListener('change', () => {
+      localStorage.setItem('onyx_autostream', optAuto.checked ? 'true' : 'false');
+    });
+  }
+
+  const optHid = byId('opt-autohid');
+  if (optHid) {
+    hidActive = localStorage.getItem('onyx_autohid') !== 'false';
+    optHid.checked = hidActive;
+    optHid.addEventListener('change', () => {
+      hidActive = optHid.checked;
+      localStorage.setItem('onyx_autohid', hidActive ? 'true' : 'false');
+      if (!hidActive) releaseAll();
+    });
+  }
+
+  const optLock = byId('opt-pointerlock');
+  if (optLock) {
+    pointerLockPref = localStorage.getItem('onyx_pointerlock') !== 'false';
+    optLock.checked = pointerLockPref;
+    optLock.addEventListener('change', () => {
+      pointerLockPref = optLock.checked;
+      localStorage.setItem('onyx_pointerlock', pointerLockPref ? 'true' : 'false');
+    });
+  }
+}
+
+function initActionButtons() {
+  byId('close-drawer-btn').addEventListener('click', toggleMenu);
+  byId('menu-toggle-btn').addEventListener('click', (e) => { e.stopPropagation(); toggleMenu(); });
+  byId('stream-toggle-btn').addEventListener('click', toggleStream);
+  byId('logout-btn').addEventListener('click', disconnect);
+
+  byId('send-cad-btn').addEventListener('click', async () => {
+    await mcp('tools/call', {name: 'kvm.keyboard.send', arguments: {report: [0x05, 0, 0x4C, 0, 0, 0, 0, 0]}});
+    setTimeout(() => {
+      mcp('tools/call', {name: 'kvm.keyboard.send', arguments: {report: [0, 0, 0, 0, 0, 0, 0, 0]}}).catch(() => {});
+    }, 100);
+  });
+  byId('release-keys-btn').addEventListener('click', releaseAll);
+
+  byId('play-tone-btn').addEventListener('click', async () => {
+    const btn = byId('play-tone-btn');
+    btn.disabled = true;
+    try {
+      await mcp('tools/call', {name: 'kvm.audio.play', arguments: {}});
+    } catch (e) {
+      alert('Audio playback failed: ' + e.message);
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  byId('capture-mic-btn').addEventListener('click', async () => {
+    const btn = byId('capture-mic-btn');
+    btn.disabled = true;
+    try {
+      const res = await mcp('tools/call', {name: 'kvm.audio.capture', arguments: {}});
+      alert('Mic sample: ' + JSON.stringify(res.structuredContent));
+    } catch (e) {
+      alert('Audio capture failed: ' + e.message);
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  byId('fetch-frame-btn').addEventListener('click', async () => {
+    const res = byId('opt-res') ? byId('opt-res').value : '1080p';
+    const width = res === '720p' ? 1280 : 1920;
+    const height = res === '720p' ? 720 : 1080;
+    try {
+      const r = await mcp('tools/call', {name:'kvm.video.snapshot',arguments:{width,height,format:'yuv422p',deadlineMs:5000}});
+      alert('Verified Snapshot: ' + JSON.stringify(r.structuredContent));
+    } catch (e) {
+      alert('Snapshot failed: ' + e.message);
+    }
+  });
+
+  function runAuth(action) {
+    action().catch((err) => {
+      byId('auth-message').textContent = err.message;
+    });
+  }
+  byId('pair-btn').addEventListener('click', () => runAuth(pair));
+  byId('pair-code').addEventListener('keydown', (e) => { if (e.key === 'Enter') runAuth(pair); });
+  byId('token-btn').addEventListener('click', () => runAuth(connectToken));
+  byId('token-input').addEventListener('keydown', (e) => { if (e.key === 'Enter') runAuth(connectToken); });
+}
+
+window.addEventListener('DOMContentLoaded', async () => {
+  loadDockState();
+  applyDockPosition();
+  initDockDrag();
+  initAuthTabs();
+  initOptions();
+  initActionButtons();
+  initInputHandlers();
+  startStatsTimer();
+
+  const savedToken = localStorage.getItem('onyx_token');
+  if (savedToken) {
+    token = savedToken;
+    byId('auth-message').textContent = 'Restoring session...';
+    try {
+      await initSession();
+      setAuthenticated(true);
+      return;
+    } catch (e) {
+      console.warn('Session restoration failed:', e);
+      localStorage.removeItem('onyx_token');
+      token = '';
+    }
+  }
+  setAuthenticated(false);
+});
+
+window.addEventListener('pagehide', () => {
+  if (streaming && streamAbort) streamAbort.abort();
+  streaming = false;
+  releaseAll();
+});
+"#;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn index_html_contains_required_elements() {
+        let html = std::str::from_utf8(INDEX_HTML).expect("INDEX_HTML must be valid utf-8");
+        assert!(html.contains("id=\"viewport\""));
+        assert!(html.contains("id=\"kvm-canvas\""));
+        assert!(html.contains("id=\"menu-dock\""));
+        assert!(html.contains("id=\"menu-drawer\""));
+        assert!(html.contains("id=\"auth-modal\""));
+        assert!(html.contains("id=\"heartbeat-dot\""));
+        assert!(html.contains("id=\"net-rate\""));
+        assert!(html.contains("id=\"pair-code\""));
+        assert!(html.contains("id=\"token-input\""));
+        assert!(html.contains("id=\"close-drawer-btn\""));
+        assert!(html.contains("id=\"menu-toggle-btn\""));
+    }
+
+    #[test]
+    fn app_css_contains_edge_contraction_and_full_screen() {
+        let css = std::str::from_utf8(APP_CSS).expect("APP_CSS must be valid utf-8");
+        assert!(css.contains("body.menu-open-right #viewport"));
+        assert!(css.contains("body.menu-open-left #viewport"));
+        assert!(css.contains("body.menu-open-top #viewport"));
+        assert!(css.contains("body.menu-open-bottom #viewport"));
+        assert!(css.contains("body.unauth #viewport"));
+        assert!(css.contains("#kvm-canvas"));
+        assert!(css.contains(".dot-live"));
+    }
+
+    #[test]
+    fn app_js_contains_persistence_and_interactions() {
+        let js = std::str::from_utf8(APP_JS).expect("APP_JS must be valid utf-8");
+        assert!(js.contains("onyx_dock"));
+        assert!(js.contains("onyx_token"));
+        assert!(js.contains("onyx_res"));
+        assert!(js.contains("onyx_fit"));
+        assert!(js.contains("onyx_autostream"));
+        assert!(js.contains("onyx_autohid"));
+        assert!(js.contains("onyx_pointerlock"));
+        assert!(js.contains("setPointerCapture"));
+        assert!(js.contains("applyDockPosition"));
+        assert!(js.contains("toggleMenu"));
+        assert!(js.contains("startStatsTimer"));
+    }
+}
+
