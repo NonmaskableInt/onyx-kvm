@@ -12,7 +12,7 @@ The web console interface has been completely overhauled to satisfy all seven op
 5. **Persistent User Settings**: All preferences (`onyx_res`, `onyx_fit`, `onyx_autostream`, `onyx_autohid`, `onyx_pointerlock`, `onyx_dock`, `onyx_token`) persist in `localStorage` across reloads and reboots.
 6. **Clean Unauthenticated Modal**: When unauthenticated, the user is presented with a clean two-option card featuring segmented tabs: Pairing PIN (6-digit console PIN, active by default) and Access Token.
 7. **Unobtrusive Status Indicators**: The floating dock features a live pulsing LED heartbeat dot (green live pulse, amber stalled, red idle) and a compact 1000ms rolling network rate readout (e.g., `30 fps | 1.8 MB/s`).
-- **Target Deployment**: Deployed cross-compiled RISC-V release binary to `/usr/bin/onyx-kvmd` on target `192.168.2.110`. Staged new pairing PIN `588619`.
+- **Target Deployment**: Deployed cross-compiled RISC-V release binary to `/usr/bin/onyx-kvmd` on target `192.168.2.110`. Updated `deploy.sh` to ensure `/run/onyx-kvm/video-enabled` and `hid-enabled` gates are automatically restored after service restarts. Hardened WebGL quad buffer binding, frame rendering try/catch, and error reporting. Active pairing PIN staged on device: `491973`.
 
 
 ## Hardware VPSS Scaler (720p) & Web Interface Fix [COMPLETED]
