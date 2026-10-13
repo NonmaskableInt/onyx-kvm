@@ -639,6 +639,7 @@ function initWebGL(canvas) {
   gl.bufferData(gl.ARRAY_BUFFER, quad, gl.STATIC_DRAW);
 
   function setupAttribs(prog) {
+    gl.bindBuffer(gl.ARRAY_BUFFER, buf);
     const aPos = gl.getAttribLocation(prog, 'a_pos');
     const aTex = gl.getAttribLocation(prog, 'a_tex');
     gl.enableVertexAttribArray(aPos);
@@ -983,14 +984,18 @@ async function startStream() {
         const formatByte = fullBuffer[20];
         const flags = fullBuffer[21];
         const framePayload = fullBuffer.subarray(HEADER_LEN, totalFrameLen);
-        if (formatByte === 5) {
-          if (flags & 1) {
-            renderUyvy(byId('kvm-canvas'), framePayload, width, height);
+        try {
+          if (formatByte === 5) {
+            if (flags & 1) {
+              renderUyvy(byId('kvm-canvas'), framePayload, width, height);
+            } else {
+              renderTileDelta(byId('kvm-canvas'), framePayload, width, height);
+            }
           } else {
-            renderTileDelta(byId('kvm-canvas'), framePayload, width, height);
+            renderFrame(byId('kvm-canvas'), framePayload, width, height, formatByte === 3 ? 'yuv422p' : 'yuv420p');
           }
-        } else {
-          renderFrame(byId('kvm-canvas'), framePayload, width, height, formatByte === 3 ? 'yuv422p' : 'yuv420p');
+        } catch (renderErr) {
+          console.warn('Frame render error:', renderErr);
         }
 
         frameCounter++;
@@ -1001,6 +1006,10 @@ async function startStream() {
   } catch (e) {
     if (!signal.aborted) {
       console.warn('Stream interrupted:', e);
+      const rateEl = byId('net-rate');
+      if (rateEl) rateEl.textContent = 'stream error';
+      const authMsg = byId('auth-message');
+      if (authMsg) authMsg.textContent = 'Stream error: ' + (e.message || e);
     }
   } finally {
     streaming = false;
@@ -1468,16 +1477,26 @@ function initActionButtons() {
 
   function runAuth(action) {
     action().catch((err) => {
-      byId('auth-message').textContent = err.message;
+      byId('auth-message').textContent = err.message || String(err);
     });
   }
   byId('pair-btn').addEventListener('click', () => runAuth(pair));
-  byId('pair-code').addEventListener('keydown', (e) => { if (e.key === 'Enter') runAuth(pair); });
+  byId('pair-code').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      runAuth(pair);
+    }
+  });
   byId('token-btn').addEventListener('click', () => runAuth(connectToken));
-  byId('token-input').addEventListener('keydown', (e) => { if (e.key === 'Enter') runAuth(connectToken); });
+  byId('token-input').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      runAuth(connectToken);
+    }
+  });
 }
 
-window.addEventListener('DOMContentLoaded', async () => {
+async function initApp() {
   loadDockState();
   applyDockPosition();
   initDockDrag();
@@ -1502,7 +1521,13 @@ window.addEventListener('DOMContentLoaded', async () => {
     }
   }
   setAuthenticated(false);
-});
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initApp);
+} else {
+  initApp();
+}
 
 window.addEventListener('pagehide', () => {
   if (streaming && streamAbort) streamAbort.abort();
