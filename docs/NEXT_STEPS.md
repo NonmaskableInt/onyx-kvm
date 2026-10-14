@@ -13,6 +13,7 @@ The web console interface has been completely overhauled to satisfy all seven op
 6. **Clean Unauthenticated Modal**: When unauthenticated, the user is presented with a clean two-option card featuring segmented tabs: Pairing PIN (6-digit console PIN, active by default) and Access Token.
 7. **Unobtrusive Status Indicators**: The floating dock features a live pulsing LED heartbeat dot (green live pulse, amber stalled, red idle) and a compact 1000ms rolling network rate readout (e.g., `30 fps | 1.8 MB/s`).
 - **Target Deployment**: Deployed cross-compiled RISC-V release binary to `/usr/bin/onyx-kvmd` on target `192.168.2.110`. Updated `deploy.sh` to ensure `/run/onyx-kvm/video-enabled` and `hid-enabled` gates are automatically restored after service restarts. Hardened WebGL quad buffer binding, frame rendering try/catch, and error reporting. Active pairing PIN staged on device: `491973`.
+- **HID Input Coalescing & Focus Fix**: Fixed event freeze where keyboard and mouse events appeared blocked until ESC was pressed. Root cause was unthrottled `mousemove` events flooding the browser HTTP/1.1 connection pool with 60-120 requests/sec, starving keyboard reports, combined with DOM focus loss on pointer lock. Implemented in-flight request bounding and motion delta coalescing for both pointer (`flushPointer`) and keyboard (`sendKeyReport`), moved keyboard listeners to `window` with text-editing guards, and made pointer lock opt-in (`pointerLockPref = false` by default).
 
 
 ## Hardware VPSS Scaler (720p) & Web Interface Fix [COMPLETED]
