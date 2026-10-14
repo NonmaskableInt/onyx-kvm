@@ -67,6 +67,17 @@ pub const INDEX_HTML: &[u8] = br#"<!doctype html>
         <div class="drawer-row-check">
           <label><input type="checkbox" id="opt-pointerlock"> Lock pointer on click</label>
         </div>
+        <div class="drawer-row">
+          <label for="opt-speed">Pointer Speed:</label>
+          <select id="opt-speed">
+            <option value="0.5">0.5x (Slow)</option>
+            <option value="0.75">0.75x</option>
+            <option value="1.0" selected>1.0x (Normal)</option>
+            <option value="1.25">1.25x</option>
+            <option value="1.5">1.5x (Fast)</option>
+            <option value="2.0">2.0x (Very Fast)</option>
+          </select>
+        </div>
         <div class="drawer-btns">
           <button id="send-cad-btn" class="btn-sm">Ctrl + Alt + Del</button>
           <button id="release-keys-btn" class="btn-sm">Release Keys</button>
@@ -172,6 +183,12 @@ body {
   display: block;
   background: #000;
   pointer-events: none;
+}
+body.auth #viewport {
+  cursor: crosshair;
+}
+body.pointer-locked #viewport {
+  cursor: none;
 }
 
 body.unauth #viewport {
@@ -1182,8 +1199,61 @@ let mouseInFlight = false;
 let pendingDx = 0;
 let pendingDy = 0;
 let pendingWheel = 0;
+let accumDx = 0;
+let accumDy = 0;
+let pointerSpeed = 1.0;
 let keyInFlight = false;
 let pendingKeyReport = null;
+
+function getVideoGeometry() {
+  const canvas = byId('kvm-canvas');
+  if (!canvas) return null;
+  const rect = canvas.getBoundingClientRect();
+  if (rect.width <= 0 || rect.height <= 0) return null;
+
+  const nativeW = canvas.width || 1920;
+  const nativeH = canvas.height || 1080;
+  const videoAspect = nativeW / nativeH;
+  const containerAspect = rect.width / rect.height;
+
+  let dispW, dispH, left, top;
+  const fit = canvas.style.objectFit || 'contain';
+  if (fit === 'fill') {
+    dispW = rect.width;
+    dispH = rect.height;
+    left = rect.left;
+    top = rect.top;
+  } else {
+    if (containerAspect > videoAspect) {
+      dispH = rect.height;
+      dispW = rect.height * videoAspect;
+      left = rect.left + (rect.width - dispW) / 2;
+      top = rect.top;
+    } else {
+      dispW = rect.width;
+      dispH = rect.width / videoAspect;
+      left = rect.left;
+      top = rect.top + (rect.height - dispH) / 2;
+    }
+  }
+
+  return {
+    rect,
+    nativeW,
+    nativeH,
+    dispW,
+    dispH,
+    left,
+    top,
+    scaleX: nativeW / dispW,
+    scaleY: nativeH / dispH,
+  };
+}
+
+function isPointerLocked() {
+  const vp = byId('viewport');
+  return document.pointerLockElement === vp;
+}
 
 function flushPointer() {
   if (!token || !hidActive || mouseInFlight) return;
@@ -1211,10 +1281,40 @@ function flushPointer() {
   });
 }
 
-function queuePointerMove(dx, dy) {
-  pendingDx += dx;
-  pendingDy += dy;
-  flushPointer();
+function queuePointerMove(rawDx, rawDy, isLocked, clientX, clientY) {
+  const geom = getVideoGeometry();
+  let scaleX = 1.0;
+  let scaleY = 1.0;
+
+  if (geom) {
+    if (!isLocked && typeof clientX === 'number' && typeof clientY === 'number') {
+      const inBounds = clientX >= geom.left &&
+                       clientX <= geom.left + geom.dispW &&
+                       clientY >= geom.top &&
+                       clientY <= geom.top + geom.dispH;
+      if (!inBounds) return;
+    }
+    scaleX = geom.scaleX;
+    scaleY = geom.scaleY;
+  }
+
+  const scaledDx = rawDx * scaleX * pointerSpeed;
+  const scaledDy = rawDy * scaleY * pointerSpeed;
+
+  accumDx += scaledDx;
+  accumDy += scaledDy;
+
+  const toSendX = Math.round(accumDx);
+  const toSendY = Math.round(accumDy);
+
+  accumDx -= toSendX;
+  accumDy -= toSendY;
+
+  if (toSendX !== 0 || toSendY !== 0) {
+    pendingDx += toSendX;
+    pendingDy += toSendY;
+    flushPointer();
+  }
 }
 
 function queuePointerWheel(wheel) {
@@ -1271,6 +1371,8 @@ function releaseAll() {
   pendingDx = 0;
   pendingDy = 0;
   pendingWheel = 0;
+  accumDx = 0;
+  accumDy = 0;
   pendingKeyReport = null;
   if (!token) return;
   mcp('tools/call', {name: 'kvm.keyboard.send', arguments: {report: [0,0,0,0,0,0,0,0]}}).catch(() => {});
@@ -1315,7 +1417,18 @@ function initInputHandlers() {
   vp.addEventListener('mousedown', (e) => {
     if (!hidActive || !token) return;
     vp.focus();
-    if (pointerLockPref && document.pointerLockElement !== vp) {
+    const locked = isPointerLocked();
+    if (!locked) {
+      const geom = getVideoGeometry();
+      if (geom) {
+        const inBounds = e.clientX >= geom.left &&
+                         e.clientX <= geom.left + geom.dispW &&
+                         e.clientY >= geom.top &&
+                         e.clientY <= geom.top + geom.dispH;
+        if (!inBounds) return;
+      }
+    }
+    if (pointerLockPref && !locked) {
       vp.requestPointerLock().catch(() => {});
     }
     queuePointerButton(e.button, true);
@@ -1334,9 +1447,10 @@ function initInputHandlers() {
   vp.addEventListener('mousemove', (e) => {
     if (!hidActive || !token) return;
     if (menuOpen) return;
+    const locked = isPointerLocked();
     let dx = e.movementX;
     let dy = e.movementY;
-    if (document.pointerLockElement !== vp) {
+    if (!locked) {
       if (dx === undefined || (dx === 0 && dy === 0 && lastClientX !== null)) {
         dx = e.clientX - lastClientX;
         dy = e.clientY - lastClientY;
@@ -1345,7 +1459,7 @@ function initInputHandlers() {
       lastClientY = e.clientY;
     }
     if (dx !== 0 || dy !== 0) {
-      queuePointerMove(dx, dy);
+      queuePointerMove(dx, dy, locked, e.clientX, e.clientY);
     }
   });
 
@@ -1362,7 +1476,10 @@ function initInputHandlers() {
   }, { passive: false });
 
   document.addEventListener('pointerlockchange', () => {
-    if (document.pointerLockElement !== vp) {
+    if (document.pointerLockElement === vp) {
+      document.body.classList.add('pointer-locked');
+    } else {
+      document.body.classList.remove('pointer-locked');
       releaseAll();
     }
   });
@@ -1535,6 +1652,17 @@ function initOptions() {
       localStorage.setItem('onyx_pointerlock', pointerLockPref ? 'true' : 'false');
     });
   }
+
+  const optSpeed = byId('opt-speed');
+  if (optSpeed) {
+    const savedSpeed = localStorage.getItem('onyx_speed') || '1.0';
+    optSpeed.value = savedSpeed;
+    pointerSpeed = parseFloat(savedSpeed) || 1.0;
+    optSpeed.addEventListener('change', () => {
+      pointerSpeed = parseFloat(optSpeed.value) || 1.0;
+      localStorage.setItem('onyx_speed', optSpeed.value);
+    });
+  }
 }
 
 function initActionButtons() {
@@ -1667,6 +1795,7 @@ mod tests {
         assert!(html.contains("id=\"token-input\""));
         assert!(html.contains("id=\"close-drawer-btn\""));
         assert!(html.contains("id=\"menu-toggle-btn\""));
+        assert!(html.contains("id=\"opt-speed\""));
     }
 
     #[test]
@@ -1691,6 +1820,8 @@ mod tests {
         assert!(js.contains("onyx_autostream"));
         assert!(js.contains("onyx_autohid"));
         assert!(js.contains("onyx_pointerlock"));
+        assert!(js.contains("onyx_speed"));
+        assert!(js.contains("getVideoGeometry"));
         assert!(js.contains("setPointerCapture"));
         assert!(js.contains("applyDockPosition"));
         assert!(js.contains("toggleMenu"));
