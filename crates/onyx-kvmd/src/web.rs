@@ -561,7 +561,7 @@ let glState = null;
 let streaming = false;
 let streamAbort = null;
 let hidActive = true;
-let pointerLockPref = true;
+let pointerLockPref = false;
 let menuOpen = false;
 let dockState = { edge: 'right', pct: 0.5 };
 
@@ -1177,82 +1177,195 @@ const MOD_MAP = {
 let pressedKeys = new Set();
 let modifiers = 0;
 let mouseButtons = 0;
+let lastSentButtons = 0;
+let mouseInFlight = false;
+let pendingDx = 0;
+let pendingDy = 0;
+let pendingWheel = 0;
+let keyInFlight = false;
+let pendingKeyReport = null;
 
-function sendKeyReport() {
-  if (!token) return;
-  const keys = Array.from(pressedKeys).slice(0, 6);
-  while (keys.length < 6) keys.push(0);
-  mcp('tools/call', {name: 'kvm.keyboard.send', arguments: {report: [modifiers, 0, ...keys]}}).catch(() => {});
+function flushPointer() {
+  if (!token || !hidActive || mouseInFlight) return;
+  const buttonsChanged = (mouseButtons !== lastSentButtons);
+  if (pendingDx === 0 && pendingDy === 0 && pendingWheel === 0 && !buttonsChanged) return;
+
+  const dx = pendingDx;
+  const dy = pendingDy;
+  const wheel = pendingWheel;
+  pendingDx = 0;
+  pendingDy = 0;
+  pendingWheel = 0;
+  lastSentButtons = mouseButtons;
+  mouseInFlight = true;
+
+  const clamp = (v) => Math.max(-127, Math.min(127, Math.round(v))) & 0xFF;
+  mcp('tools/call', {
+    name: 'kvm.pointer.send',
+    arguments: {report: [mouseButtons & 0x07, clamp(dx), clamp(dy), clamp(wheel)]}
+  }).catch(() => {}).finally(() => {
+    mouseInFlight = false;
+    if (pendingDx !== 0 || pendingDy !== 0 || pendingWheel !== 0 || mouseButtons !== lastSentButtons) {
+      flushPointer();
+    }
+  });
 }
 
-function sendPointerReport(dx, dy, wheel) {
-  if (!token) return;
-  const clamp = (v) => Math.max(-127, Math.min(127, Math.round(v))) & 0xFF;
-  mcp('tools/call', {name: 'kvm.pointer.send', arguments: {report: [mouseButtons & 0x07, clamp(dx), clamp(dy), clamp(wheel)]}}).catch(() => {});
+function queuePointerMove(dx, dy) {
+  pendingDx += dx;
+  pendingDy += dy;
+  flushPointer();
+}
+
+function queuePointerWheel(wheel) {
+  pendingWheel += wheel;
+  flushPointer();
+}
+
+function queuePointerButton(button, isDown) {
+  const bit = button === 0 ? 1 : button === 2 ? 2 : button === 1 ? 4 : 0;
+  if (isDown) mouseButtons |= bit;
+  else mouseButtons &= ~bit;
+  flushPointer();
+}
+
+function sendKeyReport() {
+  if (!token || !hidActive) return;
+  const keys = Array.from(pressedKeys).slice(0, 6);
+  while (keys.length < 6) keys.push(0);
+  const report = [modifiers, 0, ...keys];
+
+  if (keyInFlight) {
+    pendingKeyReport = report;
+    return;
+  }
+  keyInFlight = true;
+
+  mcp('tools/call', {
+    name: 'kvm.keyboard.send',
+    arguments: {report}
+  }).catch(() => {}).finally(() => {
+    keyInFlight = false;
+    if (pendingKeyReport) {
+      const nextReport = pendingKeyReport;
+      pendingKeyReport = null;
+      if (token && hidActive) {
+        keyInFlight = true;
+        mcp('tools/call', {
+          name: 'kvm.keyboard.send',
+          arguments: {report: nextReport}
+        }).catch(() => {}).finally(() => {
+          keyInFlight = false;
+          if (pendingKeyReport) sendKeyReport();
+        });
+      }
+    }
+  });
 }
 
 function releaseAll() {
   pressedKeys.clear();
   modifiers = 0;
   mouseButtons = 0;
+  lastSentButtons = 0;
+  pendingDx = 0;
+  pendingDy = 0;
+  pendingWheel = 0;
+  pendingKeyReport = null;
   if (!token) return;
   mcp('tools/call', {name: 'kvm.keyboard.send', arguments: {report: [0,0,0,0,0,0,0,0]}}).catch(() => {});
   mcp('tools/call', {name: 'kvm.pointer.send', arguments: {report: [0,0,0,0]}}).catch(() => {});
+}
+
+function isEditingText(e) {
+  const target = e.target;
+  if (!target) return false;
+  const tag = target.tagName;
+  return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || target.isContentEditable;
 }
 
 function initInputHandlers() {
   const vp = byId('viewport');
   if (!vp) return;
 
-  vp.addEventListener('keydown', (e) => {
+  window.addEventListener('keydown', (e) => {
     if (!hidActive || !token) return;
+    if (isEditingText(e)) return;
+    if (document.body.classList.contains('unauth')) return;
+    if (menuOpen) return;
     e.preventDefault();
     if (MOD_MAP[e.code]) modifiers |= MOD_MAP[e.code];
     else if (KEY_MAP[e.code]) pressedKeys.add(KEY_MAP[e.code]);
     sendKeyReport();
-  });
+  }, { passive: false });
 
-  vp.addEventListener('keyup', (e) => {
+  window.addEventListener('keyup', (e) => {
     if (!hidActive || !token) return;
+    if (isEditingText(e)) return;
+    if (document.body.classList.contains('unauth')) return;
+    if (menuOpen) return;
     e.preventDefault();
     if (MOD_MAP[e.code]) modifiers &= ~MOD_MAP[e.code];
     else if (KEY_MAP[e.code]) pressedKeys.delete(KEY_MAP[e.code]);
     sendKeyReport();
-  });
+  }, { passive: false });
 
-  vp.addEventListener('blur', releaseAll);
+  window.addEventListener('blur', releaseAll);
 
   vp.addEventListener('mousedown', (e) => {
     if (!hidActive || !token) return;
+    vp.focus();
     if (pointerLockPref && document.pointerLockElement !== vp) {
       vp.requestPointerLock().catch(() => {});
     }
-    const bit = e.button === 0 ? 1 : e.button === 2 ? 2 : e.button === 1 ? 4 : 0;
-    mouseButtons |= bit;
-    sendPointerReport(0, 0, 0);
+    queuePointerButton(e.button, true);
   });
 
   vp.addEventListener('mouseup', (e) => {
     if (!hidActive || !token) return;
-    const bit = e.button === 0 ? 1 : e.button === 2 ? 2 : e.button === 1 ? 4 : 0;
-    mouseButtons &= ~bit;
-    sendPointerReport(0, 0, 0);
+    queuePointerButton(e.button, false);
   });
 
   vp.addEventListener('contextmenu', (e) => e.preventDefault());
 
+  let lastClientX = null;
+  let lastClientY = null;
+
   vp.addEventListener('mousemove', (e) => {
     if (!hidActive || !token) return;
-    if ((document.activeElement === vp || document.pointerLockElement === vp) && (e.movementX !== 0 || e.movementY !== 0)) {
-      sendPointerReport(e.movementX, e.movementY, 0);
+    if (menuOpen) return;
+    let dx = e.movementX;
+    let dy = e.movementY;
+    if (document.pointerLockElement !== vp) {
+      if (dx === undefined || (dx === 0 && dy === 0 && lastClientX !== null)) {
+        dx = e.clientX - lastClientX;
+        dy = e.clientY - lastClientY;
+      }
+      lastClientX = e.clientX;
+      lastClientY = e.clientY;
     }
+    if (dx !== 0 || dy !== 0) {
+      queuePointerMove(dx, dy);
+    }
+  });
+
+  vp.addEventListener('mouseleave', () => {
+    lastClientX = null;
+    lastClientY = null;
   });
 
   vp.addEventListener('wheel', (e) => {
     if (!hidActive || !token) return;
+    if (menuOpen) return;
     e.preventDefault();
-    sendPointerReport(0, 0, e.deltaY < 0 ? 1 : e.deltaY > 0 ? -1 : 0);
+    queuePointerWheel(e.deltaY < 0 ? 1 : e.deltaY > 0 ? -1 : 0);
   }, { passive: false });
+
+  document.addEventListener('pointerlockchange', () => {
+    if (document.pointerLockElement !== vp) {
+      releaseAll();
+    }
+  });
 }
 
 async function initSession() {
@@ -1415,7 +1528,7 @@ function initOptions() {
 
   const optLock = byId('opt-pointerlock');
   if (optLock) {
-    pointerLockPref = localStorage.getItem('onyx_pointerlock') !== 'false';
+    pointerLockPref = localStorage.getItem('onyx_pointerlock') === 'true';
     optLock.checked = pointerLockPref;
     optLock.addEventListener('change', () => {
       pointerLockPref = optLock.checked;
