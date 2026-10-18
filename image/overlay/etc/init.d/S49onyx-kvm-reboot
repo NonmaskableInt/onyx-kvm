@@ -1,0 +1,30 @@
+#!/bin/sh
+set -eu
+
+pidfile=/run/onyx-kvm-reboot.pid
+watcher=/usr/sbin/onyx-kvm-reboot-watcher
+
+case "${1:-start}" in
+    start)
+        mkdir -p /run/onyx-kvm
+        chown root:900 /run/onyx-kvm 2>/dev/null || true
+        chmod 2770 /run/onyx-kvm 2>/dev/null || true
+        if [ -x "$watcher" ]; then
+            start-stop-daemon -S -b -m -p "$pidfile" -x "$watcher"
+        fi
+        ;;
+    stop)
+        if [ -f "$pidfile" ]; then
+            start-stop-daemon -K -p "$pidfile" 2>/dev/null || true
+            rm -f "$pidfile"
+        fi
+        ;;
+    restart|reload)
+        "$0" stop
+        "$0" start
+        ;;
+    *)
+        printf 'usage: %s {start|stop|restart}\n' "$0" >&2
+        exit 1
+        ;;
+esac

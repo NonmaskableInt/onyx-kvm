@@ -1,0 +1,92 @@
+#!/bin/sh
+set -eu
+
+case "${1:-start}" in
+    start)
+        mountpoint -q /boot 2>/dev/null || mount /boot 2>/dev/null || true
+
+        mac_file=""
+        if [ -f /boot/onyx-kvm-mac.txt ]; then
+            mac_file="/boot/onyx-kvm-mac.txt"
+        elif [ -f /boot/cleankvm-mac.txt ]; then
+            mac_file="/boot/cleankvm-mac.txt"
+        fi
+
+        saved_mac=""
+        if [ -n "$mac_file" ]; then
+            saved_mac=$(tr -d '\r\n ' < "$mac_file" 2>/dev/null || true)
+        fi
+
+        mac=""
+        case "$saved_mac" in
+            [0-9a-fA-F][0-9a-fA-F]:[0-9a-fA-F][0-9a-fA-F]:[0-9a-fA-F][0-9a-fA-F]:[0-9a-fA-F][0-9a-fA-F]:[0-9a-fA-F][0-9a-fA-F]:[0-9a-fA-F][0-9a-fA-F])
+                ip link set dev eth0 down 2>/dev/null || true
+                ip link set dev eth0 address "$saved_mac" 2>/dev/null || true
+                ip link set dev eth0 up 2>/dev/null || true
+                mac=$(printf '%s' "$saved_mac" | tr -d ':' | tr '[:upper:]' '[:lower:]')
+                ;;
+            *)
+                current_eth0=""
+                if [ -f /sys/class/net/eth0/address ]; then
+                    current_eth0=$(tr -d '\r\n ' < /sys/class/net/eth0/address 2>/dev/null || true)
+                fi
+                case "$current_eth0" in
+                    [0-9a-fA-F][0-9a-fA-F]:[0-9a-fA-F][0-9a-fA-F]:[0-9a-fA-F][0-9a-fA-F]:[0-9a-fA-F][0-9a-fA-F]:[0-9a-fA-F][0-9a-fA-F]:[0-9a-fA-F][0-9a-fA-F])
+                        saved_mac="$current_eth0"
+                        if [ -d /boot ] && touch /boot/.write_test 2>/dev/null; then
+                            rm -f /boot/.write_test 2>/dev/null || true
+                            printf '%s\n' "$saved_mac" > /boot/onyx-kvm-mac.txt 2>/dev/null || true
+                            sync /boot 2>/dev/null || sync 2>/dev/null || true
+                        fi
+                        mac=$(printf '%s' "$saved_mac" | tr -d ':' | tr '[:upper:]' '[:lower:]')
+                        ;;
+                    *)
+                        for iface in eth0 usb0; do
+                            if [ -f "/sys/class/net/$iface/address" ]; then
+                                addr=$(cat "/sys/class/net/$iface/address" 2>/dev/null | tr -d ':' | tr '[:upper:]' '[:lower:]' || true)
+                                if [ -n "$addr" ] && [ "$addr" != "000000000000" ]; then
+                                    mac="$addr"
+                                    break
+                                fi
+                            fi
+                        done
+                        ;;
+                esac
+                ;;
+        esac
+
+        if [ -n "$mac" ]; then
+            hex_id=$(printf '%s' "$mac" | awk '{print substr($0, length($0)-5)}')
+            new_hostname="onyx-kvm-$hex_id"
+        else
+            new_hostname="onyx-kvm-device"
+        fi
+
+        hostname "$new_hostname"
+
+        mkdir -p /run/system
+        echo "$new_hostname" > /run/system/hostname
+        cat > /run/system/hosts <<EOF
+127.0.0.1	localhost
+127.0.1.1	$new_hostname
+EOF
+        cat > /run/system/interfaces <<EOF
+auto lo
+iface lo inet loopback
+
+auto eth0
+iface eth0 inet dhcp
+	pre-up /usr/sbin/onyx-kvm-wait-carrier eth0 10
+	hostname $new_hostname
+EOF
+        mount --bind /run/system/hosts /etc/hosts 2>/dev/null || true
+        mount --bind /run/system/hostname /etc/hostname 2>/dev/null || true
+        mount --bind /run/system/interfaces /etc/network/interfaces 2>/dev/null || true
+        ;;
+    stop|restart|reload)
+        ;;
+    *)
+        printf 'usage: %s {start|stop|restart}\n' "$0" >&2
+        exit 1
+        ;;
+esac

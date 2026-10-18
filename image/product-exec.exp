@@ -13,9 +13,9 @@ close $fh
 if {![regexp -line {^password=(.*)$} $credential_text -> password]} { exit 2 }
 
 spawn /usr/bin/sudo /usr/bin/cu -l /dev/cu.usbserial-112440 -s 115200
-expect { -re {Connected\.} {} timeout { exit 7 } }
+expect -re {Connected\.} {} timeout { exit 7 }
 after 300
-send "\r"
+send "\r\r"
 set logged_in 0
 set tries 0
 while {$tries < 6} {
@@ -29,11 +29,11 @@ while {$tries < 6} {
 set timeout 30
 if {!$logged_in} {
     send "root\r"
-    expect { -re {Password: *$} {} timeout { exit 4 } }
+    expect -re {Password: *$} {} timeout { exit 4 }
     set send_slow {1 .02}
     log_user 0
     send -s -- "$password\r"
-    expect { -re {# } {} timeout { log_user 1; exit 5 } }
+    expect -re {# } {} timeout { log_user 1; exit 5 }
 }
 
 unset password
@@ -41,10 +41,12 @@ unset credential_text
 log_user 1
 send "stty -echo\r"
 after 200
-send -- "$command; echo __CLEANKVM_EXEC_DONE__\r"
-expect { -re {__CLEANKVM_EXEC_DONE__} {} timeout { exit 6 } }
+send -- "$command; echo __CLEANKVM_EXEC_DONE__; stty echo\r"
+expect -re {__CLEANKVM_EXEC_DONE__} {} timeout { exit 6 }
+set timeout 3
+catch {send "\r~.\r"}
+catch {close}
 catch {exec /usr/bin/sudo -n /usr/bin/killall -9 cu}
-catch close
-catch wait
+catch {exec /usr/bin/sudo -n /bin/rm -f /var/spool/uucp/LCK..cu.usbserial-112440}
 exit 0
 

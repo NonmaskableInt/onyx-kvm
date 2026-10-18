@@ -1,0 +1,15 @@
+#!/bin/sh
+set -eu
+
+# Onyx KVM privileged reboot trigger watcher
+# Monitors for reboot triggers dispatched by the authenticated daemon.
+
+while true; do
+    if [ -f /run/onyx-kvm/reboot-trigger ] || [ -f /run/cleankvm/reboot-trigger ]; then
+        rm -f /run/onyx-kvm/reboot-trigger /run/cleankvm/reboot-trigger 2>/dev/null || true
+        sync
+        sleep 1
+        /sbin/reboot -f || /sbin/reboot || true
+    fi
+    sleep 1
+done

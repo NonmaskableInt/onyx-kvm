@@ -1,0 +1,107 @@
+#!/bin/sh
+set -eu
+export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+
+pidfile=/run/onyx-kvm-dev-exec.pid
+watcher=/usr/sbin/onyx-kvm-dev-exec-watcher
+dropbear_bin=/usr/lib/onyx-kvm/dev/dropbear
+dropbear_key_bin=/usr/lib/onyx-kvm/dev/dropbearkey
+dropbear_pid=/run/dropbear.pid
+
+is_dev_mode() {
+    [ -f /boot/DEV_MODE ] || [ -f /boot/dev_mode ] || [ -f /run/onyx-kvm/dev-mode ] || [ -f /run/cleankvm/dev-mode ]
+}
+
+start_dev_mode() {
+    mkdir -p /run/onyx-kvm
+    chown root:900 /run/onyx-kvm 2>/dev/null || true
+    chmod 2770 /run/onyx-kvm 2>/dev/null || true
+    touch /run/onyx-kvm/dev-mode
+
+    # Grant group 900 (onyx-kvmd) direct I2C access for video diagnostics in DEV_MODE
+    if [ -e /dev/i2c-4 ]; then
+        chown root:900 /dev/i2c-4 2>/dev/null || true
+        chmod 0660 /dev/i2c-4 2>/dev/null || true
+    fi
+
+    # Start privileged dev exec watcher
+    if [ -x "$watcher" ] && [ ! -f "$pidfile" ]; then
+        start-stop-daemon -S -b -m -p "$pidfile" -x "$watcher"
+    fi
+
+    # Set up and start Dropbear SSH if installed
+    if [ -x "$dropbear_bin" ]; then
+        # Ensure /root is writable on read-only rootfs
+        if ! grep -q " /root " /proc/mounts 2>/dev/null; then
+            mount -t tmpfs -o mode=700,size=2M tmpfs /root 2>/dev/null || true
+        fi
+        mkdir -p /root/.ssh
+        chmod 700 /root /root/.ssh 2>/dev/null || true
+
+        # Install authorized keys from /boot if present
+        if [ -f /boot/ssh_authorized_keys ]; then
+            cat /boot/ssh_authorized_keys > /root/.ssh/authorized_keys
+            chmod 600 /root/.ssh/authorized_keys
+        elif [ -f /boot/authorized_keys ]; then
+            cat /boot/authorized_keys > /root/.ssh/authorized_keys
+            chmod 600 /root/.ssh/authorized_keys
+        fi
+
+        # Generate hostkeys in writable /run/dropbear
+        mkdir -p /run/dropbear
+        chmod 700 /run/dropbear
+        if [ -x "$dropbear_key_bin" ]; then
+            if [ ! -f /run/dropbear/dropbear_ed25519_host_key ]; then
+                "$dropbear_key_bin" -t ed25519 -f /run/dropbear/dropbear_ed25519_host_key 2>/dev/null || true
+            fi
+            if [ ! -f /run/dropbear/dropbear_rsa_host_key ]; then
+                "$dropbear_key_bin" -t rsa -s 2048 -f /run/dropbear/dropbear_rsa_host_key 2>/dev/null || true
+            fi
+        fi
+
+        # Start dropbear: key-only auth (-s -g), port 22
+        if [ ! -f "$dropbear_pid" ] || ! kill -0 "$(cat "$dropbear_pid" 2>/dev/null)" 2>/dev/null; then
+            "$dropbear_bin" -s -g \
+                -r /run/dropbear/dropbear_ed25519_host_key \
+                -r /run/dropbear/dropbear_rsa_host_key \
+                -p 22 -P "$dropbear_pid"
+        fi
+    fi
+}
+
+stop_dev_mode() {
+    rm -f /run/onyx-kvm/dev-mode /run/cleankvm/dev-mode 2>/dev/null || true
+
+    if [ -f "$dropbear_pid" ]; then
+        kill "$(cat "$dropbear_pid")" 2>/dev/null || true
+        rm -f "$dropbear_pid"
+    fi
+
+    if [ -f "$pidfile" ]; then
+        start-stop-daemon -K -p "$pidfile" 2>/dev/null || true
+        rm -f "$pidfile"
+    fi
+}
+
+case "${1:-start}" in
+    start)
+        if is_dev_mode; then
+            start_dev_mode
+        else
+            stop_dev_mode
+        fi
+        ;;
+    stop)
+        stop_dev_mode
+        ;;
+    restart|reload)
+        stop_dev_mode
+        if is_dev_mode; then
+            start_dev_mode
+        fi
+        ;;
+    *)
+        printf 'usage: %s {start|stop|restart}\n' "$0" >&2
+        exit 1
+        ;;
+esac

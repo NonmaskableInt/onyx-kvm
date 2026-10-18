@@ -1,0 +1,31 @@
+#!/bin/sh
+set -eu
+
+# Onyx KVM privileged dev-exec watcher
+# Runs diagnostic commands with root privileges when dispatched by authenticated MCP
+# in DEV_MODE.
+
+req_file=/run/onyx-kvm/dev-exec-request
+res_file=/run/onyx-kvm/dev-exec-response
+
+while true; do
+    if [ -f "$req_file" ]; then
+        cmd=$(cat "$req_file")
+        rm -f "$req_file"
+
+        tmp_out=$(mktemp /run/onyx-kvm/dev-exec-tmp.XXXXXX 2>/dev/null || mktemp /tmp/dev-exec-tmp.XXXXXX)
+        rc=0
+        sh -c "$cmd" >"$tmp_out" 2>&1 || rc=$?
+
+        # Format: line 1 = exit code, subsequent lines = command output
+        {
+            printf '%d\n' "$rc"
+            cat "$tmp_out"
+        } > "$res_file"
+
+        chown root:900 "$res_file" 2>/dev/null || true
+        chmod 0660 "$res_file" 2>/dev/null || true
+        rm -f "$tmp_out"
+    fi
+    sleep 0.2 2>/dev/null || sleep 1
+done

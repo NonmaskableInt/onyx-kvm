@@ -85,7 +85,7 @@ fn env_path_any(name: &str, fallback_name: &str, default: &str) -> PathBuf {
 fn serve_forever(config: &Config) -> io::Result<()> {
     if let Some(parent) = config.socket.parent() {
         fs::create_dir_all(parent)?;
-        fs::set_permissions(parent, Permissions::from_mode(0o2750))?;
+        fs::set_permissions(parent, Permissions::from_mode(0o2770))?;
     }
     remove_if_exists(&config.socket)?;
     let listener = UnixListener::bind(&config.socket)?;
@@ -109,6 +109,56 @@ fn serve_forever(config: &Config) -> io::Result<()> {
     Ok(())
 }
 
+const STREAM_CHUNK_BYTES: usize = 3200;
+
+fn serve_capture_stream(mut stream: UnixStream, config: &Config, probe_path: &Path) -> io::Result<()> {
+    stream.set_read_timeout(None)?;
+    stream.set_write_timeout(Some(Duration::from_secs(5)))?;
+
+    let mut child = Command::new(probe_path)
+        .arg("stream")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()?;
+
+    let mut stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| io::Error::other("no stdout for audio probe"))?;
+
+    let mut ready = [0_u8; 1];
+    stdout.read_exact(&mut ready)?;
+    if ready[0] != 0 {
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err(io::Error::other("audio probe returned non-zero ready byte"));
+    }
+
+    stream.write_all(&[0])?;
+    stream.flush()?;
+
+    let mut chunk = [0_u8; STREAM_CHUNK_BYTES];
+    loop {
+        if File::open(&config.gate).is_err() {
+            break;
+        }
+        if stdout.read_exact(&mut chunk).is_err() {
+            break;
+        }
+        if stream.write_all(&chunk).is_err() {
+            break;
+        }
+        if stream.flush().is_err() {
+            break;
+        }
+    }
+    chunk.fill(0);
+    let _ = child.kill();
+    let _ = child.wait();
+    Ok(())
+}
+
 fn serve_one(mut stream: UnixStream, config: &Config) -> io::Result<()> {
     authenticate_peer(&stream)?;
     stream.set_read_timeout(Some(IO_TIMEOUT))?;
@@ -117,8 +167,7 @@ fn serve_one(mut stream: UnixStream, config: &Config) -> io::Result<()> {
     let mut payload = [0_u8; AUDIO_REQUEST_BYTES];
     stream.read_exact(&mut header)?;
     stream.read_exact(&mut payload)?;
-    authorize_request(header, payload, config.kind, &config.gate)?;
-    let started = Instant::now();
+
     let probe_path = if config.probe.exists() {
         config.probe.as_path()
     } else {
@@ -132,6 +181,20 @@ fn serve_one(mut stream: UnixStream, config: &Config) -> io::Result<()> {
             config.probe.as_path()
         }
     };
+
+    let wire_header = WireHeader::decode(header).map_err(|_| invalid("invalid wire header"))?;
+    if config.kind == Kind::Capture && wire_header.operation == Operation::StreamAudioPcm {
+        if File::open(&config.gate).is_err() {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "audio capture capability is disabled",
+            ));
+        }
+        return serve_capture_stream(stream, config, probe_path);
+    }
+
+    authorize_request(header, payload, config.kind, &config.gate)?;
+    let started = Instant::now();
     let output = Command::new(probe_path)
         .stdin(Stdio::null())
         .stderr(Stdio::null())

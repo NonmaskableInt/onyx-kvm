@@ -86,6 +86,36 @@ pub const OPERATIONS: &[Operation] = &[
         scope: Scope::Admin,
         effect: Effect::Disruptive,
     },
+    Operation {
+        name: "kvm.system.reboot",
+        scope: Scope::Admin,
+        effect: Effect::Disruptive,
+    },
+    Operation {
+        name: "kvm.diag.video",
+        scope: Scope::Admin,
+        effect: Effect::ReadOnly,
+    },
+    Operation {
+        name: "kvm.diag.dmesg",
+        scope: Scope::Admin,
+        effect: Effect::ReadOnly,
+    },
+    Operation {
+        name: "kvm.diag.system",
+        scope: Scope::Admin,
+        effect: Effect::ReadOnly,
+    },
+    Operation {
+        name: "kvm.dev.exec",
+        scope: Scope::Admin,
+        effect: Effect::Mutating,
+    },
+    Operation {
+        name: "kvm.system.dev_mode",
+        scope: Scope::Admin,
+        effect: Effect::Mutating,
+    },
 ];
 
 #[derive(Debug, Eq, PartialEq)]

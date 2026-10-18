@@ -3,7 +3,7 @@
 use std::io::{self, BufRead, Write};
 
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
-use ed25519_dalek::{Signature, Verifier, VerifyingKey};
+use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 pub use onyx_kvm_core::Scope;
 use onyx_kvm_core::{Effect, Grant, Operation, PolicyError, authorize, authorize_grant};
 use onyx_kvm_media_protocol::{
@@ -130,6 +130,35 @@ impl<'a> Ed25519JwtValidator<'a> {
     pub const fn new(issuer: &'a str, public_key: &'a [u8]) -> Self {
         Self { issuer, public_key }
     }
+}
+
+/// Mint an Ed25519-signed JWT bearer token using a 32-byte private signing key seed.
+#[must_use]
+pub fn mint_token(
+    signing_key_bytes: &[u8; 32],
+    issuer: &str,
+    audience: &str,
+    scope: &str,
+    mutation: bool,
+    expires_at_unix_seconds: u64,
+) -> String {
+    let signing_key = SigningKey::from_bytes(signing_key_bytes);
+    let header_json = r#"{"alg":"EdDSA","typ":"at+jwt"}"#;
+    let claims_json = json!({
+        "iss": issuer,
+        "aud": audience,
+        "exp": expires_at_unix_seconds,
+        "scope": scope,
+        "onyx_kvm_mutation": mutation,
+    })
+    .to_string();
+
+    let header_b64 = URL_SAFE_NO_PAD.encode(header_json.as_bytes());
+    let claims_b64 = URL_SAFE_NO_PAD.encode(claims_json.as_bytes());
+    let signing_input = format!("{header_b64}.{claims_b64}");
+    let signature = signing_key.sign(signing_input.as_bytes());
+    let signature_b64 = URL_SAFE_NO_PAD.encode(signature.to_bytes());
+    format!("{signing_input}.{signature_b64}")
 }
 
 #[derive(Deserialize)]
@@ -583,6 +612,24 @@ impl<'a> Server<'a> {
         if matches!(name, "kvm.audio.capture" | "kvm.audio.play") {
             return self.call_audio_tool(id, name, params.get("arguments"));
         }
+        if matches!(name, "kvm.device.reboot" | "kvm.system.reboot") {
+            return self.call_reboot_tool(id, name, params.get("arguments"));
+        }
+        if name == "kvm.diag.video" {
+            return self.call_diag_video(id);
+        }
+        if name == "kvm.diag.dmesg" {
+            return self.call_diag_dmesg(id, params.get("arguments"));
+        }
+        if name == "kvm.diag.system" {
+            return self.call_diag_system(id);
+        }
+        if name == "kvm.dev.exec" {
+            return self.call_dev_exec(id, params.get("arguments"));
+        }
+        if name == "kvm.system.dev_mode" {
+            return self.call_dev_mode(id, params.get("arguments"));
+        }
         if name != "kvm.status" {
             return error(id, -32602, "Unknown or disabled tool");
         }
@@ -692,11 +739,47 @@ impl<'a> Server<'a> {
         if self.authorize("kvm.video.snapshot").is_err() {
             return error(id, -32603, "Policy denied video snapshot");
         }
-        let Some(request) = parse_snapshot_arguments(arguments) else {
-            return error(id, -32602, "Invalid video snapshot arguments");
+        let request = match parse_snapshot_arguments(arguments) {
+            Ok(req) => req,
+            Err(err) => return error(id, -32602, err),
         };
+        // If hardware LT6911 reports no carrier lock (target sleeping / no HDMI signal),
+        // return early without timing out inside the hardware driver.
+        let (hdmi_locked, sig_output, _, _, _) = query_lt6911_i2c();
+        if !hdmi_locked && sig_output.is_some() {
+            let sig_str = sig_output.as_deref().unwrap_or("unknown");
+            return success(
+                id,
+                &json!({
+                    "content": [{
+                        "type": "text",
+                        "text": format!("Target device is sleeping or HDMI carrier is not locked (signal: {sig_str}). No video frame available while device is sleeping.")
+                    }],
+                    "structuredContent": {
+                        "connected": false,
+                        "standby": true,
+                        "signalA3": sig_str,
+                        "message": "Target device is in standby or HDMI signal is not present. Video stream and snapshot will resume when target displays video."
+                    },
+                    "isError": false
+                }),
+            );
+        }
         let Ok(snapshot) = video.capture_snapshot(request) else {
-            return error(id, -32603, "Video broker rejected snapshot");
+            return success(
+                id,
+                &json!({
+                    "content": [{
+                        "type": "text",
+                        "text": "Video snapshot failed: No active HDMI video input signal detected or video broker capture timed out (verify HDMI cable is connected and transmitting video)"
+                    }],
+                    "structuredContent": {
+                        "error": "No active HDMI video input signal detected or video broker capture timed out",
+                        "connected": false
+                    },
+                    "isError": true
+                }),
+            );
         };
         let result = json!({
             "width": snapshot.width,
@@ -715,6 +798,319 @@ impl<'a> Server<'a> {
         )
     }
 
+    fn call_reboot_tool(&self, id: &Value, name: &str, arguments: Option<&Value>) -> String {
+        let arguments_are_empty =
+            arguments.is_none_or(|value| value.as_object().is_some_and(serde_json::Map::is_empty));
+        if !arguments_are_empty {
+            return error(id, -32602, "Reboot tool accepts no arguments");
+        }
+        if self.authorize(name).is_err() {
+            return error(id, -32603, "Policy denied device reboot");
+        }
+        let _ = std::fs::write("/run/onyx-kvm/reboot-trigger", b"reboot\n");
+        let _ = std::fs::write("/run/cleankvm/reboot-trigger", b"reboot\n");
+        let _ = std::process::Command::new("/sbin/reboot").spawn();
+
+        let result = json!({
+            "status": "rebooting",
+            "message": "Device reboot initiated"
+        });
+        success(
+            id,
+            &json!({
+                "content": [{ "type": "text", "text": result.to_string() }],
+                "structuredContent": result,
+                "isError": false
+            }),
+        )
+    }
+
+    fn call_diag_video(&self, id: &Value) -> String {
+        if self.authorize("kvm.diag.video").is_err() {
+            return error(id, -32603, "Policy denied diagnostic video status");
+        }
+        let mipi_rx = std::fs::read_to_string("/proc/mipi-rx")
+            .unwrap_or_else(|e| format!("unavailable: {e}"));
+        let vi_dbg = std::fs::read_to_string("/proc/cvitek/vi_dbg")
+            .unwrap_or_else(|e| format!("unavailable: {e}"));
+        let (hdmi_locked, signal_a3, csi_w, csi_h, i2c_note) = query_lt6911_i2c();
+
+        let result = json!({
+            "hdmiCarrierLocked": hdmi_locked,
+            "signalA3": signal_a3,
+            "csiWidth": csi_w,
+            "csiHeight": csi_h,
+            "i2cStatus": i2c_note,
+            "mipiRx": mipi_rx,
+            "viDbg": vi_dbg
+        });
+
+        success(
+            id,
+            &json!({
+                "content": [{ "type": "text", "text": result.to_string() }],
+                "structuredContent": result,
+                "isError": false
+            }),
+        )
+    }
+
+    fn call_diag_dmesg(&self, id: &Value, arguments: Option<&Value>) -> String {
+        if self.authorize("kvm.diag.dmesg").is_err() {
+            return error(id, -32603, "Policy denied diagnostic dmesg");
+        }
+        let lines_limit = arguments
+            .and_then(|args| args.get("lines"))
+            .and_then(Value::as_u64)
+            .unwrap_or(60)
+            .clamp(1, 200) as usize;
+
+        let output = std::process::Command::new("dmesg")
+            .output()
+            .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
+            .unwrap_or_else(|e| format!("dmesg execution failed: {e}"));
+
+        let all_lines: Vec<&str> = output.lines().collect();
+        let total = all_lines.len();
+        let start = total.saturating_sub(lines_limit);
+        let selected = all_lines[start..].join("\n");
+
+        let result = json!({
+            "totalLines": total,
+            "returnedLines": all_lines[start..].len(),
+            "messages": selected
+        });
+
+        success(
+            id,
+            &json!({
+                "content": [{ "type": "text", "text": result.to_string() }],
+                "structuredContent": result,
+                "isError": false
+            }),
+        )
+    }
+
+    fn call_diag_system(&self, id: &Value) -> String {
+        if self.authorize("kvm.diag.system").is_err() {
+            return error(id, -32603, "Policy denied diagnostic system status");
+        }
+        let uptime = std::fs::read_to_string("/proc/uptime").unwrap_or_default();
+        let meminfo = std::fs::read_to_string("/proc/meminfo").unwrap_or_default();
+        let loadavg = std::fs::read_to_string("/proc/loadavg").unwrap_or_default();
+
+        let usb_state = (|| -> Option<String> {
+            for entry in std::fs::read_dir("/sys/class/udc").ok()? {
+                let entry = entry.ok()?;
+                let state_path = entry.path().join("state");
+                if let Ok(content) = std::fs::read_to_string(state_path) {
+                    return Some(format!(
+                        "{}: {}",
+                        entry.file_name().to_string_lossy(),
+                        content.trim()
+                    ));
+                }
+            }
+            None
+        })()
+        .unwrap_or_else(|| "unknown".into());
+
+        let dev_mode_active = std::path::Path::new("/run/onyx-kvm/dev-mode").exists()
+            || std::path::Path::new("/run/cleankvm/dev-mode").exists();
+        let dev_mode_boot = std::path::Path::new("/boot/DEV_MODE").exists()
+            || std::path::Path::new("/boot/dev_mode").exists();
+
+        let ps_output = std::process::Command::new("ps")
+            .output()
+            .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
+            .unwrap_or_default();
+
+        let result = json!({
+            "uptime": uptime.trim(),
+            "loadavg": loadavg.trim(),
+            "usbUdcState": usb_state,
+            "devModeActive": dev_mode_active,
+            "devModeBootConfig": dev_mode_boot,
+            "meminfo": meminfo.lines().take(5).collect::<Vec<_>>().join("; "),
+            "processes": ps_output.lines().take(30).collect::<Vec<_>>().join("\n")
+        });
+
+        success(
+            id,
+            &json!({
+                "content": [{ "type": "text", "text": result.to_string() }],
+                "structuredContent": result,
+                "isError": false
+            }),
+        )
+    }
+
+    fn call_dev_exec(&self, id: &Value, arguments: Option<&Value>) -> String {
+        if self.authorize("kvm.dev.exec").is_err() {
+            return error(id, -32603, "Policy denied dev execution");
+        }
+        let dev_mode_active = std::path::Path::new("/run/onyx-kvm/dev-mode").exists()
+            || std::path::Path::new("/boot/DEV_MODE").exists()
+            || std::path::Path::new("/boot/dev_mode").exists();
+        if !dev_mode_active {
+            return success(
+                id,
+                &json!({
+                    "isError": true,
+                    "content": [{ "type": "text", "text": "DEV_MODE is disabled. Create /boot/DEV_MODE or call kvm.system.dev_mode to enable." }],
+                    "structuredContent": { "error": "DEV_MODE is disabled" }
+                }),
+            );
+        }
+        let Some(cmd) = arguments
+            .and_then(|args| args.get("command"))
+            .and_then(Value::as_str)
+        else {
+            return error(id, -32602, "Missing required 'command' argument");
+        };
+
+        let req_path = "/run/onyx-kvm/dev-exec-request";
+        let res_path = "/run/onyx-kvm/dev-exec-response";
+        let (exit_code, output) = if std::path::Path::new("/run/onyx-kvm").exists() {
+            let _ = std::fs::remove_file(res_path);
+            if std::fs::write(req_path, cmd).is_ok() {
+                let start = std::time::Instant::now();
+                let mut response = None;
+                while start.elapsed() < std::time::Duration::from_secs(10) {
+                    if let Ok(content) = std::fs::read_to_string(res_path) {
+                        response = Some(content);
+                        let _ = std::fs::remove_file(res_path);
+                        break;
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(50));
+                }
+                if let Some(resp) = response {
+                    let mut lines = resp.lines();
+                    let rc = lines.next().and_then(|l| l.parse::<i32>().ok()).unwrap_or(-1);
+                    let out = lines.collect::<Vec<_>>().join("\n");
+                    (rc, out)
+                } else {
+                    run_command_fallback(cmd)
+                }
+            } else {
+                run_command_fallback(cmd)
+            }
+        } else {
+            run_command_fallback(cmd)
+        };
+
+        let result = json!({
+            "command": cmd,
+            "exitCode": exit_code,
+            "output": output
+        });
+
+        success(
+            id,
+            &json!({
+                "content": [{ "type": "text", "text": output }],
+                "structuredContent": result,
+                "isError": exit_code != 0
+            }),
+        )
+    }
+
+    fn call_dev_mode(&self, id: &Value, arguments: Option<&Value>) -> String {
+        if self.authorize("kvm.system.dev_mode").is_err() {
+            return error(id, -32603, "Policy denied dev_mode control");
+        }
+        let action = arguments
+            .and_then(|args| args.get("action"))
+            .and_then(Value::as_str)
+            .unwrap_or("status");
+
+        match action {
+            "status" => {
+                let boot_flag = std::path::Path::new("/boot/DEV_MODE").exists()
+                    || std::path::Path::new("/boot/dev_mode").exists();
+                let run_flag = std::path::Path::new("/run/onyx-kvm/dev-mode").exists()
+                    || std::path::Path::new("/run/cleankvm/dev-mode").exists();
+                let ssh_keys = std::fs::read_to_string("/boot/ssh_authorized_keys").ok();
+                let result = json!({
+                    "devModeBootConfig": boot_flag,
+                    "devModeRuntimeActive": run_flag,
+                    "authorizedKeysPresent": ssh_keys.is_some()
+                });
+                success(
+                    id,
+                    &json!({
+                        "content": [{ "type": "text", "text": result.to_string() }],
+                        "structuredContent": result,
+                        "isError": false
+                    }),
+                )
+            }
+            "enable" => {
+                let _ = std::process::Command::new("mount").arg("/boot").status();
+                let _ = std::fs::write("/boot/DEV_MODE", b"");
+                if let Some(keys) = arguments
+                    .and_then(|a| a.get("authorizedKeys"))
+                    .and_then(Value::as_str)
+                {
+                    let _ = std::fs::write("/boot/ssh_authorized_keys", keys);
+                }
+                let _ = std::fs::create_dir_all("/run/onyx-kvm");
+                let _ = std::fs::write("/run/onyx-kvm/dev-mode", b"");
+                let _ = std::process::Command::new("sync").status();
+                if std::path::Path::new("/etc/init.d/S35onyx-kvm-devmode").exists() {
+                    let _ = std::process::Command::new("/etc/init.d/S35onyx-kvm-devmode")
+                        .arg("start")
+                        .status();
+                }
+                let result = json!({
+                    "status": "enabled",
+                    "devModeBootConfig": true,
+                    "devModeRuntimeActive": true,
+                    "message": "DEV_MODE enabled. SSH and dev tools are active."
+                });
+                success(
+                    id,
+                    &json!({
+                        "content": [{ "type": "text", "text": result.to_string() }],
+                        "structuredContent": result,
+                        "isError": false
+                    }),
+                )
+            }
+            "disable" => {
+                let _ = std::fs::remove_file("/boot/DEV_MODE");
+                let _ = std::fs::remove_file("/boot/dev_mode");
+                let _ = std::fs::remove_file("/run/onyx-kvm/dev-mode");
+                let _ = std::fs::remove_file("/run/cleankvm/dev-mode");
+                let _ = std::process::Command::new("sync").status();
+                if std::path::Path::new("/etc/init.d/S35onyx-kvm-devmode").exists() {
+                    let _ = std::process::Command::new("/etc/init.d/S35onyx-kvm-devmode")
+                        .arg("stop")
+                        .status();
+                }
+                let result = json!({
+                    "status": "disabled",
+                    "devModeBootConfig": false,
+                    "devModeRuntimeActive": false,
+                    "message": "DEV_MODE disabled. SSH stopped and dev tools disabled."
+                });
+                success(
+                    id,
+                    &json!({
+                        "content": [{ "type": "text", "text": result.to_string() }],
+                        "structuredContent": result,
+                        "isError": false
+                    }),
+                )
+            }
+            _ => error(
+                id,
+                -32602,
+                "Invalid action: must be 'status', 'enable', or 'disable'",
+            ),
+        }
+    }
+
     fn call_hid_tool(&self, id: &Value, name: &str, arguments: Option<&Value>) -> String {
         let Some(hid) = self.hid else {
             return error(id, -32602, "Unknown or disabled tool");
@@ -722,34 +1118,56 @@ impl<'a> Server<'a> {
         if self.authorize(name).is_err() {
             return error(id, -32603, "Policy denied HID report");
         }
-        let Some(report) = arguments
-            .and_then(Value::as_object)
-            .filter(|object| object.len() == 1)
-            .and_then(|object| object.get("report"))
-            .and_then(Value::as_array)
-        else {
-            return error(id, -32602, "HID report must be one byte array");
-        };
-        let Some(bytes) = report
-            .iter()
-            .map(|value| value.as_u64().and_then(|byte| u8::try_from(byte).ok()))
-            .collect::<Option<Vec<_>>>()
-        else {
-            return error(id, -32602, "HID report contains an invalid byte");
-        };
-        let result = match name {
-            "kvm.keyboard.send" => match <[u8; 8]>::try_from(bytes.as_slice()) {
-                Ok(report) => hid.send_keyboard(report),
-                Err(_) => return error(id, -32602, "Keyboard report must contain 8 bytes"),
-            },
-            "kvm.pointer.send" => match <[u8; 4]>::try_from(bytes.as_slice()) {
-                Ok(report) => hid.send_pointer(report),
-                Err(_) => return error(id, -32602, "Pointer report must contain 4 bytes"),
-            },
+        match name {
+            "kvm.keyboard.send" => {
+                let reports = match parse_keyboard_action(arguments) {
+                    Ok(r) => r,
+                    Err(err) => return error(id, -32602, err),
+                };
+                for rep in reports {
+                    if hid.send_keyboard(rep).is_err() {
+                        return success(
+                            id,
+                            &json!({
+                                "content": [{
+                                    "type": "text",
+                                    "text": "HID keyboard report failed: USB HID device not connected or not enumerated by target computer (verify USB-C OTG cable is connected to target host)"
+                                }],
+                                "structuredContent": {
+                                    "error": "USB HID device not connected or not enumerated by target computer",
+                                    "connected": false
+                                },
+                                "isError": true
+                            }),
+                        );
+                    }
+                }
+            }
+            "kvm.pointer.send" => {
+                let reports = match parse_pointer_action(arguments) {
+                    Ok(r) => r,
+                    Err(err) => return error(id, -32602, err),
+                };
+                for rep in reports {
+                    if hid.send_pointer(rep).is_err() {
+                        return success(
+                            id,
+                            &json!({
+                                "content": [{
+                                    "type": "text",
+                                    "text": "HID pointer report failed: USB HID device not connected or not enumerated by target computer (verify USB-C OTG cable is connected to target host)"
+                                }],
+                                "structuredContent": {
+                                    "error": "USB HID device not connected or not enumerated by target computer",
+                                    "connected": false
+                                },
+                                "isError": true
+                            }),
+                        );
+                    }
+                }
+            }
             _ => return error(id, -32602, "Unknown or disabled tool"),
-        };
-        if result.is_err() {
-            return error(id, -32603, "HID broker rejected report");
         }
         success(
             id,
@@ -822,8 +1240,329 @@ impl<'a> Server<'a> {
                 false,
             ));
         }
+        if self.authorize("kvm.device.reboot").is_ok() {
+            tools.push(reboot_tool("kvm.device.reboot", "Reboot Onyx KVM device"));
+            tools.push(reboot_tool("kvm.system.reboot", "Reboot Onyx KVM system"));
+        }
+        if self.authorize("kvm.diag.video").is_ok() {
+            tools.push(diag_video_tool());
+        }
+        if self.authorize("kvm.diag.dmesg").is_ok() {
+            tools.push(diag_dmesg_tool());
+        }
+        if self.authorize("kvm.diag.system").is_ok() {
+            tools.push(diag_system_tool());
+        }
+        if self.authorize("kvm.dev.exec").is_ok() {
+            tools.push(dev_exec_tool());
+        }
+        if self.authorize("kvm.system.dev_mode").is_ok() {
+            tools.push(dev_mode_tool());
+        }
         json!({ "tools": tools })
     }
+}
+
+fn diag_video_tool() -> Value {
+    json!({
+        "name": "kvm.diag.video",
+        "title": "Hardware Video Pipeline Diagnostics",
+        "description": "Query hardware video pipeline state: LT6911 I2C lock & CSI dimensions, MIPI-RX driver stats, and CVITEK VI debug buffer",
+        "inputSchema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "additionalProperties": false
+        },
+        "outputSchema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "properties": {
+                "hdmiCarrierLocked": { "type": "boolean" },
+                "signalA3": { "type": ["string", "null"] },
+                "csiWidth": { "type": ["integer", "null"] },
+                "csiHeight": { "type": ["integer", "null"] },
+                "i2cStatus": { "type": "string" },
+                "mipiRx": { "type": "string" },
+                "viDbg": { "type": "string" }
+            },
+            "required": ["hdmiCarrierLocked", "i2cStatus", "mipiRx", "viDbg"],
+            "additionalProperties": false
+        },
+        "annotations": {
+            "readOnlyHint": true,
+            "destructiveHint": false,
+            "idempotentHint": true,
+            "openWorldHint": false
+        },
+        "execution": { "taskSupport": "forbidden" }
+    })
+}
+
+fn diag_dmesg_tool() -> Value {
+    json!({
+        "name": "kvm.diag.dmesg",
+        "title": "Kernel Ring Buffer (dmesg)",
+        "description": "Fetch the most recent kernel ring buffer messages (dmesg tail)",
+        "inputSchema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "properties": {
+                "lines": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 200,
+                    "default": 60,
+                    "description": "Number of trailing dmesg lines to return (1-200, default 60)"
+                }
+            },
+            "additionalProperties": false
+        },
+        "outputSchema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "properties": {
+                "totalLines": { "type": "integer" },
+                "returnedLines": { "type": "integer" },
+                "messages": { "type": "string" }
+            },
+            "required": ["totalLines", "returnedLines", "messages"],
+            "additionalProperties": false
+        },
+        "annotations": {
+            "readOnlyHint": true,
+            "destructiveHint": false,
+            "idempotentHint": true,
+            "openWorldHint": false
+        },
+        "execution": { "taskSupport": "forbidden" }
+    })
+}
+
+fn diag_system_tool() -> Value {
+    json!({
+        "name": "kvm.diag.system",
+        "title": "System Hardware & Runtime Diagnostics",
+        "description": "Query system diagnostics: uptime, memory, CPU load, USB UDC endpoint state, DEV_MODE status, and process table",
+        "inputSchema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "additionalProperties": false
+        },
+        "outputSchema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "properties": {
+                "uptime": { "type": "string" },
+                "loadavg": { "type": "string" },
+                "usbUdcState": { "type": "string" },
+                "devModeActive": { "type": "boolean" },
+                "devModeBootConfig": { "type": "boolean" },
+                "meminfo": { "type": "string" },
+                "processes": { "type": "string" }
+            },
+            "required": ["uptime", "loadavg", "usbUdcState", "devModeActive", "devModeBootConfig", "meminfo", "processes"],
+            "additionalProperties": false
+        },
+        "annotations": {
+            "readOnlyHint": true,
+            "destructiveHint": false,
+            "idempotentHint": true,
+            "openWorldHint": false
+        },
+        "execution": { "taskSupport": "forbidden" }
+    })
+}
+
+fn dev_exec_tool() -> Value {
+    json!({
+        "name": "kvm.dev.exec",
+        "title": "Execute Diagnostic Command in DEV_MODE",
+        "description": "Execute a diagnostic command in DEV_MODE (only available when /boot/DEV_MODE is present and Admin scope + mutation is granted)",
+        "inputSchema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "properties": {
+                "command": {
+                    "type": "string",
+                    "description": "Shell command to run"
+                }
+            },
+            "required": ["command"],
+            "additionalProperties": false
+        },
+        "outputSchema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "properties": {
+                "command": { "type": "string" },
+                "exitCode": { "type": "integer" },
+                "output": { "type": "string" }
+            },
+            "required": ["command", "exitCode", "output"],
+            "additionalProperties": false
+        },
+        "annotations": {
+            "readOnlyHint": false,
+            "destructiveHint": true,
+            "idempotentHint": false,
+            "openWorldHint": false
+        },
+        "execution": { "taskSupport": "forbidden" }
+    })
+}
+
+fn dev_mode_tool() -> Value {
+    json!({
+        "name": "kvm.system.dev_mode",
+        "title": "DEV_MODE Runtime & Boot Control",
+        "description": "Control DEV_MODE (status, enable, disable) and configure SSH authorized keys on /boot",
+        "inputSchema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["status", "enable", "disable"],
+                    "default": "status",
+                    "description": "Dev mode action: 'status' to inspect, 'enable' to enable and optionally install keys, 'disable' to turn off"
+                },
+                "authorizedKeys": {
+                    "type": "string",
+                    "description": "Optional OpenSSH public key line(s) to store in /boot/ssh_authorized_keys when enabling"
+                }
+            },
+            "additionalProperties": false
+        },
+        "outputSchema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object"
+        },
+        "annotations": {
+            "readOnlyHint": false,
+            "destructiveHint": false,
+            "idempotentHint": false,
+            "openWorldHint": false
+        },
+        "execution": { "taskSupport": "forbidden" }
+    })
+}
+
+fn run_command_fallback(cmd: &str) -> (i32, String) {
+    match std::process::Command::new("/bin/sh").arg("-c").arg(cmd).output() {
+        Ok(output) => {
+            let rc = output.status.code().unwrap_or(-1);
+            let mut out = String::from_utf8_lossy(&output.stdout).to_string();
+            let err = String::from_utf8_lossy(&output.stderr);
+            if !err.is_empty() {
+                if !out.is_empty() {
+                    out.push('\n');
+                }
+                out.push_str(&err);
+            }
+            (rc, out)
+        }
+        Err(e) => (-1, format!("Execution failed: {e}")),
+    }
+}
+
+fn query_lt6911_i2c() -> (bool, Option<String>, Option<u16>, Option<u16>, String) {
+    if !std::path::Path::new("/dev/i2c-4").exists() {
+        return (false, None, None, None, "/dev/i2c-4 unavailable".into());
+    }
+
+    // 1. Halt LT6911 MCU: bank 0x80, reg 0xee = 0x01
+    let halt_status = std::process::Command::new("i2cset")
+        .args(["-y", "4", "0x2b", "0xff", "0x80"])
+        .status();
+    if halt_status.is_err() || !halt_status.unwrap().success() {
+        return (false, None, None, None, "i2cset bank 0x80 failed".into());
+    }
+    let _ = std::process::Command::new("i2cset")
+        .args(["-y", "4", "0x2b", "0xee", "0x01"])
+        .status();
+
+    // 2. Query signal state from bank 0x86, reg 0xa3
+    let _ = std::process::Command::new("i2cset")
+        .args(["-y", "4", "0x2b", "0xff", "0x86"])
+        .status();
+    let sig_output = std::process::Command::new("i2cget")
+        .args(["-y", "4", "0x2b", "0xa3"])
+        .output()
+        .ok()
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string());
+
+    // 3. Query CSI geometry from bank 0x85: HACTIVE at 0xea, VACTIVE at 0xf0
+    let _ = std::process::Command::new("i2cset")
+        .args(["-y", "4", "0x2b", "0xff", "0x85"])
+        .status();
+
+    let parse_i2ctransfer_u16 = |reg: &str| -> Option<u16> {
+        let out = std::process::Command::new("i2ctransfer")
+            .args(["-y", "4", "w1@0x2b", reg, "r2"])
+            .output()
+            .ok()?;
+        let text = String::from_utf8_lossy(&out.stdout);
+        let bytes: Vec<u8> = text
+            .split_whitespace()
+            .filter_map(|s| {
+                let clean = s.strip_prefix("0x").unwrap_or(s);
+                u8::from_str_radix(clean, 16).ok()
+            })
+            .collect();
+        if bytes.len() >= 2 {
+            Some(((bytes[0] as u16) << 8) | (bytes[1] as u16))
+        } else {
+            None
+        }
+    };
+
+    let csi_w = parse_i2ctransfer_u16("0xea");
+    let csi_h = parse_i2ctransfer_u16("0xf0");
+
+    // 4. Resume LT6911 MCU unconditionally: bank 0x80, reg 0xee = 0x00
+    let _ = std::process::Command::new("i2cset")
+        .args(["-y", "4", "0x2b", "0xff", "0x80"])
+        .status();
+    let _ = std::process::Command::new("i2cset")
+        .args(["-y", "4", "0x2b", "0xee", "0x00"])
+        .status();
+
+    let hdmi_locked = sig_output
+        .as_deref()
+        .map(|s| s.eq_ignore_ascii_case("0x55") || s == "85")
+        .unwrap_or(false);
+
+    (hdmi_locked, sig_output, csi_w, csi_h, "ok".into())
+}
+
+fn reboot_tool(name: &str, title: &str) -> Value {
+    json!({
+        "name": name,
+        "title": title,
+        "description": "Trigger an authenticated, graceful system reboot of the Onyx KVM device",
+        "inputSchema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "additionalProperties": false
+        },
+        "outputSchema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "properties": {
+                "status": { "type": "string" },
+                "message": { "type": "string" }
+            },
+            "required": ["status", "message"],
+            "additionalProperties": false
+        },
+        "annotations": {
+            "readOnlyHint": false,
+            "destructiveHint": true,
+            "idempotentHint": false,
+            "openWorldHint": false
+        },
+        "execution": { "taskSupport": "forbidden" }
+    })
 }
 
 fn audio_tool(name: &str, title: &str, read_only: bool) -> Value {
@@ -848,40 +1587,307 @@ fn audio_tool(name: &str, title: &str, read_only: bool) -> Value {
     })
 }
 
-fn parse_snapshot_arguments(arguments: Option<&Value>) -> Option<SnapshotRequest> {
+fn parse_snapshot_arguments(arguments: Option<&Value>) -> Result<SnapshotRequest, &'static str> {
     let Some(arguments) = arguments else {
-        return SnapshotRequest::new(1920, 1080, SnapshotFormat::Yuv422p, 5_000).ok();
+        return SnapshotRequest::new(1920, 1080, SnapshotFormat::Yuv422p, 5_000)
+            .map_err(|_| "Invalid default snapshot arguments");
     };
-    let object = arguments.as_object()?;
+    let Some(object) = arguments.as_object() else {
+        return Err("Snapshot arguments must be a JSON object");
+    };
     for key in object.keys() {
         if !matches!(key.as_str(), "width" | "height" | "format" | "deadlineMs") {
-            return None;
+            return Err("Unknown snapshot argument key");
         }
     }
     let width = match object.get("width") {
-        Some(value) => u16::try_from(value.as_u64()?).ok()?,
+        Some(value) => {
+            let Some(val) = value.as_u64() else {
+                return Err("width must be an integer");
+            };
+            let Ok(w) = u16::try_from(val) else {
+                return Err("width must be between 1 and 1920");
+            };
+            if w == 0 || w > 1920 {
+                return Err("width must be between 1 and 1920");
+            }
+            w
+        }
         None => 1920,
     };
     let height = match object.get("height") {
-        Some(value) => u16::try_from(value.as_u64()?).ok()?,
+        Some(value) => {
+            let Some(val) = value.as_u64() else {
+                return Err("height must be an integer");
+            };
+            let Ok(h) = u16::try_from(val) else {
+                return Err("height must be between 1 and 1080");
+            };
+            if h == 0 || h > 1080 {
+                return Err("height must be between 1 and 1080");
+            }
+            h
+        }
         None => 1080,
     };
     let format = match object.get("format") {
-        Some(value) => match value.as_str()? {
-            "jpeg" => SnapshotFormat::Jpeg,
-            "rgb565" => SnapshotFormat::Rgb565,
-            "yuv422p" => SnapshotFormat::Yuv422p,
-            "yuv420p" => SnapshotFormat::Yuv420p,
-            "tile-delta-yuv422" | "tile_delta" => SnapshotFormat::TileDeltaYuv422,
-            _ => return None,
-        },
+        Some(value) => {
+            let Some(s) = value.as_str() else {
+                return Err("format must be a string");
+            };
+            match s {
+                "jpeg" => SnapshotFormat::Jpeg,
+                "rgb565" => SnapshotFormat::Rgb565,
+                "yuv422p" => SnapshotFormat::Yuv422p,
+                "yuv420p" => SnapshotFormat::Yuv420p,
+                "tile-delta-yuv422" | "tile_delta" => SnapshotFormat::TileDeltaYuv422,
+                "h264" => SnapshotFormat::H264,
+                _ => return Err("format must be 'yuv422p', 'yuv420p', or 'h264'"),
+            }
+        }
         None => SnapshotFormat::Yuv422p,
     };
     let deadline_ms = match object.get("deadlineMs") {
-        Some(value) => u16::try_from(value.as_u64()?).ok()?,
+        Some(value) => {
+            let Some(val) = value.as_u64() else {
+                return Err("deadlineMs must be an integer");
+            };
+            u16::try_from(val.clamp(100, 5000)).unwrap_or(5000)
+        }
         None => 5_000,
     };
-    SnapshotRequest::new(width, height, format, deadline_ms).ok()
+    SnapshotRequest::new(width, height, format, deadline_ms)
+        .map_err(|_| "Invalid snapshot dimensions or deadline")
+}
+
+fn char_to_hid(c: char) -> Option<(u8, u8)> {
+    match c {
+        'a'..='z' => Some((0, 4 + (c as u8 - b'a'))),
+        'A'..='Z' => Some((0x02, 4 + (c as u8 - b'A'))),
+        '1'..='9' => Some((0, 30 + (c as u8 - b'1'))),
+        '0' => Some((0, 39)),
+        '!' => Some((0x02, 30)),
+        '@' => Some((0x02, 31)),
+        '#' => Some((0x02, 32)),
+        '$' => Some((0x02, 33)),
+        '%' => Some((0x02, 34)),
+        '^' => Some((0x02, 35)),
+        '&' => Some((0x02, 36)),
+        '*' => Some((0x02, 37)),
+        '(' => Some((0x02, 38)),
+        ')' => Some((0x02, 39)),
+        '\n' | '\r' => Some((0, 40)),
+        '\t' => Some((0, 43)),
+        ' ' => Some((0, 44)),
+        '-' => Some((0, 45)),
+        '_' => Some((0x02, 45)),
+        '=' => Some((0, 46)),
+        '+' => Some((0x02, 46)),
+        '[' => Some((0, 47)),
+        '{' => Some((0x02, 47)),
+        ']' => Some((0, 48)),
+        '}' => Some((0x02, 48)),
+        '\\' => Some((0, 49)),
+        '|' => Some((0x02, 49)),
+        ';' => Some((0, 51)),
+        ':' => Some((0x02, 51)),
+        '\'' => Some((0, 52)),
+        '"' => Some((0x02, 52)),
+        '`' => Some((0, 53)),
+        '~' => Some((0x02, 53)),
+        ',' => Some((0, 54)),
+        '<' => Some((0x02, 54)),
+        '.' => Some((0, 55)),
+        '>' => Some((0x02, 55)),
+        '/' => Some((0, 56)),
+        '?' => Some((0x02, 56)),
+        _ => None,
+    }
+}
+
+fn key_name_to_hid(name: &str) -> Option<(u8, u8)> {
+    let lower = name.trim().to_ascii_lowercase();
+    match lower.as_str() {
+        "enter" | "return" => Some((0, 40)),
+        "esc" | "escape" => Some((0, 41)),
+        "backspace" => Some((0, 42)),
+        "tab" => Some((0, 43)),
+        "space" | "spacebar" => Some((0, 44)),
+        "capslock" => Some((0, 57)),
+        "f1" => Some((0, 58)),
+        "f2" => Some((0, 59)),
+        "f3" => Some((0, 60)),
+        "f4" => Some((0, 61)),
+        "f5" => Some((0, 62)),
+        "f6" => Some((0, 63)),
+        "f7" => Some((0, 64)),
+        "f8" => Some((0, 65)),
+        "f9" => Some((0, 66)),
+        "f10" => Some((0, 67)),
+        "f11" => Some((0, 68)),
+        "f12" => Some((0, 69)),
+        "printscreen" => Some((0, 70)),
+        "scrolllock" => Some((0, 71)),
+        "pause" => Some((0, 72)),
+        "insert" => Some((0, 73)),
+        "home" => Some((0, 74)),
+        "pageup" => Some((0, 75)),
+        "delete" => Some((0, 76)),
+        "end" => Some((0, 77)),
+        "pagedown" => Some((0, 78)),
+        "right" | "arrowright" => Some((0, 79)),
+        "left" | "arrowleft" => Some((0, 80)),
+        "down" | "arrowdown" => Some((0, 81)),
+        "up" | "arrowup" => Some((0, 82)),
+        _ => {
+            if lower.chars().count() == 1 {
+                char_to_hid(lower.chars().next()?)
+            } else {
+                None
+            }
+        }
+    }
+}
+
+fn parse_modifiers(value: Option<&Value>) -> u8 {
+    let mut mask = 0u8;
+    let Some(val) = value else { return 0; };
+    if let Some(arr) = val.as_array() {
+        for item in arr {
+            if let Some(s) = item.as_str() {
+                match s.to_ascii_lowercase().as_str() {
+                    "ctrl" | "leftctrl" => mask |= 0x01,
+                    "shift" | "leftshift" => mask |= 0x02,
+                    "alt" | "leftalt" => mask |= 0x04,
+                    "gui" | "meta" | "win" | "cmd" | "leftgui" => mask |= 0x08,
+                    "rctrl" | "rightctrl" => mask |= 0x10,
+                    "rshift" | "rightshift" => mask |= 0x20,
+                    "ralt" | "rightalt" => mask |= 0x40,
+                    "rgui" | "rightgui" => mask |= 0x80,
+                    _ => {}
+                }
+            }
+        }
+    } else if let Some(n) = val.as_u64() {
+        mask = (n & 0xFF) as u8;
+    }
+    mask
+}
+
+fn parse_keyboard_action(arguments: Option<&Value>) -> Result<Vec<[u8; 8]>, &'static str> {
+    let Some(arguments) = arguments else {
+        return Err("Keyboard arguments must be provided");
+    };
+    let Some(object) = arguments.as_object() else {
+        return Err("Keyboard arguments must be a JSON object");
+    };
+    if let Some(report) = object.get("report") {
+        let Some(arr) = report.as_array() else {
+            return Err("HID report must be one byte array");
+        };
+        let Some(bytes) = arr
+            .iter()
+            .map(|value| value.as_u64().and_then(|byte| u8::try_from(byte).ok()))
+            .collect::<Option<Vec<_>>>()
+        else {
+            return Err("HID report contains an invalid byte");
+        };
+        let Ok(report) = <[u8; 8]>::try_from(bytes.as_slice()) else {
+            return Err("Keyboard report must contain 8 bytes");
+        };
+        return Ok(vec![report]);
+    }
+    if let Some(key_val) = object.get("key") {
+        let Some(key_str) = key_val.as_str() else {
+            return Err("key must be a string");
+        };
+        let Some((char_mod, code)) = key_name_to_hid(key_str) else {
+            return Err("Unknown key name");
+        };
+        let mod_mask = parse_modifiers(object.get("modifiers")) | char_mod;
+        return Ok(vec![
+            [mod_mask, 0, code, 0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0, 0, 0, 0],
+        ]);
+    }
+    if let Some(text_val) = object.get("text") {
+        let Some(text_str) = text_val.as_str() else {
+            return Err("text must be a string");
+        };
+        if text_str.len() > 128 {
+            return Err("text cannot exceed 128 characters");
+        }
+        let mut reports = Vec::new();
+        for ch in text_str.chars() {
+            let Some((char_mod, code)) = char_to_hid(ch) else {
+                return Err("Unsupported character in text");
+            };
+            reports.push([char_mod, 0, code, 0, 0, 0, 0, 0]);
+            reports.push([0, 0, 0, 0, 0, 0, 0, 0]);
+        }
+        return Ok(reports);
+    }
+    Err("Keyboard arguments must specify 'key', 'text', or 'report'")
+}
+
+fn parse_pointer_action(arguments: Option<&Value>) -> Result<Vec<[u8; 4]>, &'static str> {
+    let Some(arguments) = arguments else {
+        return Err("Pointer arguments must be provided");
+    };
+    let Some(object) = arguments.as_object() else {
+        return Err("Pointer arguments must be a JSON object");
+    };
+    if let Some(report) = object.get("report") {
+        let Some(arr) = report.as_array() else {
+            return Err("HID report must be one byte array");
+        };
+        let Some(bytes) = arr
+            .iter()
+            .map(|value| {
+                if let Some(byte) = value.as_u64() {
+                    u8::try_from(byte).ok()
+                } else if let Some(signed) = value.as_i64() {
+                    i8::try_from(signed).ok().map(|s| s as u8)
+                } else {
+                    None
+                }
+            })
+            .collect::<Option<Vec<_>>>()
+        else {
+            return Err("HID report contains an invalid byte");
+        };
+        let Ok(report) = <[u8; 4]>::try_from(bytes.as_slice()) else {
+            return Err("Pointer report must contain 4 bytes");
+        };
+        return Ok(vec![report]);
+    }
+    if let Some(click_val) = object.get("click") {
+        let Some(btn_str) = click_val.as_str() else {
+            return Err("click must be a string");
+        };
+        let button = match btn_str.to_ascii_lowercase().as_str() {
+            "left" => 1,
+            "right" => 2,
+            "middle" => 4,
+            _ => return Err("click must be 'left', 'right', or 'middle'"),
+        };
+        return Ok(vec![
+            [button, 0, 0, 0],
+            [0, 0, 0, 0],
+        ]);
+    }
+    if object.contains_key("dx")
+        || object.contains_key("dy")
+        || object.contains_key("wheel")
+        || object.contains_key("buttons")
+    {
+        let buttons = object.get("buttons").and_then(Value::as_u64).unwrap_or(0) as u8;
+        let dx = object.get("dx").and_then(Value::as_i64).unwrap_or(0).clamp(-127, 127) as i8 as u8;
+        let dy = object.get("dy").and_then(Value::as_i64).unwrap_or(0).clamp(-127, 127) as i8 as u8;
+        let wheel = object.get("wheel").and_then(Value::as_i64).unwrap_or(0).clamp(-127, 127) as i8 as u8;
+        return Ok(vec![[buttons, dx, dy, wheel]]);
+    }
+    Err("Pointer arguments must specify 'click', 'dx'/'dy', or 'report'")
 }
 
 fn video_snapshot_tool() -> Value {
@@ -893,10 +1899,10 @@ fn video_snapshot_tool() -> Value {
             "$schema": "https://json-schema.org/draft/2020-12/schema",
             "type": "object",
             "properties": {
-                "width": { "type": "integer", "minimum": 1, "maximum": 1920 },
-                "height": { "type": "integer", "minimum": 1, "maximum": 1080 },
-                "format": { "type": "string", "enum": ["yuv420p", "yuv422p"] },
-                "deadlineMs": { "type": "integer", "minimum": 100, "maximum": 5000 }
+                "width": { "type": "integer", "minimum": 1, "maximum": 1920, "default": 1920, "description": "Horizontal resolution (1 to 1920, default 1920)" },
+                "height": { "type": "integer", "minimum": 1, "maximum": 1080, "default": 1080, "description": "Vertical resolution (1 to 1080, default 1080)" },
+                "format": { "type": "string", "enum": ["yuv420p", "yuv422p", "h264"], "default": "yuv422p", "description": "Video frame pixel format: 'yuv422p' (lossless UYVY raw), 'yuv420p', or 'h264'" },
+                "deadlineMs": { "type": "integer", "minimum": 100, "maximum": 5000, "default": 5000, "description": "Snapshot timeout in milliseconds between 100 and 5000 (default 5000)" }
             },
             "additionalProperties": false
         },
@@ -906,7 +1912,7 @@ fn video_snapshot_tool() -> Value {
             "properties": {
                 "width": { "type": "integer", "minimum": 1, "maximum": 1920 },
                 "height": { "type": "integer", "minimum": 1, "maximum": 1080 },
-                "format": { "type": "string", "enum": ["yuv420p", "yuv422p"] },
+                "format": { "type": "string", "enum": ["yuv420p", "yuv422p", "h264"] },
                 "byteLength": { "type": "integer", "minimum": 1, "maximum": 4_194_304 },
                 "sha256": { "type": "string", "minLength": 64, "maxLength": 64 }
             },
@@ -921,26 +1927,94 @@ fn video_snapshot_tool() -> Value {
     })
 }
 
-fn hid_tool(name: &str, title: &str, length: usize) -> Value {
-    json!({
-        "name": name,
-        "title": title,
-        "description": "Send one fixed-size USB HID report through the local privileged broker",
-        "inputSchema": {
-            "$schema": "https://json-schema.org/draft/2020-12/schema",
-            "type": "object",
-            "properties": { "report": {
-                "type": "array", "items": { "type": "integer", "minimum": 0, "maximum": 255 },
-                "minItems": length, "maxItems": length
-            }},
-            "required": ["report"], "additionalProperties": false
-        },
-        "annotations": {
-            "readOnlyHint": false, "destructiveHint": false,
-            "idempotentHint": false, "openWorldHint": false
-        },
-        "execution": { "taskSupport": "forbidden" }
-    })
+fn hid_tool(name: &str, title: &str, _length: usize) -> Value {
+    if name == "kvm.keyboard.send" {
+        json!({
+            "name": name,
+            "title": title,
+            "description": "Send keyboard keystrokes or raw reports to the target computer over USB HID. Provide either 'key' (named key, e.g. 'Return', 'Escape', 'Tab', 'Space', 'Backspace', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', or single char 'a'-'z'), 'text' (a string to type sequentially), or 'report' (raw 8-byte array).",
+            "inputSchema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "type": "object",
+                "properties": {
+                    "key": {
+                        "type": "string",
+                        "description": "Named key or character to press and release, e.g. 'Return', 'Enter', 'Escape', 'Tab', 'Space', 'Backspace', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Delete', 'Home', 'End', 'PageUp', 'PageDown', 'F1'-'F12', or single character 'a'-'z', '0'-'9'."
+                    },
+                    "modifiers": {
+                        "type": "array",
+                        "items": { "type": "string", "enum": ["ctrl", "shift", "alt", "gui"] },
+                        "description": "Optional list of modifier keys to hold during the keypress, e.g. ['ctrl', 'alt']"
+                    },
+                    "text": {
+                        "type": "string",
+                        "description": "Plain ASCII text string to type sequentially on the target machine (max 128 characters)"
+                    },
+                    "report": {
+                        "type": "array",
+                        "items": { "type": "integer", "minimum": 0, "maximum": 255 },
+                        "minItems": 8, "maxItems": 8,
+                        "description": "Exact 8-byte array representing the raw USB HID boot keyboard report: [modifiers, 0, key1, key2, key3, key4, key5, key6]"
+                    }
+                },
+                "additionalProperties": false
+            },
+            "annotations": {
+                "readOnlyHint": false, "destructiveHint": false,
+                "idempotentHint": false, "openWorldHint": false
+            },
+            "execution": { "taskSupport": "forbidden" }
+        })
+    } else {
+        json!({
+            "name": name,
+            "title": title,
+            "description": "Send mouse pointer movements, clicks, or raw reports to the target computer over USB HID. Provide 'dx'/'dy' for relative movement, 'click' ('left', 'right', 'middle'), 'wheel' for scrolling, or 'report' (raw 4-byte array).",
+            "inputSchema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "type": "object",
+                "properties": {
+                    "click": {
+                        "type": "string",
+                        "enum": ["left", "right", "middle"],
+                        "description": "Mouse button to click (press and release)"
+                    },
+                    "dx": {
+                        "type": "integer",
+                        "minimum": -127, "maximum": 127,
+                        "description": "Relative horizontal movement in pixels (-127 to 127, positive = right, negative = left)"
+                    },
+                    "dy": {
+                        "type": "integer",
+                        "minimum": -127, "maximum": 127,
+                        "description": "Relative vertical movement in pixels (-127 to 127, positive = down, negative = up)"
+                    },
+                    "wheel": {
+                        "type": "integer",
+                        "minimum": -127, "maximum": 127,
+                        "description": "Relative vertical scroll wheel movement (positive = scroll up, negative = scroll down)"
+                    },
+                    "buttons": {
+                        "type": "integer",
+                        "minimum": 0, "maximum": 7,
+                        "description": "Button bitmask: bit 0 = Left (1), bit 1 = Right (2), bit 2 = Middle (4)"
+                    },
+                    "report": {
+                        "type": "array",
+                        "items": { "type": "integer", "minimum": 0, "maximum": 255 },
+                        "minItems": 4, "maxItems": 4,
+                        "description": "Exact 4-byte array representing the raw USB HID relative mouse report: [buttons, dx, dy, wheel]"
+                    }
+                },
+                "additionalProperties": false
+            },
+            "annotations": {
+                "readOnlyHint": false, "destructiveHint": false,
+                "idempotentHint": false, "openWorldHint": false
+            },
+            "execution": { "taskSupport": "forbidden" }
+        })
+    }
 }
 
 fn success(id: &Value, result: &Value) -> String {
@@ -1272,12 +2346,41 @@ mod tests {
         );
         assert_eq!(accepted["result"]["structuredContent"]["accepted"], true);
         assert_eq!(hid.keyboard.get(), Some([0, 0, 4, 0, 0, 0, 0, 0]));
+
+        let key_named = response(
+            &mut server,
+            r#"{"jsonrpc":"2.0","id":16,"method":"tools/call","params":{"name":"kvm.keyboard.send","arguments":{"key":"Return"}}}"#,
+        );
+        assert_eq!(key_named["result"]["structuredContent"]["accepted"], true);
+        assert_eq!(hid.keyboard.get(), Some([0, 0, 0, 0, 0, 0, 0, 0]));
+
+        let pointer_move = response(
+            &mut server,
+            r#"{"jsonrpc":"2.0","id":17,"method":"tools/call","params":{"name":"kvm.pointer.send","arguments":{"dx":10,"dy":5}}}"#,
+        );
+        assert_eq!(pointer_move["result"]["structuredContent"]["accepted"], true);
+        assert_eq!(hid.pointer.get(), Some([0, 10, 5, 0]));
+
+        let pointer_click = response(
+            &mut server,
+            r#"{"jsonrpc":"2.0","id":18,"method":"tools/call","params":{"name":"kvm.pointer.send","arguments":{"click":"left"}}}"#,
+        );
+        assert_eq!(pointer_click["result"]["structuredContent"]["accepted"], true);
+        assert_eq!(hid.pointer.get(), Some([0, 0, 0, 0]));
+
+        let pointer_signed = response(
+            &mut server,
+            r#"{"jsonrpc":"2.0","id":19,"method":"tools/call","params":{"name":"kvm.pointer.send","arguments":{"report":[0,-1,0,0]}}}"#,
+        );
+        assert_eq!(pointer_signed["result"]["structuredContent"]["accepted"], true);
+        assert_eq!(hid.pointer.get(), Some([0, 255, 0, 0]));
+
         let malformed = response(
             &mut server,
             r#"{"jsonrpc":"2.0","id":13,"method":"tools/call","params":{"name":"kvm.pointer.send","arguments":{"report":[0,0,0,256]}}}"#,
         );
         assert_eq!(malformed["error"]["code"], -32602);
-        assert_eq!(hid.pointer.get(), None);
+        assert_eq!(hid.pointer.get(), Some([0, 255, 0, 0]));
 
         let read_control = [Scope::Read, Scope::Control];
         let full_grant = Grant {
@@ -1398,6 +2501,27 @@ mod tests {
     }
 
     #[test]
+    fn mint_token_produces_verifiable_jwt() {
+        let seed = [77u8; 32];
+        let signing_key = SigningKey::from_bytes(&seed);
+        let public_key = signing_key.verifying_key().to_bytes();
+        let token = super::mint_token(
+            &seed,
+            "https://test-issuer",
+            "https://test-kvm/mcp",
+            "kvm:read kvm:video kvm:control",
+            true,
+            1234567890,
+        );
+        let validator = Ed25519JwtValidator::new("https://test-issuer", &public_key);
+        let claims = validator.validate(&token).expect("valid mint_token JWT");
+        assert_eq!(claims.audience, "https://test-kvm/mcp");
+        assert_eq!(claims.expires_at_unix_seconds, 1234567890);
+        assert_eq!(claims.scopes, vec![Scope::Read, Scope::Video, Scope::Control]);
+        assert!(claims.mutation_enabled);
+    }
+
+    #[test]
     fn validate_actual_v59_token() {
         if let (Ok(token), Ok(pub_key)) = (
             std::fs::read_to_string("../../out/product-v59-secrets/operator-token.jwt"),
@@ -1449,6 +2573,7 @@ mod tests {
         fn capture_snapshot(&self, request: SnapshotRequest) -> io::Result<VideoSnapshot> {
             self.last_request.set(Some(request));
             let byte_length = match request.format {
+                SnapshotFormat::H264 => 100_000,
                 SnapshotFormat::Yuv420p => 3_110_400,
                 SnapshotFormat::Yuv422p | SnapshotFormat::TileDeltaYuv422 => 4_147_200,
                 SnapshotFormat::Jpeg | SnapshotFormat::Rgb565 => {
@@ -1624,4 +2749,200 @@ mod tests {
         assert_eq!(result["result"]["structuredContent"]["toneHz"], 1_000);
         assert_eq!(result["result"]["structuredContent"]["completed"], true);
     }
+
+    #[test]
+    fn reboot_tools_require_admin_scope_and_mutation() {
+        let read_scopes = [Scope::Read];
+        let read_grant = Grant {
+            audience: "https://kvm.example/mcp",
+            expires_at_unix_seconds: 200,
+            scopes: &read_scopes,
+            mutation_enabled: false,
+        };
+        let mut server = Server::remote_ready("https://kvm.example/mcp", 100, read_grant);
+        let list = response(&mut server, r#"{"jsonrpc":"2.0","id":40,"method":"tools/list"}"#);
+        let tool_names: Vec<&str> = list["result"]["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|t| t["name"].as_str().unwrap())
+            .collect();
+        assert!(!tool_names.contains(&"kvm.device.reboot"));
+        assert!(!tool_names.contains(&"kvm.system.reboot"));
+
+        let denied = response(
+            &mut server,
+            r#"{"jsonrpc":"2.0","id":41,"method":"tools/call","params":{"name":"kvm.device.reboot","arguments":{}}}"#,
+        );
+        assert_eq!(denied["error"]["code"], -32603);
+
+        let admin_scopes = [Scope::Read, Scope::Admin];
+        let admin_no_mut_grant = Grant {
+            audience: "https://kvm.example/mcp",
+            expires_at_unix_seconds: 200,
+            scopes: &admin_scopes,
+            mutation_enabled: false,
+        };
+        let mut server = Server::remote_ready("https://kvm.example/mcp", 100, admin_no_mut_grant);
+        let denied = response(
+            &mut server,
+            r#"{"jsonrpc":"2.0","id":42,"method":"tools/call","params":{"name":"kvm.device.reboot","arguments":{}}}"#,
+        );
+        assert_eq!(denied["error"]["code"], -32603);
+
+        let admin_mut_grant = Grant {
+            audience: "https://kvm.example/mcp",
+            expires_at_unix_seconds: 200,
+            scopes: &admin_scopes,
+            mutation_enabled: true,
+        };
+        let mut server = Server::remote_ready("https://kvm.example/mcp", 100, admin_mut_grant);
+        let list = response(&mut server, r#"{"jsonrpc":"2.0","id":43,"method":"tools/list"}"#);
+        let tool_names: Vec<&str> = list["result"]["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|t| t["name"].as_str().unwrap())
+            .collect();
+        assert!(tool_names.contains(&"kvm.device.reboot"));
+        assert!(tool_names.contains(&"kvm.system.reboot"));
+
+        let res = response(
+            &mut server,
+            r#"{"jsonrpc":"2.0","id":44,"method":"tools/call","params":{"name":"kvm.device.reboot","arguments":{}}}"#,
+        );
+        assert_eq!(res["result"]["structuredContent"]["status"], "rebooting");
+
+        let res = response(
+            &mut server,
+            r#"{"jsonrpc":"2.0","id":45,"method":"tools/call","params":{"name":"kvm.system.reboot","arguments":{}}}"#,
+        );
+        assert_eq!(res["result"]["structuredContent"]["status"], "rebooting");
+    }
+
+    #[test]
+    fn diagnostic_tools_require_admin_scope() {
+        let read_scopes = [Scope::Read];
+        let read_grant = Grant {
+            audience: "https://kvm.example/mcp",
+            expires_at_unix_seconds: 200,
+            scopes: &read_scopes,
+            mutation_enabled: false,
+        };
+        let mut server = Server::remote_ready("https://kvm.example/mcp", 100, read_grant);
+        let list = response(&mut server, r#"{"jsonrpc":"2.0","id":50,"method":"tools/list"}"#);
+        let tool_names: Vec<&str> = list["result"]["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|t| t["name"].as_str().unwrap())
+            .collect();
+        assert!(!tool_names.contains(&"kvm.diag.video"));
+        assert!(!tool_names.contains(&"kvm.diag.dmesg"));
+        assert!(!tool_names.contains(&"kvm.diag.system"));
+
+        let denied_video = response(
+            &mut server,
+            r#"{"jsonrpc":"2.0","id":51,"method":"tools/call","params":{"name":"kvm.diag.video"}}"#,
+        );
+        assert_eq!(denied_video["error"]["code"], -32603);
+
+        let admin_scopes = [Scope::Read, Scope::Admin];
+        let admin_grant = Grant {
+            audience: "https://kvm.example/mcp",
+            expires_at_unix_seconds: 200,
+            scopes: &admin_scopes,
+            mutation_enabled: false,
+        };
+        let mut server = Server::remote_ready("https://kvm.example/mcp", 100, admin_grant);
+        let list = response(&mut server, r#"{"jsonrpc":"2.0","id":52,"method":"tools/list"}"#);
+        let tool_names: Vec<&str> = list["result"]["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|t| t["name"].as_str().unwrap())
+            .collect();
+        assert!(tool_names.contains(&"kvm.diag.video"));
+        assert!(tool_names.contains(&"kvm.diag.dmesg"));
+        assert!(tool_names.contains(&"kvm.diag.system"));
+
+        let diag_vid = response(
+            &mut server,
+            r#"{"jsonrpc":"2.0","id":53,"method":"tools/call","params":{"name":"kvm.diag.video"}}"#,
+        );
+        assert!(diag_vid["result"]["structuredContent"]["hdmiCarrierLocked"].is_boolean());
+        assert!(diag_vid["result"]["structuredContent"]["i2cStatus"].is_string());
+
+        let diag_dmsg = response(
+            &mut server,
+            r#"{"jsonrpc":"2.0","id":54,"method":"tools/call","params":{"name":"kvm.diag.dmesg","arguments":{"lines":10}}}"#,
+        );
+        assert!(diag_dmsg["result"]["structuredContent"]["totalLines"].is_number());
+        assert!(diag_dmsg["result"]["structuredContent"]["returnedLines"].is_number());
+
+        let diag_sys = response(
+            &mut server,
+            r#"{"jsonrpc":"2.0","id":55,"method":"tools/call","params":{"name":"kvm.diag.system"}}"#,
+        );
+        assert!(diag_sys["result"]["structuredContent"]["uptime"].is_string());
+        assert!(diag_sys["result"]["structuredContent"]["usbUdcState"].is_string());
+    }
+
+    #[test]
+    fn dev_exec_and_dev_mode_require_admin_scope_and_mutation() {
+        let admin_scopes = [Scope::Read, Scope::Admin];
+        let admin_no_mut = Grant {
+            audience: "https://kvm.example/mcp",
+            expires_at_unix_seconds: 200,
+            scopes: &admin_scopes,
+            mutation_enabled: false,
+        };
+        let mut server = Server::remote_ready("https://kvm.example/mcp", 100, admin_no_mut);
+        let list = response(&mut server, r#"{"jsonrpc":"2.0","id":60,"method":"tools/list"}"#);
+        let tool_names: Vec<&str> = list["result"]["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|t| t["name"].as_str().unwrap())
+            .collect();
+        assert!(!tool_names.contains(&"kvm.dev.exec"));
+        assert!(!tool_names.contains(&"kvm.system.dev_mode"));
+
+        let denied_exec = response(
+            &mut server,
+            r#"{"jsonrpc":"2.0","id":61,"method":"tools/call","params":{"name":"kvm.dev.exec","arguments":{"command":"id"}}}"#,
+        );
+        assert_eq!(denied_exec["error"]["code"], -32603);
+
+        let admin_mut = Grant {
+            audience: "https://kvm.example/mcp",
+            expires_at_unix_seconds: 200,
+            scopes: &admin_scopes,
+            mutation_enabled: true,
+        };
+        let mut server = Server::remote_ready("https://kvm.example/mcp", 100, admin_mut);
+        let list = response(&mut server, r#"{"jsonrpc":"2.0","id":62,"method":"tools/list"}"#);
+        let tool_names: Vec<&str> = list["result"]["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|t| t["name"].as_str().unwrap())
+            .collect();
+        assert!(tool_names.contains(&"kvm.dev.exec"));
+        assert!(tool_names.contains(&"kvm.system.dev_mode"));
+
+        let dev_status = response(
+            &mut server,
+            r#"{"jsonrpc":"2.0","id":63,"method":"tools/call","params":{"name":"kvm.system.dev_mode","arguments":{"action":"status"}}}"#,
+        );
+        assert!(dev_status["result"]["structuredContent"]["devModeBootConfig"].is_boolean());
+
+        // dev.exec when DEV_MODE is disabled reports failure closed
+        let dev_exec_disabled = response(
+            &mut server,
+            r#"{"jsonrpc":"2.0","id":64,"method":"tools/call","params":{"name":"kvm.dev.exec","arguments":{"command":"echo hello"}}}"#,
+        );
+        assert_eq!(dev_exec_disabled["result"]["isError"], true);
+    }
 }
+
