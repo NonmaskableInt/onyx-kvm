@@ -55,7 +55,7 @@ fn env_path_any(name: &str, fallback_name: &str, default: &str) -> PathBuf {
 fn run(config: &Config) -> io::Result<()> {
     if let Some(parent) = config.socket.parent() {
         fs::create_dir_all(parent)?;
-        fs::set_permissions(parent, Permissions::from_mode(0o2750))?;
+        fs::set_permissions(parent, Permissions::from_mode(0o2770))?;
     }
     match fs::remove_file(&config.socket) {
         Ok(()) => {}

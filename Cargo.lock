@@ -255,7 +255,9 @@ dependencies = [
  "httparse",
  "onyx-kvm-mcp",
  "onyx-kvm-media-protocol",
+ "ring",
  "rustls",
+ "serde",
  "serde_json",
 ]
 

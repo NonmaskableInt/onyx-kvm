@@ -24,11 +24,13 @@ start_gadget() {
     mkdir "$gadget/configs/c.1/strings/0x409"
     printf %s 'Keyboard and pointer' >"$gadget/configs/c.1/strings/0x409/configuration"
     printf %s '50' >"$gadget/configs/c.1/MaxPower"
+    printf %s '0xa0' >"$gadget/configs/c.1/bmAttributes"
 
     mkdir "$gadget/functions/hid.keyboard"
     printf %s '1' >"$gadget/functions/hid.keyboard/protocol"
     printf %s '1' >"$gadget/functions/hid.keyboard/subclass"
     printf %s '8' >"$gadget/functions/hid.keyboard/report_length"
+    printf %s '1' >"$gadget/functions/hid.keyboard/wakeup_on_write"
     printf '\005\001\011\006\241\001\005\007\031\340\051\347\025\000\045\001\165\001\225\010\201\002\225\001\165\010\201\001\225\005\165\001\005\010\031\001\051\005\221\002\225\001\165\003\221\001\225\006\165\010\025\000\045\145\005\007\031\000\051\145\201\000\300' \
         >"$gadget/functions/hid.keyboard/report_desc"
 
@@ -36,6 +38,7 @@ start_gadget() {
     printf %s '2' >"$gadget/functions/hid.pointer/protocol"
     printf %s '1' >"$gadget/functions/hid.pointer/subclass"
     printf %s '4' >"$gadget/functions/hid.pointer/report_length"
+    printf %s '1' >"$gadget/functions/hid.pointer/wakeup_on_write"
     printf '\005\001\011\002\241\001\011\001\241\000\005\011\031\001\051\003\025\000\045\001\225\003\165\001\201\002\225\001\165\005\201\001\005\001\011\060\011\061\011\070\025\201\045\177\165\010\225\003\201\006\300\300' \
         >"$gadget/functions/hid.pointer/report_desc"
 

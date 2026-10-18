@@ -5,10 +5,10 @@ use std::{
     os::unix::net::UnixStream,
     path::{Path, PathBuf},
     sync::{
-        Arc,
+        Arc, RwLock,
         atomic::{AtomicBool, AtomicUsize, Ordering},
     },
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 use onyx_kvm_mcp::{
@@ -18,8 +18,9 @@ use onyx_kvm_mcp::{
 };
 use onyx_kvm_media_protocol::{
     AUDIO_REQUEST_BYTES, BoundedFrameRing, CAPTURE_METRICS_BYTES, CaptureMetrics,
-    DEFAULT_STREAM_LEASE_MS, Operation, PLAYBACK_RECEIPT_BYTES, PcmShape, PlaybackReceipt,
-    SNAPSHOT_RESPONSE_BYTES, STREAM_FLAG_DELTA, STREAM_FLAG_KEYFRAME, SnapshotFormat,
+    MAX_STREAM_LEASE_MS, Operation, PLAYBACK_RECEIPT_BYTES, PcmShape, PlaybackReceipt,
+    SNAPSHOT_RESPONSE_BYTES, STREAM_FLAG_DELTA, STREAM_FLAG_KEYFRAME, STREAM_FLAG_STANDBY,
+    SnapshotFormat,
     SnapshotRequest, StreamFrame, StreamFrameHeader, StreamSessionLease, VideoSnapshot,
     WIRE_HEADER_BYTES, WireHeader,
 };
@@ -28,23 +29,122 @@ use rustls::{
     pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer},
 };
 
-use crate::web::{APP_CSS, APP_JS, INDEX_HTML};
+use crate::web::{APP_CSS, APP_JS, FAVICON_SVG, INDEX_HTML};
 
 const MAX_HEADER_BYTES: usize = 16 * 1024;
 const MAX_IDENTITY_BYTES: usize = 64 * 1024;
 const TIMEOUT: Duration = Duration::from_secs(10);
 const METADATA_PATH: &str = "/.well-known/oauth-protected-resource";
 const HID_SOCKET: &str = "/run/onyx-kvm/hid.sock";
+const HID_ENABLED_PATH: &str = "/run/onyx-kvm/hid-enabled";
+const HID_ENABLED_FALLBACK: &str = "/run/cleankvm/hid-enabled";
 const VIDEO_SOCKET: &str = "/run/onyx-kvm/video.sock";
 const VIDEO_ENABLED_PATH: &str = "/run/onyx-kvm/video-enabled";
+const VIDEO_ENABLED_FALLBACK: &str = "/run/cleankvm/video-enabled";
 const AUDIO_CAPTURE_SOCKET: &str = "/run/onyx-kvm/audio-capture.sock";
 const AUDIO_CAPTURE_ENABLED_PATH: &str = "/run/onyx-kvm/audio-capture-enabled";
+const AUDIO_CAPTURE_ENABLED_FALLBACK: &str = "/run/cleankvm/audio-capture-enabled";
 const AUDIO_OUTPUT_SOCKET: &str = "/run/onyx-kvm/audio-output.sock";
 const AUDIO_OUTPUT_ENABLED_PATH: &str = "/run/onyx-kvm/audio-output-enabled";
+const AUDIO_OUTPUT_ENABLED_FALLBACK: &str = "/run/cleankvm/audio-output-enabled";
+const FEATURES_PATH: &str = "/etc/onyx-kvm/features.json";
+const FEATURES_FALLBACK: &str = "/etc/cleankvm/features.json";
 const PAIRING_CODE_PATH: &str = "/run/onyx-kvm/pairing-code";
 const PAIRING_CODE_FALLBACK: &str = "/run/cleankvm/pairing-code";
 const PENDING_SESSION_TOKEN_PATH: &str = "/run/onyx-kvm/pending-session-token";
 const PENDING_SESSION_TOKEN_FALLBACK: &str = "/run/cleankvm/pending-session-token";
+const PIN_HASH_BOOT: &str = "/boot/onyx-kvm-pin.hash";
+const PIN_HASH_RUN: &str = "/run/onyx-kvm/pin.hash";
+const PIN_HASH_ETC: &str = "/etc/onyx-kvm/pin.hash";
+const PIN_HASH_ETC_FALLBACK: &str = "/etc/cleankvm/pin.hash";
+const FACTORY_RESET_BOOT: &str = "/boot/RESET";
+const FACTORY_RESET_BOOT2: &str = "/boot/FACTORY_RESET";
+const FACTORY_RESET_RUN: &str = "/run/onyx-kvm/reset";
+const FACTORY_RESET_RUN_FALLBACK: &str = "/run/cleankvm/reset";
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct FeatureState {
+    pub video: bool,
+    pub hid: bool,
+    pub speaker: bool,
+    pub microphone: bool,
+}
+
+impl Default for FeatureState {
+    fn default() -> Self {
+        Self {
+            video: true,
+            hid: true,
+            speaker: false,
+            microphone: false,
+        }
+    }
+}
+
+#[must_use]
+pub fn current_feature_state() -> FeatureState {
+    FeatureState {
+        video: Path::new(VIDEO_ENABLED_PATH).exists() || Path::new(VIDEO_ENABLED_FALLBACK).exists(),
+        hid: Path::new(HID_ENABLED_PATH).exists() || Path::new(HID_ENABLED_FALLBACK).exists(),
+        speaker: Path::new(AUDIO_OUTPUT_ENABLED_PATH).exists()
+            || Path::new(AUDIO_OUTPUT_ENABLED_FALLBACK).exists(),
+        microphone: Path::new(AUDIO_CAPTURE_ENABLED_PATH).exists()
+            || Path::new(AUDIO_CAPTURE_ENABLED_FALLBACK).exists(),
+    }
+}
+
+fn set_gate_file(path: &str, fallback: &str, enable: bool) {
+    if enable {
+        if let Some(parent) = Path::new(path).parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        let _ = fs::write(path, b"");
+        if let Some(parent) = Path::new(fallback).parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        let _ = fs::write(fallback, b"");
+    } else {
+        let _ = fs::remove_file(path);
+        let _ = fs::remove_file(fallback);
+    }
+}
+
+pub fn apply_feature_state(state: &FeatureState) {
+    set_gate_file(VIDEO_ENABLED_PATH, VIDEO_ENABLED_FALLBACK, state.video);
+    set_gate_file(HID_ENABLED_PATH, HID_ENABLED_FALLBACK, state.hid);
+    set_gate_file(AUDIO_OUTPUT_ENABLED_PATH, AUDIO_OUTPUT_ENABLED_FALLBACK, state.speaker);
+    set_gate_file(AUDIO_CAPTURE_ENABLED_PATH, AUDIO_CAPTURE_ENABLED_FALLBACK, state.microphone);
+
+    if let Ok(json_bytes) = serde_json::to_vec_pretty(state) {
+        let target = if Path::new("/etc/onyx-kvm").exists() {
+            FEATURES_PATH
+        } else if Path::new("/etc/cleankvm").exists() {
+            FEATURES_FALLBACK
+        } else {
+            FEATURES_PATH
+        };
+        let _ = fs::write(target, json_bytes);
+    }
+}
+
+pub fn init_features_from_disk() {
+    let loaded = (|| -> Option<FeatureState> {
+        if let Ok(content) = fs::read_to_string(FEATURES_PATH) {
+            if let Ok(s) = serde_json::from_str(&content) {
+                return Some(s);
+            }
+        }
+        if let Ok(content) = fs::read_to_string(FEATURES_FALLBACK) {
+            if let Ok(s) = serde_json::from_str(&content) {
+                return Some(s);
+            }
+        }
+        None
+    })();
+
+    let state = loaded.unwrap_or_default();
+    apply_feature_state(&state);
+}
 
 static PAIRING_ATTEMPTS: AtomicUsize = AtomicUsize::new(0);
 const MAX_PAIRING_ATTEMPTS: usize = 3;
@@ -78,10 +178,19 @@ impl HidTransport for BrokerHid {
     }
 }
 
+static LATEST_STREAM_FRAME: RwLock<Option<(VideoSnapshot, Vec<u8>, Instant)>> = RwLock::new(None);
+
 struct BrokerVideo;
 
 impl BrokerVideo {
     fn capture_frame(request: SnapshotRequest) -> io::Result<(VideoSnapshot, Vec<u8>)> {
+        if let Ok(guard) = LATEST_STREAM_FRAME.read() {
+            if let Some((snap, bytes, timestamp)) = guard.as_ref() {
+                if timestamp.elapsed() < Duration::from_secs(2) {
+                    return Ok((*snap, bytes.clone()));
+                }
+            }
+        }
         let mut stream = UnixStream::connect(VIDEO_SOCKET)?;
         let timeout = TIMEOUT.max(Duration::from_millis(u64::from(request.deadline_ms)));
         stream.set_read_timeout(Some(timeout))?;
@@ -126,7 +235,7 @@ impl VideoStreamSession {
         Ok(Self { stream })
     }
 
-    fn capture_next(&mut self, request: SnapshotRequest) -> io::Result<(VideoSnapshot, Vec<u8>)> {
+    fn capture_next(&mut self, request: SnapshotRequest) -> io::Result<Option<(VideoSnapshot, Vec<u8>)>> {
         let payload = request.encode();
         let payload_bytes =
             u32::try_from(payload.len()).map_err(|_| invalid("invalid snapshot request length"))?;
@@ -144,6 +253,9 @@ impl VideoStreamSession {
         if wire_header.operation != Operation::StreamFrame {
             return Err(invalid("unexpected operation in broker response"));
         }
+        if wire_header.payload_bytes == 0 {
+            return Ok(None);
+        }
         let mut snapshot_bytes = [0_u8; SNAPSHOT_RESPONSE_BYTES];
         self.stream.read_exact(&mut snapshot_bytes)?;
         let snapshot = VideoSnapshot::decode(snapshot_bytes)
@@ -152,12 +264,19 @@ impl VideoStreamSession {
             .map_err(|_| invalid("frame byte length overflow"))?;
         let mut frame_bytes = vec![0_u8; expected_frame_bytes];
         self.stream.read_exact(&mut frame_bytes)?;
-        Ok((snapshot, frame_bytes))
+        Ok(Some((snapshot, frame_bytes)))
     }
 }
 
 impl VideoTransport for BrokerVideo {
     fn capture_snapshot(&self, request: SnapshotRequest) -> io::Result<VideoSnapshot> {
+        if let Ok(guard) = LATEST_STREAM_FRAME.read() {
+            if let Some((snap, _, timestamp)) = guard.as_ref() {
+                if timestamp.elapsed() < Duration::from_secs(2) {
+                    return Ok(*snap);
+                }
+            }
+        }
         let mut stream = UnixStream::connect(VIDEO_SOCKET)?;
         let timeout = TIMEOUT.max(Duration::from_millis(u64::from(request.deadline_ms)));
         stream.set_read_timeout(Some(timeout))?;
@@ -234,6 +353,7 @@ struct Config {
     certificate: PathBuf,
     private_key: PathBuf,
     issuer_public_key: PathBuf,
+    issuer_signing_key: Option<PathBuf>,
 }
 
 struct Request {
@@ -259,6 +379,22 @@ impl Config {
         else {
             return Ok(None);
         };
+        let signing_key = env::var_os("ONYX_KVM_ISSUER_SIGNING_KEY_RAW")
+            .or_else(|| env::var_os("CLEANKVM_ISSUER_SIGNING_KEY_RAW"))
+            .map(PathBuf::from)
+            .or_else(|| {
+                let default_path = PathBuf::from("/etc/onyx-kvm/oauth-issuer-signing-key.raw");
+                if default_path.exists() {
+                    Some(default_path)
+                } else {
+                    let fallback = PathBuf::from("/etc/cleankvm/oauth-issuer-signing-key.raw");
+                    if fallback.exists() {
+                        Some(fallback)
+                    } else {
+                        None
+                    }
+                }
+            });
         Ok(Some(Self {
             bind: bind
                 .into_string()
@@ -285,6 +421,7 @@ impl Config {
                 "CLEANKVM_ISSUER_PUBLIC_KEY_RAW",
             )?
             .into(),
+            issuer_signing_key: signing_key,
         }))
     }
 }
@@ -343,8 +480,10 @@ fn tls_config(config: &Config) -> io::Result<Arc<ServerConfig>> {
 }
 
 fn serve(config: &Config) -> io::Result<()> {
+    init_features_from_disk();
     let tls = tls_config(config)?;
     let issuer_key = Arc::new(read_identity(&config.issuer_public_key, Some(32))?);
+    let signing_key = Arc::new(load_signing_key(config.issuer_signing_key.as_deref()));
     let listener = TcpListener::bind(&config.bind)?;
     let initialized = Arc::new(AtomicBool::new(false));
     let config = Arc::new(config.clone());
@@ -355,6 +494,7 @@ fn serve(config: &Config) -> io::Result<()> {
         let tls = Arc::clone(&tls);
         let config = Arc::clone(&config);
         let issuer_key = Arc::clone(&issuer_key);
+        let signing_key = Arc::clone(&signing_key);
         let initialized = Arc::clone(&initialized);
         std::thread::spawn(move || {
             let session = match ServerConnection::new(tls) {
@@ -365,7 +505,13 @@ fn serve(config: &Config) -> io::Result<()> {
                 }
             };
             let mut stream = StreamOwned::new(session, socket);
-            if let Err(error) = handle(&mut stream, &config, &issuer_key, &initialized) {
+            if let Err(error) = handle(
+                &mut stream,
+                &config,
+                &issuer_key,
+                signing_key.as_ref().as_ref(),
+                &initialized,
+            ) {
                 let _ = respond(&mut stream, 400, "text/plain", b"bad request", None);
                 eprintln!("rejected HTTPS request: {error}");
             }
@@ -374,11 +520,233 @@ fn serve(config: &Config) -> io::Result<()> {
     Ok(())
 }
 
-struct PairingPaths<'a> {
-    code: &'a str,
-    code_fallback: &'a str,
-    token: &'a str,
-    token_fallback: &'a str,
+#[derive(Clone, Copy, Debug)]
+pub struct PairingPaths<'a> {
+    pub code: &'a str,
+    pub code_fallback: &'a str,
+    pub token: &'a str,
+    pub token_fallback: &'a str,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct PinPaths<'a> {
+    pub boot: &'a str,
+    pub run: &'a str,
+    pub etc: &'a str,
+    pub etc_fallback: &'a str,
+}
+
+pub const DEFAULT_PIN_PATHS: PinPaths<'static> = PinPaths {
+    boot: PIN_HASH_BOOT,
+    run: PIN_HASH_RUN,
+    etc: PIN_HASH_ETC,
+    etc_fallback: PIN_HASH_ETC_FALLBACK,
+};
+
+pub const DEFAULT_PAIRING_PATHS: PairingPaths<'static> = PairingPaths {
+    code: PAIRING_CODE_PATH,
+    code_fallback: PAIRING_CODE_FALLBACK,
+    token: PENDING_SESSION_TOKEN_PATH,
+    token_fallback: PENDING_SESSION_TOKEN_FALLBACK,
+};
+
+pub fn check_and_process_factory_reset(paths: &PinPaths<'_>) {
+    let mut triggers: Vec<PathBuf> = vec![
+        PathBuf::from(FACTORY_RESET_BOOT),
+        PathBuf::from(FACTORY_RESET_BOOT2),
+        PathBuf::from(FACTORY_RESET_RUN),
+        PathBuf::from(FACTORY_RESET_RUN_FALLBACK),
+    ];
+    if let Some(parent) = Path::new(paths.boot).parent() {
+        triggers.push(parent.join("RESET"));
+        triggers.push(parent.join("FACTORY_RESET"));
+    }
+    if let Some(parent) = Path::new(paths.run).parent() {
+        triggers.push(parent.join("RESET"));
+        triggers.push(parent.join("FACTORY_RESET"));
+    }
+    let mut triggered = false;
+    for p in &triggers {
+        if p.exists() {
+            triggered = true;
+            let _ = fs::remove_file(p);
+        }
+    }
+    if triggered {
+        let _ = fs::remove_file(paths.boot);
+        let _ = fs::remove_file(paths.run);
+        let _ = fs::remove_file(paths.etc);
+        let _ = fs::remove_file(paths.etc_fallback);
+        eprintln!("Factory reset executed: cleared device PIN hash");
+    }
+}
+
+pub fn is_device_configured_with_paths(
+    pin_paths: &PinPaths<'_>,
+    pairing_paths: &PairingPaths<'_>,
+) -> bool {
+    check_and_process_factory_reset(pin_paths);
+    if let Ok(content) = fs::read_to_string(pin_paths.boot) {
+        if !content.trim().is_empty() {
+            return true;
+        }
+    }
+    if let Ok(content) = fs::read_to_string(pin_paths.run) {
+        if !content.trim().is_empty() {
+            return true;
+        }
+    }
+    if let Ok(content) = fs::read_to_string(pin_paths.etc) {
+        if !content.trim().is_empty() {
+            return true;
+        }
+    }
+    if let Ok(content) = fs::read_to_string(pin_paths.etc_fallback) {
+        if !content.trim().is_empty() {
+            return true;
+        }
+    }
+    if let Ok(content) = fs::read_to_string(pairing_paths.code) {
+        if !content.trim().is_empty() {
+            return true;
+        }
+    }
+    if let Ok(content) = fs::read_to_string(pairing_paths.code_fallback) {
+        if !content.trim().is_empty() {
+            return true;
+        }
+    }
+    false
+}
+
+fn to_hex(bytes: &[u8]) -> String {
+    let mut s = String::with_capacity(bytes.len() * 2);
+    for &b in bytes {
+        use std::fmt::Write as _;
+        let _ = write!(s, "{:02x}", b);
+    }
+    s
+}
+
+fn from_hex(s: &str) -> Option<Vec<u8>> {
+    if s.len() % 2 != 0 {
+        return None;
+    }
+    (0..s.len())
+        .step_by(2)
+        .map(|i| u8::from_str_radix(&s[i..i + 2], 16).ok())
+        .collect()
+}
+
+fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut diff = 0u8;
+    for (&x, &y) in a.iter().zip(b.iter()) {
+        diff |= x ^ y;
+    }
+    diff == 0
+}
+
+fn hash_pin(pin: &str, salt: &[u8]) -> [u8; 32] {
+    let mut data = Vec::with_capacity(salt.len() + pin.len());
+    data.extend_from_slice(salt);
+    data.extend_from_slice(pin.as_bytes());
+    let mut h = ring::digest::digest(&ring::digest::SHA256, &data);
+    for _ in 0..5000 {
+        h = ring::digest::digest(&ring::digest::SHA256, h.as_ref());
+    }
+    let mut out = [0u8; 32];
+    out.copy_from_slice(h.as_ref());
+    out
+}
+
+fn verify_pin(pin: &str, stored_hash_str: &str) -> bool {
+    let parts: Vec<&str> = stored_hash_str.trim().split(':').collect();
+    if parts.len() != 3 || parts[0] != "sha256-5000" {
+        return false;
+    }
+    let Some(salt) = from_hex(parts[1]) else {
+        return false;
+    };
+    let Some(expected) = from_hex(parts[2]) else {
+        return false;
+    };
+    if salt.len() != 16 || expected.len() != 32 {
+        return false;
+    }
+    let computed = hash_pin(pin, &salt);
+    constant_time_eq(&computed, &expected)
+}
+
+fn save_pin_hash_paths(pin: &str, paths: &PinPaths<'_>) -> io::Result<()> {
+    let mut salt = [0u8; 16];
+    if let Ok(mut f) = fs::File::open("/dev/urandom") {
+        let _ = f.read_exact(&mut salt);
+    } else {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let h = ring::digest::digest(&ring::digest::SHA256, &now.to_le_bytes());
+        salt.copy_from_slice(&h.as_ref()[..16]);
+    }
+    let hash = hash_pin(pin, &salt);
+    let record = format!("sha256-5000:{}:{}\n", to_hex(&salt), to_hex(&hash));
+
+    if let Some(parent) = Path::new(paths.run).parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    let _ = fs::write(paths.run, record.as_bytes());
+
+    if let Some(parent) = Path::new(paths.boot).parent() {
+        if parent.exists() {
+            let _ = fs::write(paths.boot, record.as_bytes());
+        }
+    }
+    Ok(())
+}
+
+fn load_signing_key(path: Option<&Path>) -> Option<[u8; 32]> {
+    let path = path?;
+    let bytes = fs::read(path).ok()?;
+    if bytes.len() == 32 {
+        let mut key = [0u8; 32];
+        key.copy_from_slice(&bytes);
+        Some(key)
+    } else if bytes.len() >= 48 {
+        let mut key = [0u8; 32];
+        key.copy_from_slice(&bytes[bytes.len() - 32..]);
+        Some(key)
+    } else {
+        None
+    }
+}
+
+fn mint_operator_token(
+    signing_key: &[u8; 32],
+    issuer: &str,
+    resource: &str,
+    ttl_seconds: u64,
+) -> io::Result<String> {
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(io::Error::other)?
+        .as_secs();
+    let iss = issuer.split(',').next().unwrap_or(issuer).trim();
+    let aud = resource.split(',').next().unwrap_or(resource).trim();
+    let scope = "kvm:read kvm:video kvm:audio-capture kvm:audio-output kvm:control kvm:admin";
+    let mutation = true;
+    let exp = now.saturating_add(ttl_seconds);
+    Ok(onyx_kvm_mcp::mint_token(
+        signing_key,
+        iss,
+        aud,
+        scope,
+        mutation,
+        exp,
+    ))
 }
 
 fn wipe_pairing_state_paths(paths: &PairingPaths<'_>) {
@@ -399,11 +767,211 @@ fn read_file_with_fallback(path: &str, fallback: &str) -> Option<String> {
     fs::read_to_string(fallback).ok()
 }
 
-fn handle_pair_with_paths<W: Write>(
+fn read_device_name() -> String {
+    if let Ok(name) = std::env::var("ONYX_KVM_HOSTNAME") {
+        let trimmed = name.trim();
+        if !trimmed.is_empty() {
+            return trimmed.to_string();
+        }
+    }
+    if let Ok(content) = fs::read_to_string("/etc/hostname") {
+        let trimmed = content.trim();
+        if !trimmed.is_empty() {
+            return trimmed.to_string();
+        }
+    }
+    if let Ok(content) = fs::read_to_string("/proc/sys/kernel/hostname") {
+        let trimmed = content.trim();
+        if !trimmed.is_empty() {
+            return trimmed.to_string();
+        }
+    }
+    "onyx-kvm".to_string()
+}
+
+fn handle_setup_status<W: Write>(
+    stream: &mut W,
+    pin_paths: &PinPaths<'_>,
+    pairing_paths: &PairingPaths<'_>,
+) -> io::Result<()> {
+    let configured = is_device_configured_with_paths(pin_paths, pairing_paths);
+    let name = read_device_name();
+    let body = serde_json::json!({
+        "configured": configured,
+        "name": name,
+    });
+    let bytes = serde_json::to_vec(&body)
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+    respond(stream, 200, "application/json", &bytes, None)
+}
+
+fn handle_setup_claim<W: Write>(
+    stream: &mut W,
+    config: &Config,
+    request: &Request,
+    signing_key: Option<&[u8; 32]>,
+    pin_paths: &PinPaths<'_>,
+    pairing_paths: &PairingPaths<'_>,
+) -> io::Result<()> {
+    if validate_origin(request.origin.as_deref(), &config.origin).is_err() {
+        return respond(
+            stream,
+            403,
+            "application/json",
+            b"{\"error\":\"forbidden\"}",
+            None,
+        );
+    }
+
+    if is_device_configured_with_paths(pin_paths, pairing_paths) {
+        return respond(
+            stream,
+            409,
+            "application/json",
+            b"{\"error\":\"device already configured\"}",
+            None,
+        );
+    }
+
+    let value: serde_json::Value = match serde_json::from_slice(&request.body) {
+        Ok(v) => v,
+        Err(_) => {
+            return respond(
+                stream,
+                400,
+                "application/json",
+                b"{\"error\":\"invalid JSON payload\"}",
+                None,
+            );
+        }
+    };
+    let pin_str = value
+        .get("pin")
+        .or_else(|| value.get("code"))
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim);
+
+    let Some(pin) = pin_str else {
+        return respond(
+            stream,
+            400,
+            "application/json",
+            b"{\"error\":\"missing 'pin' field in payload\"}",
+            None,
+        );
+    };
+
+    if pin.len() < 4 || pin.len() > 8 || !pin.chars().all(|c| c.is_ascii_digit()) {
+        return respond(
+            stream,
+            400,
+            "application/json",
+            b"{\"error\":\"PIN must be between 4 and 8 digits\"}",
+            None,
+        );
+    }
+
+    save_pin_hash_paths(pin, pin_paths)?;
+
+    let Some(signing_key) = signing_key else {
+        return respond(
+            stream,
+            500,
+            "application/json",
+            b"{\"error\":\"server missing token signing key\"}",
+            None,
+        );
+    };
+
+    let token = mint_operator_token(signing_key, &config.issuer, &config.resource, 14400)?;
+    let response_body = serde_json::json!({
+        "status": "configured",
+        "token": token,
+        "tokenType": "Bearer",
+        "expiresIn": 14400,
+    });
+    let body_bytes = serde_json::to_vec(&response_body)
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+    respond(stream, 200, "application/json", &body_bytes, None)
+}
+
+fn handle_update_pin<W: Write>(
+    stream: &mut W,
+    config: &Config,
+    issuer_key: &[u8],
+    request: &Request,
+    pin_paths: &PinPaths<'_>,
+) -> io::Result<()> {
+    let validator = Ed25519JwtValidator::new(&config.issuer, issuer_key);
+    let claims = match authenticate_http_request(
+        request.origin.as_deref(),
+        request.authorization.as_deref(),
+        &config.origin,
+        &validator,
+    ) {
+        Ok(claims) => claims,
+        Err(HttpRequestAuthError::Boundary(HttpAuthError::InvalidOrigin)) => {
+            return respond(stream, 403, "text/plain", b"forbidden", None);
+        }
+        Err(_) => return unauthorized(stream),
+    };
+
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(io::Error::other)?
+        .as_secs();
+    let valid_aud = config
+        .resource
+        .split(',')
+        .any(|expected| expected.trim() == claims.audience);
+    if !valid_aud || claims.expires_at_unix_seconds < now || !claims.mutation_enabled {
+        return unauthorized(stream);
+    }
+
+    let value: serde_json::Value = match serde_json::from_slice(&request.body) {
+        Ok(v) => v,
+        Err(_) => {
+            return respond(
+                stream,
+                400,
+                "application/json",
+                b"{\"error\":\"invalid JSON payload\"}",
+                None,
+            );
+        }
+    };
+    let Some(pin) = value.get("pin").and_then(serde_json::Value::as_str).map(str::trim) else {
+        return respond(
+            stream,
+            400,
+            "application/json",
+            b"{\"error\":\"missing 'pin' field in payload\"}",
+            None,
+        );
+    };
+    if pin.len() < 4 || pin.len() > 8 || !pin.chars().all(|c| c.is_ascii_digit()) {
+        return respond(
+            stream,
+            400,
+            "application/json",
+            b"{\"error\":\"PIN must be between 4 and 8 digits\"}",
+            None,
+        );
+    }
+
+    save_pin_hash_paths(pin, pin_paths)?;
+    respond(stream, 200, "application/json", b"{\"status\":\"updated\"}", None)
+}
+
+fn handle_pair_full<W: Write>(
     stream: &mut W,
     config_origin: &str,
+    issuer: Option<&str>,
+    resource: Option<&str>,
     request: &Request,
-    paths: &PairingPaths<'_>,
+    pairing_paths: &PairingPaths<'_>,
+    pin_paths: &PinPaths<'_>,
+    signing_key: Option<&[u8; 32]>,
     attempts_counter: &AtomicUsize,
 ) -> io::Result<()> {
     if validate_origin(request.origin.as_deref(), config_origin).is_err() {
@@ -428,7 +996,13 @@ fn handle_pair_with_paths<W: Write>(
             );
         }
     };
-    let Some(code_val) = value.get("code").and_then(serde_json::Value::as_str) else {
+    let code_str = value
+        .get("code")
+        .or_else(|| value.get("pin"))
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim);
+
+    let Some(code_val) = code_str else {
         return respond(
             stream,
             400,
@@ -438,7 +1012,70 @@ fn handle_pair_with_paths<W: Write>(
         );
     };
 
-    let Some(expected_code) = read_file_with_fallback(paths.code, paths.code_fallback) else {
+    // 1. Check UART-staged pairing ceremony first
+    if let Some(expected_code) = read_file_with_fallback(pairing_paths.code, pairing_paths.code_fallback) {
+        let expected_trimmed = expected_code.trim();
+        let mut diff = expected_trimmed.len() ^ code_val.len();
+        for (a, b) in expected_trimmed.bytes().zip(code_val.bytes()) {
+            diff |= (a ^ b) as usize;
+        }
+
+        if diff != 0 {
+            let attempts = attempts_counter.fetch_add(1, Ordering::SeqCst) + 1;
+            if attempts >= MAX_PAIRING_ATTEMPTS {
+                wipe_pairing_state_paths(pairing_paths);
+                attempts_counter.store(0, Ordering::SeqCst);
+                return respond(
+                    stream,
+                    403,
+                    "application/json",
+                    b"{\"error\":\"maximum pairing attempts exceeded; pairing code invalidated\"}",
+                    None,
+                );
+            }
+            return respond(
+                stream,
+                401,
+                "application/json",
+                b"{\"error\":\"invalid pairing code\"}",
+                None,
+            );
+        }
+
+        attempts_counter.store(0, Ordering::SeqCst);
+        let token = if let Some(tok) = read_file_with_fallback(pairing_paths.token, pairing_paths.token_fallback) {
+            tok
+        } else if let (Some(sk), Some(iss), Some(res)) = (signing_key, issuer, resource) {
+            mint_operator_token(sk, iss, res, 14400)?
+        } else {
+            wipe_pairing_state_paths(pairing_paths);
+            return respond(
+                stream,
+                500,
+                "application/json",
+                b"{\"error\":\"missing pending session token\"}",
+                None,
+            );
+        };
+
+        wipe_pairing_state_paths(pairing_paths);
+
+        let response_body = serde_json::json!({
+            "token": token.trim(),
+            "tokenType": "Bearer",
+            "expiresIn": 14400,
+        });
+        let body_bytes = serde_json::to_vec(&response_body)
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+
+        return respond(stream, 200, "application/json", &body_bytes, None);
+    }
+
+    // 2. Check persistent PIN hash
+    let stored_hash = read_file_with_fallback(pin_paths.boot, pin_paths.run)
+        .or_else(|| read_file_with_fallback(pin_paths.etc, pin_paths.etc_fallback));
+
+    let Some(stored_hash) = stored_hash else {
         return respond(
             stream,
             404,
@@ -448,26 +1085,10 @@ fn handle_pair_with_paths<W: Write>(
         );
     };
 
-    let expected_trimmed = expected_code.trim();
-    let code_trimmed = code_val.trim();
-
-    let mut diff = expected_trimmed.len() ^ code_trimmed.len();
-    for (a, b) in expected_trimmed.bytes().zip(code_trimmed.bytes()) {
-        diff |= (a ^ b) as usize;
-    }
-
-    if diff != 0 {
+    if !verify_pin(code_val, &stored_hash) {
         let attempts = attempts_counter.fetch_add(1, Ordering::SeqCst) + 1;
-        if attempts >= MAX_PAIRING_ATTEMPTS {
-            wipe_pairing_state_paths(paths);
-            attempts_counter.store(0, Ordering::SeqCst);
-            return respond(
-                stream,
-                403,
-                "application/json",
-                b"{\"error\":\"maximum pairing attempts exceeded; pairing code invalidated\"}",
-                None,
-            );
+        if attempts >= 10 {
+            std::thread::sleep(Duration::from_millis(500));
         }
         return respond(
             stream,
@@ -479,46 +1100,63 @@ fn handle_pair_with_paths<W: Write>(
     }
 
     attempts_counter.store(0, Ordering::SeqCst);
-    let Some(token) = read_file_with_fallback(paths.token, paths.token_fallback) else {
-        wipe_pairing_state_paths(paths);
+    let (Some(sk), Some(iss), Some(res)) = (signing_key, issuer, resource) else {
         return respond(
             stream,
             500,
             "application/json",
-            b"{\"error\":\"missing pending session token\"}",
+            b"{\"error\":\"server missing token signing key\"}",
             None,
         );
     };
 
-    wipe_pairing_state_paths(paths);
-
+    let token = mint_operator_token(sk, iss, res, 14400)?;
     let response_body = serde_json::json!({
-        "token": token.trim(),
+        "token": token,
         "tokenType": "Bearer",
         "expiresIn": 14400,
     });
     let body_bytes = serde_json::to_vec(&response_body)
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-
     respond(stream, 200, "application/json", &body_bytes, None)
+}
+
+#[cfg(test)]
+fn handle_pair_with_paths<W: Write>(
+    stream: &mut W,
+    config_origin: &str,
+    request: &Request,
+    paths: &PairingPaths<'_>,
+    attempts_counter: &AtomicUsize,
+) -> io::Result<()> {
+    handle_pair_full(
+        stream,
+        config_origin,
+        None,
+        None,
+        request,
+        paths,
+        &DEFAULT_PIN_PATHS,
+        None,
+        attempts_counter,
+    )
 }
 
 fn handle_pair<W: Write>(
     stream: &mut W,
     config: &Config,
+    signing_key: Option<&[u8; 32]>,
     request: &Request,
 ) -> io::Result<()> {
-    let paths = PairingPaths {
-        code: PAIRING_CODE_PATH,
-        code_fallback: PAIRING_CODE_FALLBACK,
-        token: PENDING_SESSION_TOKEN_PATH,
-        token_fallback: PENDING_SESSION_TOKEN_FALLBACK,
-    };
-    handle_pair_with_paths(
+    handle_pair_full(
         stream,
         &config.origin,
+        Some(&config.issuer),
+        Some(&config.resource),
         request,
-        &paths,
+        &DEFAULT_PAIRING_PATHS,
+        &DEFAULT_PIN_PATHS,
+        signing_key,
         &PAIRING_ATTEMPTS,
     )
 }
@@ -527,6 +1165,7 @@ fn handle(
     stream: &mut StreamOwned<ServerConnection, TcpStream>,
     config: &Config,
     issuer_key: &[u8],
+    signing_key: Option<&[u8; 32]>,
     initialized: &AtomicBool,
 ) -> io::Result<()> {
     let request = read_request(stream)?;
@@ -534,6 +1173,22 @@ fn handle(
         let body =
             protected_resource_metadata(&config.resource, &config.authorization_server).to_string();
         return respond(stream, 200, "application/json", body.as_bytes(), None);
+    }
+    if request.method == "GET" && request.path == "/setup/status" {
+        return handle_setup_status(stream, &DEFAULT_PIN_PATHS, &DEFAULT_PAIRING_PATHS);
+    }
+    if request.method == "POST" && request.path == "/setup/claim" {
+        return handle_setup_claim(
+            stream,
+            config,
+            &request,
+            signing_key,
+            &DEFAULT_PIN_PATHS,
+            &DEFAULT_PAIRING_PATHS,
+        );
+    }
+    if request.method == "POST" && request.path == "/setup/pin" {
+        return handle_update_pin(stream, config, issuer_key, &request, &DEFAULT_PIN_PATHS);
     }
     if request.method == "GET"
         && (request.path == "/video/frame" || request.path.starts_with("/video/frame?"))
@@ -545,16 +1200,33 @@ fn handle(
     {
         return handle_video_stream(stream, config, issuer_key, &request);
     }
+    if request.method == "GET"
+        && (request.path == "/audio/stream" || request.path.starts_with("/audio/stream?"))
+    {
+        return handle_audio_stream(stream, config, issuer_key, &request);
+    }
+    if request.method == "GET" && request.path == "/features" {
+        return handle_get_features(stream, config, issuer_key, &request);
+    }
+    if request.method == "POST" && request.path == "/features" {
+        return handle_post_features(stream, config, issuer_key, &request);
+    }
+    if request.method == "POST" && (request.path == "/system/reboot" || request.path == "/reboot") {
+        return handle_reboot(stream, config, issuer_key, &request);
+    }
     if request.method == "GET" {
         return match request.path.as_str() {
             "/" => respond(stream, 200, "text/html; charset=utf-8", INDEX_HTML, None),
             "/app.css" => respond(stream, 200, "text/css; charset=utf-8", APP_CSS, None),
             "/app.js" => respond(stream, 200, "text/javascript; charset=utf-8", APP_JS, None),
+            "/favicon.ico" | "/favicon.svg" => {
+                respond(stream, 200, "image/svg+xml", FAVICON_SVG, None)
+            }
             _ => respond(stream, 404, "text/plain", b"not found", None),
         };
     }
     if request.method == "POST" && (request.path == "/pair" || request.path == "/enroll") {
-        return handle_pair(stream, config, &request);
+        return handle_pair(stream, config, signing_key, &request);
     }
     if request.method != "POST" || request.path != "/mcp" {
         return respond(stream, 404, "text/plain", b"not found", None);
@@ -598,18 +1270,26 @@ fn handle(
     let audio_capture = BrokerAudioCapture;
     let audio_output = BrokerAudioOutput;
     let is_init = initialized.load(Ordering::Relaxed);
+    let hid_enabled =
+        Path::new(HID_ENABLED_PATH).exists() || Path::new(HID_ENABLED_FALLBACK).exists();
     let mut server = if method == Some("initialize") || !is_init {
         Server::remote(&claims.audience, now, grant)
-    } else {
+    } else if hid_enabled {
         Server::remote_ready_with_hid(&claims.audience, now, grant, &hid)
+    } else {
+        Server::remote_ready(&claims.audience, now, grant)
     };
-    if Path::new(VIDEO_ENABLED_PATH).exists() {
+    if Path::new(VIDEO_ENABLED_PATH).exists() || Path::new(VIDEO_ENABLED_FALLBACK).exists() {
         server = server.with_video(&video);
     }
-    if Path::new(AUDIO_CAPTURE_ENABLED_PATH).exists() {
+    if Path::new(AUDIO_CAPTURE_ENABLED_PATH).exists()
+        || Path::new(AUDIO_CAPTURE_ENABLED_FALLBACK).exists()
+    {
         server = server.with_audio_capture(&audio_capture);
     }
-    if Path::new(AUDIO_OUTPUT_ENABLED_PATH).exists() {
+    if Path::new(AUDIO_OUTPUT_ENABLED_PATH).exists()
+        || Path::new(AUDIO_OUTPUT_ENABLED_FALLBACK).exists()
+    {
         server = server.with_audio_output(&audio_output);
     }
     let Some(body) = server.handle_line(&request.body) else {
@@ -624,7 +1304,9 @@ fn handle_video_frame(
     issuer_key: &[u8],
     request: &Request,
 ) -> io::Result<()> {
-    if !Path::new(VIDEO_ENABLED_PATH).exists() {
+    if !Path::new(VIDEO_ENABLED_PATH).exists()
+        && !Path::new(VIDEO_ENABLED_FALLBACK).exists()
+    {
         return respond(stream, 403, "text/plain", b"video disabled", None);
     }
     let validator = Ed25519JwtValidator::new(&config.issuer, issuer_key);
@@ -660,8 +1342,10 @@ fn handle_video_frame(
         } else {
             (1920, 1080)
         };
-    let format = if request.path.contains("format=yuv420p") {
-        SnapshotFormat::Yuv420p
+    let format = if request.path.contains("format=h264") {
+        SnapshotFormat::H264
+    } else if request.path.contains("format=yuv420p") || request.path.contains("format=yuv422p") {
+        SnapshotFormat::Yuv422p
     } else {
         SnapshotFormat::Yuv422p
     };
@@ -686,7 +1370,9 @@ fn handle_video_stream(
     issuer_key: &[u8],
     request: &Request,
 ) -> io::Result<()> {
-    if !Path::new(VIDEO_ENABLED_PATH).exists() {
+    if !Path::new(VIDEO_ENABLED_PATH).exists()
+        && !Path::new(VIDEO_ENABLED_FALLBACK).exists()
+    {
         return respond(stream, 403, "text/plain", b"video disabled", None);
     }
     let validator = Ed25519JwtValidator::new(&config.issuer, issuer_key);
@@ -722,12 +1408,14 @@ fn handle_video_stream(
         } else {
             (1920, 1080)
         };
-    let format = if request.path.contains("format=tile_delta")
+    let format = if request.path.contains("format=h264") {
+        SnapshotFormat::H264
+    } else if request.path.contains("format=tile_delta")
         || request.path.contains("mode=delta")
     {
         SnapshotFormat::TileDeltaYuv422
-    } else if request.path.contains("format=yuv420p") {
-        SnapshotFormat::Yuv420p
+    } else if request.path.contains("format=yuv420p") || request.path.contains("format=yuv422p") {
+        SnapshotFormat::Yuv422p
     } else {
         SnapshotFormat::Yuv422p
     };
@@ -766,21 +1454,26 @@ fn stream_frames_loop(
             .as_millis(),
     )
     .map_err(io::Error::other)?;
-    let mut lease = StreamSessionLease::new(1, now_ms, DEFAULT_STREAM_LEASE_MS)
+    let mut lease = StreamSessionLease::new(1, now_ms, MAX_STREAM_LEASE_MS)
         .map_err(|_| invalid("invalid stream lease"))?;
     let mut ring = BoundedFrameRing::new(2);
     let mut sequence = 0_u32;
     let timeout = TIMEOUT.max(Duration::from_millis(u64::from(snapshot_request.deadline_ms)));
-    let mut broker_session = match VideoStreamSession::connect(timeout) {
-        Ok(s) => s,
-        Err(err) => {
-            eprintln!("failed to connect to video broker: {err}");
-            return Ok(());
+    let mut broker_session = VideoStreamSession::connect(timeout).ok();
+    struct StreamFrameGuard;
+    impl Drop for StreamFrameGuard {
+        fn drop(&mut self) {
+            if let Ok(mut lock) = LATEST_STREAM_FRAME.write() {
+                *lock = None;
+            }
         }
-    };
+    }
+    let _frame_guard = StreamFrameGuard;
 
     loop {
-        if !Path::new(VIDEO_ENABLED_PATH).exists() {
+        if !Path::new(VIDEO_ENABLED_PATH).exists()
+            && !Path::new(VIDEO_ENABLED_FALLBACK).exists()
+        {
             break;
         }
         let current_now = SystemTime::now()
@@ -792,15 +1485,57 @@ fn stream_frames_loop(
             break;
         }
 
-        let (snapshot, frame_bytes) = match broker_session.capture_next(snapshot_request) {
-            Ok(res) => res,
-            Err(err) => {
-                eprintln!("failed to capture video frame in stream: {err}");
-                break;
+        if broker_session.is_none() {
+            broker_session = VideoStreamSession::connect(timeout).ok();
+        }
+
+        let maybe_frame = if let Some(ref mut session) = broker_session {
+            match session.capture_next(snapshot_request) {
+                Ok(frame) => frame,
+                Err(err) => {
+                    eprintln!("video broker session error: {err}");
+                    broker_session = None;
+                    None
+                }
             }
+        } else {
+            None
         };
 
+        if let Some((snapshot, frame_bytes)) = maybe_frame {
+            if let Ok(mut lock) = LATEST_STREAM_FRAME.write() {
+                *lock = Some((snapshot, frame_bytes.clone(), Instant::now()));
+            }
+
         let flags = match snapshot.format {
+            SnapshotFormat::H264 => {
+                let mut is_key = false;
+                let payload = &frame_bytes;
+                if payload.len() >= 4 {
+                    for i in 0..payload.len() - 3 {
+                        if payload[i] == 0 && payload[i + 1] == 0 {
+                            if payload[i + 2] == 1 {
+                                let nal_type = payload[i + 3] & 0x1f;
+                                if nal_type == 5 || nal_type == 7 {
+                                    is_key = true;
+                                    break;
+                                }
+                            } else if i + 4 < payload.len() && payload[i + 2] == 0 && payload[i + 3] == 1 {
+                                let nal_type = payload[i + 4] & 0x1f;
+                                if nal_type == 5 || nal_type == 7 {
+                                    is_key = true;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+                if is_key {
+                    STREAM_FLAG_KEYFRAME
+                } else {
+                    STREAM_FLAG_DELTA
+                }
+            }
             SnapshotFormat::TileDeltaYuv422 => {
                 let full_frame_bytes =
                     (snapshot.width as u32).saturating_mul(snapshot.height as u32).saturating_mul(2);
@@ -848,13 +1583,317 @@ fn stream_frames_loop(
             }
             to_send.zeroize();
         }
+    } else {
+            // Standby / no HDMI signal / target asleep
+            let Ok(header) = StreamFrameHeader::with_flags(
+                sequence,
+                current_ms,
+                snapshot_request.width,
+                snapshot_request.height,
+                snapshot_request.format,
+                STREAM_FLAG_STANDBY,
+                0,
+                [0; 32],
+            ) else {
+                break;
+            };
+
+            let Ok(frame) = StreamFrame::new(header, Vec::new()) else {
+                break;
+            };
+
+            ring.push(frame);
+
+            if let Some(mut to_send) = ring.pop() {
+                let encoded_hdr = to_send.header.encode();
+                if stream.write_all(&encoded_hdr).is_err() {
+                    to_send.zeroize();
+                    break;
+                }
+                if stream.flush().is_err() {
+                    to_send.zeroize();
+                    break;
+                }
+                to_send.zeroize();
+            }
+
+            // Pace standby heartbeats so we don't spin while target is sleeping
+            std::thread::sleep(Duration::from_millis(500));
+        }
 
         sequence = sequence.wrapping_add(1);
-        let _ = lease.renew(current_ms, DEFAULT_STREAM_LEASE_MS);
+        let renew_ms = u64::try_from(
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map_err(io::Error::other)?
+                .as_millis(),
+        )
+        .map_err(io::Error::other)?;
+        let _ = lease.renew(renew_ms, MAX_STREAM_LEASE_MS);
     }
 
     ring.clear();
     Ok(())
+}
+
+fn handle_audio_stream(
+    stream: &mut StreamOwned<ServerConnection, TcpStream>,
+    config: &Config,
+    issuer_key: &[u8],
+    request: &Request,
+) -> io::Result<()> {
+    if !Path::new(AUDIO_CAPTURE_ENABLED_PATH).exists()
+        && !Path::new(AUDIO_CAPTURE_ENABLED_FALLBACK).exists()
+    {
+        return respond(stream, 403, "text/plain", b"microphone disabled", None);
+    }
+    let validator = Ed25519JwtValidator::new(&config.issuer, issuer_key);
+    let claims = match authenticate_http_request(
+        request.origin.as_deref(),
+        request.authorization.as_deref(),
+        &config.origin,
+        &validator,
+    ) {
+        Ok(claims) => claims,
+        Err(HttpRequestAuthError::Boundary(HttpAuthError::InvalidOrigin)) => {
+            return respond(stream, 403, "text/plain", b"forbidden", None);
+        }
+        Err(_) => return unauthorized(stream),
+    };
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(io::Error::other)?
+        .as_secs();
+    let valid_aud = config
+        .resource
+        .split(',')
+        .any(|expected| expected.trim() == claims.audience);
+    if !valid_aud || claims.expires_at_unix_seconds < now {
+        return unauthorized(stream);
+    }
+    if !claims.scopes.contains(&Scope::AudioCapture) && !claims.scopes.contains(&Scope::Read) {
+        return unauthorized(stream);
+    }
+
+    let mut broker_stream = match UnixStream::connect(AUDIO_CAPTURE_SOCKET) {
+        Ok(s) => s,
+        Err(err) => {
+            eprintln!("failed to connect to audio capture broker: {err}");
+            return respond(stream, 500, "text/plain", b"audio broker unavailable", None);
+        }
+    };
+    broker_stream.set_read_timeout(Some(Duration::from_secs(5)))?;
+    broker_stream.set_write_timeout(Some(Duration::from_secs(5)))?;
+
+    let shape = PcmShape::new(
+        onyx_kvm_media_protocol::PcmFormat::Signed16LittleEndian,
+        16_000,
+        1,
+        1_000,
+    )
+    .map_err(|_| invalid("invalid pcm shape"))?;
+    let header = WireHeader {
+        operation: Operation::StreamAudioPcm,
+        payload_bytes: u32::try_from(AUDIO_REQUEST_BYTES)
+            .map_err(|_| invalid("invalid audio request length"))?,
+    };
+    broker_stream.write_all(&header.encode())?;
+    broker_stream.write_all(&shape.encode())?;
+    broker_stream.flush()?;
+
+    let mut ready = [0_u8; 1];
+    broker_stream.read_exact(&mut ready)?;
+    if ready[0] != 0 {
+        return respond(stream, 500, "text/plain", b"audio probe not ready", None);
+    }
+
+    write!(
+        stream,
+        concat!(
+            "HTTP/1.1 200 OK\r\n",
+            "Content-Type: audio/l16; rate=16000; channels=1\r\n",
+            "Cache-Control: no-store, no-cache, must-revalidate\r\n",
+            "Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'\r\n",
+            "Permissions-Policy: camera=(), geolocation=(), microphone=()\r\n",
+            "Referrer-Policy: no-referrer\r\n",
+            "X-Content-Type-Options: nosniff\r\n",
+            "X-Frame-Options: DENY\r\n",
+            "Connection: close\r\n\r\n"
+        )
+    )?;
+    stream.flush()?;
+
+    let mut chunk = vec![0_u8; 3200];
+    loop {
+        if !Path::new(AUDIO_CAPTURE_ENABLED_PATH).exists()
+            && !Path::new(AUDIO_CAPTURE_ENABLED_FALLBACK).exists()
+        {
+            break;
+        }
+        let current_now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(io::Error::other)?
+            .as_secs();
+        if current_now >= claims.expires_at_unix_seconds {
+            break;
+        }
+        if broker_stream.read_exact(&mut chunk).is_err() {
+            break;
+        }
+        if stream.write_all(&chunk).is_err() {
+            break;
+        }
+        if stream.flush().is_err() {
+            break;
+        }
+    }
+    chunk.fill(0);
+    Ok(())
+}
+
+fn handle_get_features(
+    stream: &mut StreamOwned<ServerConnection, TcpStream>,
+    config: &Config,
+    issuer_key: &[u8],
+    request: &Request,
+) -> io::Result<()> {
+    let validator = Ed25519JwtValidator::new(&config.issuer, issuer_key);
+    let claims = match authenticate_http_request(
+        request.origin.as_deref(),
+        request.authorization.as_deref(),
+        &config.origin,
+        &validator,
+    ) {
+        Ok(claims) => claims,
+        Err(HttpRequestAuthError::Boundary(HttpAuthError::InvalidOrigin)) => {
+            return respond(stream, 403, "text/plain", b"forbidden", None);
+        }
+        Err(_) => return unauthorized(stream),
+    };
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(io::Error::other)?
+        .as_secs();
+    let valid_aud = config
+        .resource
+        .split(',')
+        .any(|expected| expected.trim() == claims.audience);
+    if !valid_aud || claims.expires_at_unix_seconds < now {
+        return unauthorized(stream);
+    }
+
+    let state = current_feature_state();
+    let body = serde_json::to_vec(&state).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+    respond(stream, 200, "application/json", &body, None)
+}
+
+fn handle_post_features(
+    stream: &mut StreamOwned<ServerConnection, TcpStream>,
+    config: &Config,
+    issuer_key: &[u8],
+    request: &Request,
+) -> io::Result<()> {
+    let validator = Ed25519JwtValidator::new(&config.issuer, issuer_key);
+    let claims = match authenticate_http_request(
+        request.origin.as_deref(),
+        request.authorization.as_deref(),
+        &config.origin,
+        &validator,
+    ) {
+        Ok(claims) => claims,
+        Err(HttpRequestAuthError::Boundary(HttpAuthError::InvalidOrigin)) => {
+            return respond(stream, 403, "text/plain", b"forbidden", None);
+        }
+        Err(_) => return unauthorized(stream),
+    };
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(io::Error::other)?
+        .as_secs();
+    let valid_aud = config
+        .resource
+        .split(',')
+        .any(|expected| expected.trim() == claims.audience);
+    if !valid_aud || claims.expires_at_unix_seconds < now {
+        return unauthorized(stream);
+    }
+    if !claims.mutation_enabled {
+        return respond(
+            stream,
+            403,
+            "application/json",
+            b"{\"error\":\"mutation permission required\"}",
+            None,
+        );
+    }
+
+    let Ok(state) = serde_json::from_slice::<FeatureState>(&request.body) else {
+        return respond(
+            stream,
+            400,
+            "application/json",
+            b"{\"error\":\"invalid feature state payload\"}",
+            None,
+        );
+    };
+
+    apply_feature_state(&state);
+    let updated = current_feature_state();
+    let body = serde_json::to_vec(&updated).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+    respond(stream, 200, "application/json", &body, None)
+}
+
+fn handle_reboot<W: Write>(
+    stream: &mut W,
+    config: &Config,
+    issuer_key: &[u8],
+    request: &Request,
+) -> io::Result<()> {
+    let validator = Ed25519JwtValidator::new(&config.issuer, issuer_key);
+    let claims = match authenticate_http_request(
+        request.origin.as_deref(),
+        request.authorization.as_deref(),
+        &config.origin,
+        &validator,
+    ) {
+        Ok(claims) => claims,
+        Err(HttpRequestAuthError::Boundary(HttpAuthError::InvalidOrigin)) => {
+            return respond(stream, 403, "text/plain", b"forbidden", None);
+        }
+        Err(_) => return unauthorized(stream),
+    };
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(io::Error::other)?
+        .as_secs();
+    let valid_aud = config
+        .resource
+        .split(',')
+        .any(|expected| expected.trim() == claims.audience);
+    if !valid_aud || claims.expires_at_unix_seconds < now {
+        return unauthorized(stream);
+    }
+    if !claims.mutation_enabled {
+        return respond(
+            stream,
+            403,
+            "application/json",
+            b"{\"error\":\"mutation permission required\"}",
+            None,
+        );
+    }
+
+    let _ = fs::write("/run/onyx-kvm/reboot-trigger", b"reboot\n");
+    let _ = fs::write("/run/cleankvm/reboot-trigger", b"reboot\n");
+    let _ = std::process::Command::new("/sbin/reboot").spawn();
+
+    respond(
+        stream,
+        200,
+        "application/json",
+        b"{\"status\":\"rebooting\",\"message\":\"Device reboot initiated\"}",
+        None,
+    )
 }
 
 fn unauthorized<W: Write>(stream: &mut W) -> io::Result<()> {
@@ -994,6 +2033,7 @@ fn respond<W: Write>(
         401 => "Unauthorized",
         403 => "Forbidden",
         404 => "Not Found",
+        409 => "Conflict",
         _ => "Error",
     };
     write!(
@@ -1025,7 +2065,7 @@ fn respond<W: Write>(
 
 #[cfg(test)]
 mod tests {
-    use super::{MAX_HEADER_BYTES, read_request, respond};
+    use super::{FAVICON_SVG, MAX_HEADER_BYTES, read_request, respond};
     use std::io::Cursor;
 
     #[test]
@@ -1290,5 +2330,375 @@ mod tests {
             check_flags(1920, 1080, 10000),
             onyx_kvm_media_protocol::STREAM_FLAG_DELTA
         );
+    }
+
+    #[test]
+    fn stream_standby_frame_header_encoding_and_flags() {
+        use onyx_kvm_media_protocol::{
+            SnapshotFormat, StreamFrame, StreamFrameHeader, STREAM_FLAG_STANDBY,
+        };
+        let header = StreamFrameHeader::with_flags(
+            42,
+            1_000_000,
+            1920,
+            1080,
+            SnapshotFormat::H264,
+            STREAM_FLAG_STANDBY,
+            0,
+            [0_u8; 32],
+        )
+        .expect("standby header creation failed");
+        assert_eq!(header.flags, STREAM_FLAG_STANDBY);
+        assert_eq!(header.payload_bytes, 0);
+
+        let encoded = header.encode();
+        assert_eq!(encoded.len(), 64);
+        let decoded = StreamFrameHeader::decode(encoded).expect("decode failed");
+        assert_eq!(decoded.flags, STREAM_FLAG_STANDBY);
+        assert_eq!(decoded.payload_bytes, 0);
+        assert_eq!(decoded.sequence, 42);
+
+        let frame = StreamFrame::new(header, Vec::new()).expect("standby frame creation failed");
+        assert_eq!(frame.payload.len(), 0);
+    }
+
+    #[test]
+    fn feature_state_defaults_and_serde() {
+        let default_state = super::FeatureState::default();
+        assert!(default_state.video);
+        assert!(default_state.hid);
+        assert!(!default_state.speaker);
+        assert!(!default_state.microphone);
+
+        let json = serde_json::to_string(&default_state).unwrap();
+        let parsed: super::FeatureState = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed, default_state);
+    }
+
+    #[test]
+    fn feature_state_gate_synchronization() {
+        let temp_dir =
+            std::env::temp_dir().join(format!("onyx-features-test-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&temp_dir);
+        let vid_path = temp_dir.join("video-enabled");
+        let hid_path = temp_dir.join("hid-enabled");
+
+        super::set_gate_file(vid_path.to_str().unwrap(), "/nonexistent/fallback", true);
+        assert!(vid_path.exists());
+
+        super::set_gate_file(vid_path.to_str().unwrap(), "/nonexistent/fallback", false);
+        assert!(!vid_path.exists());
+
+        super::set_gate_file(hid_path.to_str().unwrap(), "/nonexistent/fallback", true);
+        assert!(hid_path.exists());
+        super::set_gate_file(hid_path.to_str().unwrap(), "/nonexistent/fallback", false);
+        assert!(!hid_path.exists());
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn favicon_endpoint_returns_svg() {
+        let mut output = Vec::new();
+        respond(&mut output, 200, "image/svg+xml", FAVICON_SVG, None)
+            .unwrap_or_else(|error| panic!("response failed: {error}"));
+        let text = String::from_utf8_lossy(&output);
+        assert!(text.contains("HTTP/1.1 200 OK\r\n"));
+        assert!(text.contains("Content-Type: image/svg+xml\r\n"));
+        assert!(text.contains("Onyx zen-O mark"));
+    }
+
+    #[test]
+    fn tofu_setup_lifecycle_and_pin_authentication() {
+        let temp_dir =
+            std::env::temp_dir().join(format!("onyx-tofu-test-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&temp_dir);
+        let boot_pin = temp_dir.join("boot-pin.hash");
+        let run_pin = temp_dir.join("run-pin.hash");
+        let etc_pin = temp_dir.join("etc-pin.hash");
+        let pin_paths = super::PinPaths {
+            boot: boot_pin.to_str().unwrap(),
+            run: run_pin.to_str().unwrap(),
+            etc: etc_pin.to_str().unwrap(),
+            etc_fallback: "/nonexistent/etc",
+        };
+        let pairing_paths = super::PairingPaths {
+            code: "/nonexistent/code",
+            code_fallback: "/nonexistent/code2",
+            token: "/nonexistent/token",
+            token_fallback: "/nonexistent/token2",
+        };
+
+        // 1. Initial state is unconfigured
+        let mut status_out = Vec::new();
+        super::handle_setup_status(&mut status_out, &pin_paths, &pairing_paths).unwrap();
+        let status_str = String::from_utf8(status_out).unwrap();
+        assert!(status_str.contains("\"configured\":false"));
+
+        // Setup test config and signing key
+        let signing_key = [42u8; 32];
+        let config = super::Config {
+            bind: "127.0.0.1:8443".to_string(),
+            origin: "https://kvm.example".to_string(),
+            resource: "https://kvm.example/mcp".to_string(),
+            authorization_server: "https://kvm.example".to_string(),
+            issuer: "https://kvm.example".to_string(),
+            certificate: std::path::PathBuf::from("/nonexistent/cert"),
+            private_key: std::path::PathBuf::from("/nonexistent/key"),
+            issuer_public_key: std::path::PathBuf::from("/nonexistent/pub"),
+            issuer_signing_key: None,
+        };
+
+        // 2. Claim with bad origin rejected
+        let bad_origin_req = super::Request {
+            method: "POST".to_string(),
+            path: "/setup/claim".to_string(),
+            origin: Some("https://evil.com".to_string()),
+            authorization: None,
+            body: b"{\"pin\":\"123456\"}".to_vec(),
+        };
+        let mut bad_origin_out = Vec::new();
+        super::handle_setup_claim(
+            &mut bad_origin_out,
+            &config,
+            &bad_origin_req,
+            Some(&signing_key),
+            &pin_paths,
+            &pairing_paths,
+        )
+        .unwrap();
+        assert!(String::from_utf8(bad_origin_out).unwrap().contains("403 Forbidden"));
+
+        // 3. Claim with invalid PIN (letters) rejected
+        let invalid_pin_req = super::Request {
+            method: "POST".to_string(),
+            path: "/setup/claim".to_string(),
+            origin: Some("https://kvm.example".to_string()),
+            authorization: None,
+            body: b"{\"pin\":\"abcdef\"}".to_vec(),
+        };
+        let mut invalid_pin_out = Vec::new();
+        super::handle_setup_claim(
+            &mut invalid_pin_out,
+            &config,
+            &invalid_pin_req,
+            Some(&signing_key),
+            &pin_paths,
+            &pairing_paths,
+        )
+        .unwrap();
+        assert!(String::from_utf8(invalid_pin_out).unwrap().contains("400 Bad Request"));
+
+        // 4. Valid claim succeeds and mints token
+        let claim_req = super::Request {
+            method: "POST".to_string(),
+            path: "/setup/claim".to_string(),
+            origin: Some("https://kvm.example".to_string()),
+            authorization: None,
+            body: b"{\"pin\":\"852963\"}".to_vec(),
+        };
+        let mut claim_out = Vec::new();
+        super::handle_setup_claim(
+            &mut claim_out,
+            &config,
+            &claim_req,
+            Some(&signing_key),
+            &pin_paths,
+            &pairing_paths,
+        )
+        .unwrap();
+        let claim_res = String::from_utf8(claim_out).unwrap();
+        assert!(claim_res.starts_with("HTTP/1.1 200 OK\r\n"));
+        assert!(claim_res.contains("\"status\":\"configured\""));
+        assert!(claim_res.contains("\"token\":"));
+
+        // 5. Subsequent status shows configured
+        let mut status_out2 = Vec::new();
+        super::handle_setup_status(&mut status_out2, &pin_paths, &pairing_paths).unwrap();
+        let status_str2 = String::from_utf8(status_out2).unwrap();
+        assert!(status_str2.contains("\"configured\":true"));
+
+        // 6. Claim again is rejected with 409 Conflict (single-use TOFU)
+        let mut second_claim_out = Vec::new();
+        super::handle_setup_claim(
+            &mut second_claim_out,
+            &config,
+            &claim_req,
+            Some(&signing_key),
+            &pin_paths,
+            &pairing_paths,
+        )
+        .unwrap();
+        assert!(String::from_utf8(second_claim_out).unwrap().contains("409 Conflict"));
+
+        // 7. Pair with wrong PIN rejected
+        let attempts = std::sync::atomic::AtomicUsize::new(0);
+        let wrong_pair_req = super::Request {
+            method: "POST".to_string(),
+            path: "/pair".to_string(),
+            origin: Some("https://kvm.example".to_string()),
+            authorization: None,
+            body: b"{\"code\":\"000000\"}".to_vec(),
+        };
+        let mut wrong_pair_out = Vec::new();
+        super::handle_pair_full(
+            &mut wrong_pair_out,
+            "https://kvm.example",
+            Some("https://kvm.example"),
+            Some("https://kvm.example/mcp"),
+            &wrong_pair_req,
+            &pairing_paths,
+            &pin_paths,
+            Some(&signing_key),
+            &attempts,
+        )
+        .unwrap();
+        assert!(String::from_utf8(wrong_pair_out).unwrap().contains("401 Unauthorized"));
+
+        // 8. Pair with correct PIN succeeds and mints fresh token
+        let correct_pair_req = super::Request {
+            method: "POST".to_string(),
+            path: "/pair".to_string(),
+            origin: Some("https://kvm.example".to_string()),
+            authorization: None,
+            body: b"{\"code\":\"852963\"}".to_vec(),
+        };
+        let mut correct_pair_out = Vec::new();
+        super::handle_pair_full(
+            &mut correct_pair_out,
+            "https://kvm.example",
+            Some("https://kvm.example"),
+            Some("https://kvm.example/mcp"),
+            &correct_pair_req,
+            &pairing_paths,
+            &pin_paths,
+            Some(&signing_key),
+            &attempts,
+        )
+        .unwrap();
+        let pair_res = String::from_utf8(correct_pair_out).unwrap();
+        assert!(pair_res.starts_with("HTTP/1.1 200 OK\r\n"));
+        assert!(pair_res.contains("\"token\":"));
+        assert!(pair_res.contains("\"tokenType\":\"Bearer\""));
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn factory_reset_wipes_pin_hash() {
+        let temp_dir =
+            std::env::temp_dir().join(format!("onyx-reset-test-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&temp_dir);
+        let boot_pin = temp_dir.join("boot-pin.hash");
+        let run_pin = temp_dir.join("run-pin.hash");
+        let etc_pin = temp_dir.join("etc-pin.hash");
+        let pin_paths = super::PinPaths {
+            boot: boot_pin.to_str().unwrap(),
+            run: run_pin.to_str().unwrap(),
+            etc: etc_pin.to_str().unwrap(),
+            etc_fallback: "/nonexistent/etc",
+        };
+        let pairing_paths = super::PairingPaths {
+            code: "/nonexistent/code",
+            code_fallback: "/nonexistent/code2",
+            token: "/nonexistent/token",
+            token_fallback: "/nonexistent/token2",
+        };
+
+        // Save a PIN
+        super::save_pin_hash_paths("123456", &pin_paths).unwrap();
+        assert!(super::is_device_configured_with_paths(&pin_paths, &pairing_paths));
+
+        // Create reset trigger
+        let trigger = temp_dir.join("RESET");
+        let _ = std::fs::write(&trigger, b"RESET\n");
+
+        // Factory reset clears state
+        super::check_and_process_factory_reset(&pin_paths);
+        assert!(!trigger.exists());
+        assert!(!super::is_device_configured_with_paths(&pin_paths, &pairing_paths));
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn reboot_endpoint_requires_auth_and_triggers_reboot() {
+        use ring::signature::KeyPair;
+        let signing_key = [7_u8; 32];
+        let key_pair =
+            ring::signature::Ed25519KeyPair::from_seed_unchecked(&signing_key).unwrap();
+        let verifying_key = key_pair.public_key().as_ref();
+        let config = super::Config {
+            bind: "127.0.0.1:0".to_string(),
+            origin: "https://kvm.example".to_string(),
+            resource: "https://kvm.example/mcp".to_string(),
+            authorization_server: "https://kvm.example/auth".to_string(),
+            issuer: "https://kvm.example/issuer".to_string(),
+            certificate: std::path::PathBuf::from("/nonexistent/cert"),
+            private_key: std::path::PathBuf::from("/nonexistent/key"),
+            issuer_public_key: std::path::PathBuf::from("/nonexistent/pub"),
+            issuer_signing_key: None,
+        };
+
+        // 1. Unauthenticated request -> 401
+        let unauth_req = super::Request {
+            method: "POST".to_string(),
+            path: "/system/reboot".to_string(),
+            origin: Some("https://kvm.example".to_string()),
+            authorization: None,
+            body: Vec::new(),
+        };
+        let mut out = Vec::new();
+        super::handle_reboot(&mut out, &config, &verifying_key, &unauth_req).unwrap();
+        let res = String::from_utf8(out).unwrap();
+        assert!(res.starts_with("HTTP/1.1 401 Unauthorized\r\n"));
+
+        // 2. Read-only token (mutation_enabled = false) -> 403
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let ro_token = onyx_kvm_mcp::mint_token(
+            &signing_key,
+            "https://kvm.example/issuer",
+            "https://kvm.example/mcp",
+            "kvm:read",
+            false,
+            now + 3600,
+        );
+        let ro_req = super::Request {
+            method: "POST".to_string(),
+            path: "/system/reboot".to_string(),
+            origin: Some("https://kvm.example".to_string()),
+            authorization: Some(format!("Bearer {ro_token}")),
+            body: Vec::new(),
+        };
+        let mut out = Vec::new();
+        super::handle_reboot(&mut out, &config, &verifying_key, &ro_req).unwrap();
+        let res = String::from_utf8(out).unwrap();
+        assert!(res.starts_with("HTTP/1.1 403 Forbidden\r\n"));
+        assert!(res.contains("mutation permission required"));
+
+        // 3. Authorized mutating token -> 200 OK & writes reboot-trigger
+        let rw_token = onyx_kvm_mcp::mint_token(
+            &signing_key,
+            "https://kvm.example/issuer",
+            "https://kvm.example/mcp",
+            "kvm:read kvm:admin",
+            true,
+            now + 3600,
+        );
+        let rw_req = super::Request {
+            method: "POST".to_string(),
+            path: "/system/reboot".to_string(),
+            origin: Some("https://kvm.example".to_string()),
+            authorization: Some(format!("Bearer {rw_token}")),
+            body: Vec::new(),
+        };
+        let mut out = Vec::new();
+        super::handle_reboot(&mut out, &config, &verifying_key, &rw_req).unwrap();
+        let res = String::from_utf8(out).unwrap();
+        assert!(res.starts_with("HTTP/1.1 200 OK\r\n"));
+        assert!(res.contains("\"status\":\"rebooting\""));
     }
 }
