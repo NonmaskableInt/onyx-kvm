@@ -31,9 +31,15 @@ const LOAD_ORDER: &[(&str, &[&str])] = &[
     ("soph_snsr_i2c", &[]),
     ("soph_vi", &[]),
     ("soph_vpss", &[]),
+    ("mars_vcodec", &[]),
+    ("soph_jpeg", &[]),
+    ("cvi_vc_driver", &[]),
 ];
 
 const UNLOAD_ORDER: &[&str] = &[
+    "cvi_vc_driver",
+    "soph_jpeg",
+    "mars_vcodec",
     "soph_vpss",
     "soph_vi",
     "soph_snsr_i2c",
@@ -96,7 +102,7 @@ fn env_path_any(primary: &str, fallback: &str, default: &str) -> PathBuf {
 fn run(config: &Config) -> io::Result<()> {
     if let Some(parent) = config.socket.parent() {
         fs::create_dir_all(parent)?;
-        fs::set_permissions(parent, Permissions::from_mode(0o2750))?;
+        fs::set_permissions(parent, Permissions::from_mode(0o2770))?;
     }
     remove_if_exists(&config.socket)?;
     remove_if_exists(&config.frame_path)?;
@@ -147,6 +153,7 @@ fn serve(mut stream: UnixStream, config: &Config) -> io::Result<()> {
 
     let probe_bin = resolve_probe_bin(config);
     let mut streaming_probe: Option<StreamingProbe> = None;
+    let mut last_spawn_attempt: Option<std::time::Instant> = None;
 
     let mut is_first = true;
     loop {
@@ -173,22 +180,31 @@ fn serve(mut stream: UnixStream, config: &Config) -> io::Result<()> {
         let enabled = File::open(&config.enable).is_ok();
         let (operation, request) = decode_and_authorize(&frame, enabled)
             .map_err(|error| io::Error::new(io::ErrorKind::PermissionDenied, error.to_string()))?;
-        if streaming_probe
-            .as_ref()
-            .map_or(true, |p| p.width != request.width || p.height != request.height)
-        {
-            streaming_probe = match StreamingProbe::spawn(probe_bin, request.width, request.height)
-            {
-                Ok(p) => Some(p),
-                Err(err) => {
-                    eprintln!("onyx-kvm-video-broker: streaming probe spawn note: {err}");
-                    None
-                }
-            };
+        let needs_spawn = streaming_probe.as_ref().map_or(true, |p| {
+            p.width != request.width || p.height != request.height || p.format != request.format
+        });
+        if needs_spawn {
+            let can_spawn = last_spawn_attempt
+                .map_or(true, |t| t.elapsed() >= Duration::from_millis(500));
+            if can_spawn {
+                last_spawn_attempt = Some(std::time::Instant::now());
+                streaming_probe = match StreamingProbe::spawn(
+                    probe_bin,
+                    request.width,
+                    request.height,
+                    request.format,
+                ) {
+                    Ok(p) => Some(p),
+                    Err(err) => {
+                        eprintln!("onyx-kvm-video-broker: streaming probe spawn note: {err}");
+                        None
+                    }
+                };
+            }
         }
-        let (snapshot, mut bytes) = if let Some(ref mut probe) = streaming_probe {
+        let (snapshot, bytes) = if let Some(ref mut probe) = streaming_probe {
             match probe.capture_frame(request.format) {
-                Ok(bytes) => {
+                Ok(Some(bytes)) => {
                     let snapshot = summarize_frame_fast(
                         &bytes,
                         request.format,
@@ -202,36 +218,36 @@ fn serve(mut stream: UnixStream, config: &Config) -> io::Result<()> {
                         );
                         io::Error::new(io::ErrorKind::InvalidData, error.to_string())
                     })?;
-                    (snapshot, bytes)
+                    (Some(snapshot), Some(bytes))
                 }
+                Ok(None) => (None, None),
                 Err(err) => {
-                    eprintln!(
-                        "onyx-kvm-video-broker: streaming probe error: {err}, falling back to oneshot"
-                    );
+                    eprintln!("onyx-kvm-video-broker: streaming probe error: {err}, will respawn");
                     streaming_probe = None;
-                    capture_frame_payload(
-                        config,
-                        request.format,
-                        request.width,
-                        request.height,
-                        operation != Operation::StreamFrame,
-                    )?
+                    last_spawn_attempt = Some(std::time::Instant::now());
+                    (None, None)
                 }
             }
+        } else if operation == Operation::StreamFrame {
+            (None, None)
         } else {
-            capture_frame_payload(
+            let (s, b) = capture_frame_payload(
                 config,
                 request.format,
                 request.width,
                 request.height,
                 operation != Operation::StreamFrame,
-            )?
+            )?;
+            (Some(s), Some(b))
         };
         match operation {
             Operation::Snapshot => {
+                let snapshot = snapshot.ok_or_else(|| io::Error::other("no snapshot frame available"))?;
                 stream.write_all(&snapshot.encode())?;
             }
-            Operation::SnapshotFrame | Operation::StreamFrame => {
+            Operation::SnapshotFrame => {
+                let snapshot = snapshot.ok_or_else(|| io::Error::other("no snapshot frame available"))?;
+                let mut bytes = bytes.ok_or_else(|| io::Error::other("no frame bytes available"))?;
                 let payload_bytes = u32::try_from(SNAPSHOT_RESPONSE_BYTES + bytes.len())
                     .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "payload too large"))?;
                 let header = WireHeader {
@@ -241,6 +257,27 @@ fn serve(mut stream: UnixStream, config: &Config) -> io::Result<()> {
                 stream.write_all(&header.encode())?;
                 stream.write_all(&snapshot.encode())?;
                 stream.write_all(&bytes)?;
+                bytes.fill(0);
+            }
+            Operation::StreamFrame => {
+                if let (Some(snapshot), Some(mut bytes)) = (snapshot, bytes) {
+                    let payload_bytes = u32::try_from(SNAPSHOT_RESPONSE_BYTES + bytes.len())
+                        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "payload too large"))?;
+                    let header = WireHeader {
+                        operation,
+                        payload_bytes,
+                    };
+                    stream.write_all(&header.encode())?;
+                    stream.write_all(&snapshot.encode())?;
+                    stream.write_all(&bytes)?;
+                    bytes.fill(0);
+                } else {
+                    let header = WireHeader {
+                        operation,
+                        payload_bytes: 0,
+                    };
+                    stream.write_all(&header.encode())?;
+                }
             }
             _ => {
                 return Err(io::Error::new(
@@ -249,7 +286,6 @@ fn serve(mut stream: UnixStream, config: &Config) -> io::Result<()> {
                 ));
             }
         }
-        bytes.fill(0);
         stream.flush()?;
     }
     Ok(())
@@ -287,32 +323,54 @@ fn resolve_probe_bin(config: &Config) -> &Path {
 
 struct StreamingProbe {
     child: Child,
-    stdin: ChildStdin,
+    stdin: Option<ChildStdin>,
     stdout: ChildStdout,
     width: u16,
     height: u16,
+    format: onyx_kvm_media_protocol::SnapshotFormat,
 }
 
 impl StreamingProbe {
-    fn spawn(probe_bin: &Path, width: u16, height: u16) -> io::Result<Self> {
+    fn spawn(
+        probe_bin: &Path,
+        width: u16,
+        height: u16,
+        format: onyx_kvm_media_protocol::SnapshotFormat,
+    ) -> io::Result<Self> {
         let height_str = height.to_string();
+        let mode_arg = match format {
+            onyx_kvm_media_protocol::SnapshotFormat::H264 => "stream-h264",
+            _ => "stream",
+        };
         let mut child = Command::new(probe_bin)
-            .args(["0", &height_str, "8", "0,0,0,0,0", "2,4,3,1,0", "stream"])
+            .args(["0", &height_str, "8", "0,0,0,0,0", "2,4,3,1,0", mode_arg])
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
             .spawn()?;
-        let stdin = child
-            .stdin
-            .take()
-            .ok_or_else(|| io::Error::other("no stdin for probe"))?;
-        let mut stdout = child
-            .stdout
-            .take()
-            .ok_or_else(|| io::Error::other("no stdout for probe"))?;
+        let stdin = match child.stdin.take() {
+            Some(s) => s,
+            None => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(io::Error::other("no stdin for probe"));
+            }
+        };
+        let mut stdout = match child.stdout.take() {
+            Some(s) => s,
+            None => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(io::Error::other("no stdout for probe"));
+            }
+        };
 
         let mut ready = [0_u8; 1];
-        stdout.read_exact(&mut ready)?;
+        if let Err(err) = stdout.read_exact(&mut ready) {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(err);
+        }
         if ready[0] != 0 {
             let _ = child.kill();
             let _ = child.wait();
@@ -320,24 +378,35 @@ impl StreamingProbe {
         }
         Ok(Self {
             child,
-            stdin,
+            stdin: Some(stdin),
             stdout,
             width,
             height,
+            format,
         })
     }
 
-    fn capture_frame(&mut self, format: onyx_kvm_media_protocol::SnapshotFormat) -> io::Result<Vec<u8>> {
+    fn capture_frame(
+        &mut self,
+        format: onyx_kvm_media_protocol::SnapshotFormat,
+    ) -> io::Result<Option<Vec<u8>>> {
         let cmd = match format {
+            onyx_kvm_media_protocol::SnapshotFormat::H264 => 3_u8,
             onyx_kvm_media_protocol::SnapshotFormat::TileDeltaYuv422 => 2_u8,
             _ => 1_u8,
         };
-        self.stdin.write_all(&[cmd])?;
-        self.stdin.flush()?;
+        let stdin = self
+            .stdin
+            .as_mut()
+            .ok_or_else(|| io::Error::other("probe stdin closed"))?;
+        stdin.write_all(&[cmd])?;
+        stdin.flush()?;
         let mut header = [0_u8; 5];
         self.stdout.read_exact(&mut header)?;
         if header[0] != 0 {
-            return Err(io::Error::other("probe capture error"));
+            // Hardware timeout / no signal from input.
+            // Child probe process is healthy and waiting for next command.
+            return Ok(None);
         }
         let length = u32::from_be_bytes([header[1], header[2], header[3], header[4]]) as usize;
         if length > 5 * 1024 * 1024 {
@@ -345,14 +414,23 @@ impl StreamingProbe {
         }
         let mut bytes = vec![0_u8; length];
         self.stdout.read_exact(&mut bytes)?;
-        Ok(bytes)
+        Ok(Some(bytes))
     }
 }
 
 impl Drop for StreamingProbe {
     fn drop(&mut self) {
-        let _ = self.stdin.write_all(b"Q");
-        let _ = self.stdin.flush();
+        if let Some(mut stdin) = self.stdin.take() {
+            let _ = stdin.write_all(b"Q");
+            let _ = stdin.flush();
+            drop(stdin);
+        }
+        for _ in 0..10 {
+            if let Ok(Some(_)) = self.child.try_wait() {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
         let _ = self.child.kill();
         let _ = self.child.wait();
     }
@@ -373,6 +451,10 @@ fn capture_frame_payload(
         .to_str()
         .unwrap_or("/run/cleankvm-frame.yuv422p");
     let height_str = height.to_string();
+    let mode_arg = match format {
+        onyx_kvm_media_protocol::SnapshotFormat::H264 => "oneshot-h264",
+        _ => "oneshot",
+    };
     let status = Command::new(probe_bin)
         .args([
             "0",
@@ -380,7 +462,7 @@ fn capture_frame_payload(
             "8",
             "0,0,0,0,0",
             "2,4,3,1,0",
-            "oneshot",
+            mode_arg,
             out_path,
         ])
         .stdin(Stdio::null())
@@ -398,9 +480,12 @@ fn capture_frame_payload(
         config.frame_path.as_path()
     };
     let file = File::open(actual_frame_path)?;
-    let expected_bytes = usize::from(width) * usize::from(height) * 2;
-    let mut bytes = Vec::with_capacity(expected_bytes);
-    file.take((expected_bytes + 1) as u64)
+    let max_read = match format {
+        onyx_kvm_media_protocol::SnapshotFormat::H264 => 2 * 1024 * 1024,
+        _ => usize::from(width) * usize::from(height) * 2,
+    };
+    let mut bytes = Vec::new();
+    file.take((max_read + 1) as u64)
         .read_to_end(&mut bytes)?;
     remove_if_exists(&config.frame_path)?;
     remove_if_exists(Path::new("/run/cleankvm-frame.yuv422p"))?;
@@ -409,9 +494,28 @@ fn capture_frame_payload(
     Ok((snapshot, bytes))
 }
 
+fn is_module_loaded(name: &str) -> bool {
+    if let Ok(content) = fs::read_to_string("/proc/modules") {
+        for line in content.lines() {
+            if let Some(mod_name) = line.split_whitespace().next() {
+                if mod_name == name {
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
+
 fn load_quarantine_modules(module_dir: &Path) -> io::Result<()> {
     for (name, params) in LOAD_ORDER {
+        if is_module_loaded(name) {
+            continue;
+        }
         let ko_path = module_dir.join(format!("{name}.ko"));
+        if !ko_path.exists() && matches!(*name, "soph_jpeg" | "mars_vcodec" | "cvi_vc_driver") {
+            continue;
+        }
         let status = Command::new("/sbin/insmod")
             .arg(&ko_path)
             .args(*params)

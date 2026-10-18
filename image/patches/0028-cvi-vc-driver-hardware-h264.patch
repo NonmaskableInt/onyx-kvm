@@ -1,0 +1,331 @@
+diff --git a/osdrv/interdrv/cvi_vc_drv/cvi_vc_drv.c b/osdrv/interdrv/cvi_vc_drv/cvi_vc_drv.c
+index f870ef4..288a2e4 100644
+--- a/osdrv/interdrv/cvi_vc_drv/cvi_vc_drv.c
++++ b/osdrv/interdrv/cvi_vc_drv/cvi_vc_drv.c
+@@ -49,6 +49,8 @@ static long cvi_vc_drv_venc_ioctl(struct file *filp, u_int cmd, u_long arg);
+ static long cvi_vc_drv_vdec_ioctl(struct file *filp, u_int cmd, u_long arg);
+ #endif
+ static int cvi_vc_drv_release(struct inode *inode, struct file *filp);
++static ssize_t cvi_vc_drv_read(struct file *filp, char __user *buf,
++			       size_t count, loff_t *ppos);
+ static unsigned int cvi_vc_drv_poll(struct file *filp,
+ 				    struct poll_table_struct *wait);
+ 
+@@ -58,6 +60,7 @@ extern unsigned long jpu_get_interrupt_flag(int chnIdx);
+ const struct file_operations cvi_vc_drv_venc_fops = {
+ 	.owner = THIS_MODULE,
+ 	.open = cvi_vc_drv_open,
++	.read = cvi_vc_drv_read,
+ 	.unlocked_ioctl = cvi_vc_drv_venc_ioctl,
+ #ifdef CONFIG_COMPAT
+ 	.compat_ioctl = cvi_vc_drv_venc_ioctl,
+@@ -227,6 +230,23 @@ static long cvi_vc_drv_venc_ioctl(struct file *filp, u_int cmd, u_long arg)
+ #if (KERNEL_VERSION(5, 10, 0) <= LINUX_VERSION_CODE)
+ 		// copy kernel space packs to user space
+ 		if (stStream.pstPack) {
++			int idx;
++			for (idx = 0; idx < stStream.u32PackCount; idx++) {
++				VENC_PACK_S userPackElem;
++				if (copy_from_user(&userPackElem, &pUserPack[idx], sizeof(VENC_PACK_S)) == 0) {
++					if (userPackElem.pu8Addr && stStream.pstPack[idx].pu8Addr) {
++						size_t plen = stStream.pstPack[idx].u32Len - stStream.pstPack[idx].u32Offset;
++						if (plen > 0) {
++							if (copy_to_user(userPackElem.pu8Addr,
++									 stStream.pstPack[idx].pu8Addr + stStream.pstPack[idx].u32Offset,
++									 plen) == 0) {
++								/* keep user space address in pack */
++								stStream.pstPack[idx].pu8Addr = userPackElem.pu8Addr;
++							}
++						}
++					}
++				}
++			}
+ 			if (copy_to_user(pUserPack, stStream.pstPack,
+ 					 sizeof(VENC_PACK_S) *
+ 					 stStream.u32PackCount) != 0) {
+@@ -1344,6 +1364,91 @@ static unsigned int cvi_vc_drv_poll(struct file *filp,
+ 	return mask;
+ }
+ 
++static ssize_t cvi_vc_drv_read(struct file *filp, char __user *buf,
++			       size_t count, loff_t *ppos)
++{
++	unsigned int minor = iminor(file_inode(filp));
++	VENC_STREAM_S stStream;
++	ssize_t total_len = 0;
++	CVI_S32 s32Ret;
++	CVI_U32 i;
++
++	if (!buf || count == 0)
++		return -EINVAL;
++
++	if (minor >= MaxVencChnNum)
++		return -ENODEV;
++
++	if (down_interruptible(&vencSemArry[minor]))
++		return -ERESTARTSYS;
++
++	memset(&stStream, 0, sizeof(stStream));
++
++	/* Get encoded stream frame (blocking with 1000ms timeout) */
++	s32Ret = CVI_VENC_GetStream(minor, &stStream, 1000);
++	if (s32Ret != CVI_SUCCESS) {
++		up(&vencSemArry[minor]);
++		if (s32Ret == CVI_ERR_VENC_BUSY)
++			return -EAGAIN;
++		return -EIO;
++	}
++
++	/* Calculate total length */
++	for (i = 0; i < stStream.u32PackCount; i++) {
++		VENC_PACK_S *ppack = &stStream.pstPack[i];
++		if (ppack->u32Len > ppack->u32Offset) {
++			total_len += (ppack->u32Len - ppack->u32Offset);
++		}
++	}
++
++	if (total_len > count) {
++		pr_warn_ratelimited("cvi_vc_drv read: user buf too small (%zu < %zu)\n",
++				    count, total_len);
++		CVI_VENC_ReleaseStream(minor, &stStream);
++		if (stStream.pstPack) {
++			vfree(stStream.pstPack);
++			stStream.pstPack = NULL;
++		}
++		up(&vencSemArry[minor]);
++		return -ENOBUFS;
++	}
++
++	total_len = 0;
++	for (i = 0; i < stStream.u32PackCount; i++) {
++		VENC_PACK_S *ppack = &stStream.pstPack[i];
++		size_t pack_len = 0;
++		if (ppack->u32Len > ppack->u32Offset)
++			pack_len = ppack->u32Len - ppack->u32Offset;
++
++		if (ppack->pu8Addr && pack_len > 0) {
++			if (copy_to_user(buf + total_len,
++					 ppack->pu8Addr + ppack->u32Offset,
++					 pack_len)) {
++				CVI_VENC_ReleaseStream(minor, &stStream);
++				if (stStream.pstPack) {
++					vfree(stStream.pstPack);
++					stStream.pstPack = NULL;
++				}
++				up(&vencSemArry[minor]);
++				return -EFAULT;
++			}
++			total_len += pack_len;
++		}
++	}
++
++	s32Ret = CVI_VENC_ReleaseStream(minor, &stStream);
++	if (s32Ret != CVI_SUCCESS) {
++		pr_warn_ratelimited("cvi_vc_drv: ReleaseStream failed: %d\n", s32Ret);
++	}
++	if (stStream.pstPack) {
++		vfree(stStream.pstPack);
++		stStream.pstPack = NULL;
++	}
++
++	up(&vencSemArry[minor]);
++	return total_len;
++}
++
+ static int cvi_vc_drv_release(struct inode *inode, struct file *filp)
+ {
+ 	unsigned int minor = iminor(inode);
+diff --git a/osdrv/interdrv/cvi_vc_drv/cvi_vc_drv.h b/osdrv/interdrv/cvi_vc_drv/cvi_vc_drv.h
+index 9f1c8a1..74031a1 100644
+--- a/osdrv/interdrv/cvi_vc_drv/cvi_vc_drv.h
++++ b/osdrv/interdrv/cvi_vc_drv/cvi_vc_drv.h
+@@ -10,6 +10,15 @@
+ #include <linux/io.h>
+ 
+ #include <linux/cvi_vc_drv_ioctl.h>
++#ifndef CVI_VC_VENC_ENABLE_SVC
++#define CVI_VC_VENC_ENABLE_SVC _IO(CVI_VC_DRV_IOCTL_MAGIC, 78)
++#endif
++#ifndef CVI_VC_VENC_SET_SVC_PARAM
++#define CVI_VC_VENC_SET_SVC_PARAM _IO(CVI_VC_DRV_IOCTL_MAGIC, 79)
++#endif
++#ifndef CVI_VC_VENC_GET_SVC_PARAM
++#define CVI_VC_VENC_GET_SVC_PARAM _IO(CVI_VC_DRV_IOCTL_MAGIC, 80)
++#endif
+ #include "cvi_venc.h"
+ #include "cvi_vdec.h"
+ 
+diff --git a/osdrv/interdrv/cvi_vc_drv/cvi_vc_drv_proc.c b/osdrv/interdrv/cvi_vc_drv/cvi_vc_drv_proc.c
+index 92ea900..f902f10 100644
+--- a/osdrv/interdrv/cvi_vc_drv/cvi_vc_drv_proc.c
++++ b/osdrv/interdrv/cvi_vc_drv/cvi_vc_drv_proc.c
+@@ -514,9 +514,9 @@ static int venc_proc_show(struct seq_file *m, void *v)
+ 					"-----VENC CHN PERFORMANCE------------------------------------------------\n");
+ 				seq_printf(
+ 					m,
+-					"ID: %d\t No.SendFramePerSec: %u\t No.EncFramePerSec: %u\t HwEncTime: %llu us\t MaxHwEncTime: %llu us\t EncodedFrame: %llu\n\n",
++					"ID: %d\t No.SendFramePerSec: %u\t No.EncFramePerSec: %u\t HwEncTime: %llu us\n\n",
+ 					idx, pstFPS->u32InFPS,
+-					pstFPS->u32OutFPS, pstFPS->u64HwTime, pstFPS->u64MaxHwTime, pstFPS->u64DoneFrame);
++					pstFPS->u32OutFPS, pstFPS->u64HwTime);
+ 			}
+ 		}
+ 	}
+@@ -2024,11 +2024,10 @@ static int vdec_proc_show(struct seq_file *m, void *v)
+ 					"-----VDEC CHN PERFORMANCE------------------------------------------------\n");
+ 				seq_printf(
+ 					m,
+-					"ID: %d\t No.SendStreamPerSec: %u\t No.DecFramePerSec: %u\t HwDecTime: %llu us\t DecodedFrame: %llu\n\n",
++					"ID: %d\t No.SendStreamPerSec: %u\t No.DecFramePerSec: %u\t HwDecTime: %llu us\n\n",
+ 					idx, pChnHandle->stFPS.u32InFPS,
+ 					pChnHandle->stFPS.u32OutFPS,
+-					pChnHandle->stFPS.u64HwTime,
+-					pChnHandle->stFPS.u64DoneFrame);
++					pChnHandle->stFPS.u64HwTime);
+ 			}
+ 		}
+ 	}
+diff --git a/osdrv/interdrv/cvi_vc_drv/include/cvi_venc.h b/osdrv/interdrv/cvi_vc_drv/include/cvi_venc.h
+index 70f03a6..1a6bce7 100644
+--- a/osdrv/interdrv/cvi_vc_drv/include/cvi_venc.h
++++ b/osdrv/interdrv/cvi_vc_drv/include/cvi_venc.h
+@@ -236,6 +236,20 @@ CVI_S32 cvi_VENC_CB_SkipFrame(CVI_S32 VpssGrp, CVI_S32 VpssChn, CVI_U32 srcImgHe
+ CVI_S32 cvi_VENC_CB_SnapJpgFrame(CVI_S32 VpssGrp, CVI_S32 VpssChn, CVI_U32 FrmCnt);
+ CVI_S32 cvi_VENC_CB_SwitchChn(CVI_S32 VpssGrp, CVI_S32 VpssChn);
+ 
++#ifndef _VENC_SVC_PARAM_S_DEFINED
++#define _VENC_SVC_PARAM_S_DEFINED
++typedef struct _VENC_SVC_PARAM_S {
++	CVI_BOOL fg_protect_en;
++	CVI_S32  fg_dealt_qp;
++	CVI_BOOL complex_scene_detect_en;
++	CVI_U32  complex_scene_low_th;
++	CVI_U32  complex_scene_hight_th;
++	CVI_U32  middle_min_percent;
++	CVI_U32  complex_min_percent;
++	CVI_BOOL smart_ai_en;
++} VENC_SVC_PARAM_S;
++#endif
++
+ CVI_S32 CVI_VENC_SetSvcParam(VENC_CHN VeChn, VENC_SVC_PARAM_S *pstSvcParam);
+ CVI_S32 CVI_VENC_GetSvcParam(VENC_CHN VeChn, VENC_SVC_PARAM_S *pstSvcParam);
+ 
+diff --git a/osdrv/interdrv/cvi_vc_drv/module/include/venc.h b/osdrv/interdrv/cvi_vc_drv/module/include/venc.h
+index 35d6f71..52843cd 100644
+--- a/osdrv/interdrv/cvi_vc_drv/module/include/venc.h
++++ b/osdrv/interdrv/cvi_vc_drv/module/include/venc.h
+@@ -7,6 +7,21 @@
+ #include <linux/cvi_type.h>
+ #include <linux/cvi_defines.h>
+ #include <linux/cvi_comm_venc.h>
++
++#ifndef _VENC_SVC_PARAM_S_DEFINED
++#define _VENC_SVC_PARAM_S_DEFINED
++typedef struct _VENC_SVC_PARAM_S {
++	CVI_BOOL fg_protect_en;
++	CVI_S32  fg_dealt_qp;
++	CVI_BOOL complex_scene_detect_en;
++	CVI_U32  complex_scene_low_th;
++	CVI_U32  complex_scene_hight_th;
++	CVI_U32  middle_min_percent;
++	CVI_U32  complex_min_percent;
++	CVI_BOOL smart_ai_en;
++} VENC_SVC_PARAM_S;
++#endif
++
+ #include "enc_ctx.h"
+ #include "cvi_jpg_interface.h"
+ 
+diff --git a/osdrv/interdrv/cvi_vc_drv/module/src/cvi_vdec.c b/osdrv/interdrv/cvi_vc_drv/module/src/cvi_vdec.c
+index 1c64c12..82a61cb 100644
+--- a/osdrv/interdrv/cvi_vc_drv/module/src/cvi_vdec.c
++++ b/osdrv/interdrv/cvi_vc_drv/module/src/cvi_vdec.c
+@@ -1762,7 +1762,7 @@ static CVI_S32 cviSetVdecFpsToProc(VDEC_CHN VdChn, CVI_BOOL bSendStream)
+ 			pChnHandle->u64LastGetFrameTimeStamp = u64CurTime;
+ 			pChnHandle->u32GetFrameCnt = 0;
+ 		}
+-		pChnHandle->stFPS.u64DoneFrame++;
++		// pChnHandle->stFPS.u64DoneFrame++;
+ 	}
+ 
+ 	return s32Ret;
+diff --git a/osdrv/interdrv/cvi_vc_drv/module/src/cvi_venc.c b/osdrv/interdrv/cvi_vc_drv/module/src/cvi_venc.c
+index db35473..3e19180 100644
+--- a/osdrv/interdrv/cvi_vc_drv/module/src/cvi_venc.c
++++ b/osdrv/interdrv/cvi_vc_drv/module/src/cvi_venc.c
+@@ -2750,8 +2750,8 @@ CVI_S32 CVI_VENC_SendFrameEx(VENC_CHN VeChn,
+ 	       sizeof(USER_RC_INFO_S));
+ 
+ 	puri->bQpMapValid = pChnVars->stUserRcInfo.bQpMapValid;
+-	puri->bRoiBinValid = pChnVars->stUserRcInfo.bRoiBinValid;
+-	puri->roideltaqp = pChnVars->stUserRcInfo.roideltaqp;
++	puri->bRoiBinValid = 0;
++	puri->roideltaqp = 0;
+ 	puri->u64QpMapPhyAddr = pChnVars->stUserRcInfo.u64QpMapPhyAddr;
+ 
+ 	CVI_VENC_CFG("bQpMapValid = %d\n", puri->bQpMapValid);
+@@ -3664,9 +3664,7 @@ static CVI_S32 cviSetVencPerfAttrToProc(venc_chn_context *pChnHandle)
+ 		pChnVars->u64LastGetStreamTimeStamp = u64CurTime;
+ 		pChnVars->u32GetStreamCnt = 0;
+ 	}
+-	pChnVars->stFPS.u64MaxHwTime = MAX(pChnVars->stFPS.u64MaxHwTime, pEncCtx->base.u64EncHwTime);
+ 	pChnVars->stFPS.u64HwTime = pEncCtx->base.u64EncHwTime;
+-	pChnVars->stFPS.u64DoneFrame++;
+ 	MUTEX_UNLOCK(&pChnHandle->chnShmMutex);
+ 
+ 	return s32Ret;
+@@ -7305,7 +7303,7 @@ CVI_S32 CVI_VENC_SetSvcParam(VENC_CHN VeChn, VENC_SVC_PARAM_S *pstSvcParam)
+ 		memcpy(&pChnHandle->svcParam, pstSvcParam, sizeof(VENC_SVC_PARAM_S));
+ 	} else {
+ 		CVI_VENC_ERR("failed to set svc param %d", s32Ret);
+-		s32Ret = CVI_ERR_VENC_SVC_PARAM;
++		s32Ret = CVI_ERR_VENC_ILLEGAL_PARAM;
+ 	}
+ 
+ 	return s32Ret;
+diff --git a/osdrv/interdrv/cvi_vc_drv/module/src/enc_ctx.c b/osdrv/interdrv/cvi_vc_drv/module/src/enc_ctx.c
+index 2c3d0d1..4bfcaad 100644
+--- a/osdrv/interdrv/cvi_vc_drv/module/src/enc_ctx.c
++++ b/osdrv/interdrv/cvi_vc_drv/module/src/enc_ctx.c
+@@ -1078,7 +1078,7 @@ static CVI_S32 vidEnc_enc_one_pic(CVI_VOID *ctx,
+ 		|| pEncCtx->base.rcMode == RC_MODE_AVBR) {
+ 		if (blk && (indexFrameDisplay & 0xffffff00)) {
+ 			pPicCfg->picMotionLevel = blk->buf.motion_lv;
+-			pPicCfg->picDciLv = blk->buf.dci_lv;
++			pPicCfg->picDciLv = 0;
+ 			pPicCfg->picMotionMap = mtable;
+ 			pPicCfg->picMotionMapSize = MO_TBL_SIZE;
+ 			memcpy(mtable, blk->buf.motion_table, MO_TBL_SIZE);
+diff --git a/osdrv/interdrv/cvi_vc_drv/vcodec/sample/main_enc_cvitest.c b/osdrv/interdrv/cvi_vc_drv/vcodec/sample/main_enc_cvitest.c
+index 3468973..ba6776f 100644
+--- a/osdrv/interdrv/cvi_vc_drv/vcodec/sample/main_enc_cvitest.c
++++ b/osdrv/interdrv/cvi_vc_drv/vcodec/sample/main_enc_cvitest.c
+@@ -2914,10 +2914,10 @@ void cviCopyMotionMap(void *handle, cviEncOnePicCfg *pPicCfg, void *phandle)
+ 	if (pCodecInst->CodecInfo->encInfo.bSbmEn) {
+ 		mlv_info->vpss_grp = 0;
+ 		cvi_vc_get_motion_tbl((void *) mlv_info);
+-		pPicCfg->picMotionLevel = mlv_info->m_lv_i.mlv_i.mlv_i_level;
+-		pPicCfg->picDciLv = mlv_info->m_lv_i.dci_lv;
++		pPicCfg->picMotionLevel = mlv_info->m_lv_i.mlv_i_level;
++		pPicCfg->picDciLv = 0;
+ 		pPicCfg->picMotionMapSize = MO_TBL_SIZE;
+-		memcpy(pPicCfg->picMotionMap, mlv_info->m_lv_i.mlv_i.mlv_i_table, MO_TBL_SIZE);
++		memcpy(pPicCfg->picMotionMap, mlv_info->m_lv_i.mlv_i_table, MO_TBL_SIZE);
+ 	}
+ 
+ 	kfree(mlv_info);
+diff --git a/osdrv/interdrv/jpeg/Makefile b/osdrv/interdrv/jpeg/Makefile
+index 7e53e09..c26abd9 100644
+--- a/osdrv/interdrv/jpeg/Makefile
++++ b/osdrv/interdrv/jpeg/Makefile
+@@ -17,8 +17,8 @@ ccflags-y += $(DEBFLAGS) -I$(PWD) -I$(LDDINCDIR) -D$(CHIP_TYPE) -D$(SUB_TYPE) -D
+ KBUILD_EXTRA_SYMBOLS += $(PWD)/../vcodec/Module.symvers
+ 
+ # PWD	:= $(shell pwd)
+-obj-m += $(CVIARCH_L)_jpeg.o
+-$(CVIARCH_L)_jpeg-y += cvi_jpeg.o jpeg_common.o jmm.o hal/$(CVIARCH_L)/cvi_jpeg_cfg.o
++obj-m += soph_jpeg.o
++soph_jpeg-y += cvi_jpeg.o jpeg_common.o jmm.o hal/$(CVIARCH_L)/cvi_jpeg_cfg.o
+ 
+ all:
+ 	$(MAKE) ARCH=${ARCH} -C $(KERNEL_DIR) M=$(PWD) modules

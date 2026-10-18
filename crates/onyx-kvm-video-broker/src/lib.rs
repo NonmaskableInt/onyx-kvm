@@ -65,7 +65,10 @@ pub fn decode_and_authorize(
     let request = SnapshotRequest::decode(payload_bytes).map_err(BrokerError::Validation)?;
     if !matches!(
         request.format,
-        SnapshotFormat::Yuv420p | SnapshotFormat::Yuv422p | SnapshotFormat::TileDeltaYuv422
+        SnapshotFormat::Yuv420p
+            | SnapshotFormat::Yuv422p
+            | SnapshotFormat::TileDeltaYuv422
+            | SnapshotFormat::H264
     ) {
         return Err(BrokerError::UnsupportedFormat);
     }
@@ -77,7 +80,7 @@ pub fn decode_and_authorize(
     Ok((header.operation, request))
 }
 
-/// Validate a captured planar YUV or tile-delta frame buffer and construct its wire response.
+/// Validate a captured planar YUV, tile-delta, or H.264 frame buffer and construct its wire response.
 ///
 /// # Errors
 /// Rejects a buffer unless its dimensions are supported and its length matches the requested pixel format.
@@ -94,7 +97,7 @@ pub fn summarize_frame_fast(
     let expected = match format {
         SnapshotFormat::Yuv420p => Some(usize::from(width) * usize::from(height) * 3 / 2),
         SnapshotFormat::Yuv422p => Some(usize::from(width) * usize::from(height) * 2),
-        SnapshotFormat::TileDeltaYuv422 => None,
+        SnapshotFormat::TileDeltaYuv422 | SnapshotFormat::H264 => None,
         SnapshotFormat::Jpeg | SnapshotFormat::Rgb565 => {
             return Err(BrokerError::UnsupportedFormat);
         }

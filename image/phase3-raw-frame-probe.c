@@ -54,12 +54,24 @@ static void handle_sig(int sig)
 #include "cvi_vb.h"
 #include "cvi_vi.h"
 #include "cvi_vpss.h"
+#include <linux/cvi_comm_venc.h>
+#include <linux/cvi_comm_rc.h>
+#include <linux/cvi_vc_drv_ioctl.h>
+
+#ifndef _VIDEO_FRAME_INFO_EX_S_DEFINED
+typedef struct _VIDEO_FRAME_INFO_EX_S {
+	VIDEO_FRAME_INFO_S *pstFrame;
+	CVI_S32 s32MilliSec;
+} VIDEO_FRAME_INFO_EX_S;
+#define _VIDEO_FRAME_INFO_EX_S_DEFINED
+#endif
 
 extern CVI_S32 get_vi_fd(CVI_VOID);
 
 #define WIDTH 1920U
 #define HEIGHT 1080U
 #define OUTPUT_LIMIT (WIDTH * HEIGHT * 2U)
+#define H264_STREAM_LIMIT (1024U * 1024U)
 
 static int acquire_output_frame(int vpss_up, VIDEO_FRAME_INFO_S *out_frame, unsigned int timeout_ms)
 {
@@ -254,6 +266,9 @@ int main(int argc, char **argv)
 	CVI_U32 mipi_dev = 0;
 	int mipi_fd = -1, out_fd = -1, rc = 1;
 	int sys_up = 0, dev_up = 0, pipe_created = 0, pipe_up = 0, chn_up = 0, vpss_up = 0;
+	int h264_mode = 0;
+	int venc_fd = -1, venc_created = 0, venc_started = 0;
+	uint8_t *h264_buf = NULL;
 	unsigned int i, lane_profile = 0;
 	CVI_U32 target_height = HEIGHT;
 	CVI_U32 out_width = WIDTH;
@@ -320,12 +335,21 @@ int main(int argc, char **argv)
 	if (argc >= 7 && argv[6][0]) {
 		if (strcmp(argv[6], "stream") == 0) {
 			stream_mode = 1;
+		} else if (strcmp(argv[6], "stream-h264") == 0) {
+			stream_mode = 1;
+			h264_mode = 1;
+		} else if (strcmp(argv[6], "oneshot-h264") == 0) {
+			stream_mode = 0;
+			h264_mode = 1;
 		} else if (strcmp(argv[6], "oneshot") == 0) {
 			stream_mode = 0;
 		} else {
 			output = argv[6];
 			stream_mode = 0;
 		}
+	}
+	if (h264_mode) {
+		vpss_needed = 1;
 	}
 	if (argc >= 8 && argv[7][0]) {
 		output = argv[7];
@@ -347,7 +371,9 @@ int main(int argc, char **argv)
 		vb.astCommPool[0].u32BlkCnt = 4;
 		vb.astCommPool[0].enRemapMode = VB_REMAP_MODE_CACHED;
 		vb.astCommPool[1].u32BlkSize = COMMON_GetPicBufferSize(
-			out_width, out_height, PIXEL_FORMAT_UYVY, DATA_BITWIDTH_8,
+			out_width, out_height,
+			h264_mode ? PIXEL_FORMAT_YUV_PLANAR_420 : PIXEL_FORMAT_UYVY,
+			DATA_BITWIDTH_8,
 			COMPRESS_MODE_NONE, DEFAULT_ALIGN);
 		vb.astCommPool[1].u32BlkCnt = 4;
 		vb.astCommPool[1].enRemapMode = VB_REMAP_MODE_CACHED;
@@ -563,7 +589,7 @@ int main(int argc, char **argv)
 		chn_attr.u32Width = out_width;
 		chn_attr.u32Height = out_height;
 		chn_attr.enVideoFormat = VIDEO_FORMAT_LINEAR;
-		chn_attr.enPixelFormat = PIXEL_FORMAT_UYVY;
+		chn_attr.enPixelFormat = h264_mode ? PIXEL_FORMAT_YUV_PLANAR_420 : PIXEL_FORMAT_UYVY;
 		chn_attr.stFrameRate.s32SrcFrameRate = -1;
 		chn_attr.stFrameRate.s32DstFrameRate = -1;
 		chn_attr.u32Depth = 1;
@@ -578,6 +604,59 @@ int main(int argc, char **argv)
 			goto cleanup;
 		vpss_up = 1;
 	}
+
+	if (h264_mode) {
+		VENC_CHN_ATTR_S venc_attr = {0};
+		VENC_RECV_PIC_PARAM_S recv_param = {0};
+
+		venc_fd = open("/dev/cvi_vc_enc0", O_RDWR | O_CLOEXEC);
+		if (venc_fd < 0) {
+			perror("open /dev/cvi_vc_enc0");
+			goto cleanup;
+		}
+
+		venc_attr.stVencAttr.enType = PT_H264;
+		venc_attr.stVencAttr.u32MaxPicWidth = out_width;
+		venc_attr.stVencAttr.u32MaxPicHeight = out_height;
+		venc_attr.stVencAttr.u32PicWidth = out_width;
+		venc_attr.stVencAttr.u32PicHeight = out_height;
+		venc_attr.stVencAttr.u32BufSize = 0;
+		venc_attr.stVencAttr.u32Profile = H264E_PROFILE_BASELINE;
+		venc_attr.stVencAttr.bByFrame = CVI_TRUE;
+		venc_attr.stVencAttr.stAttrH264e.bRcnRefShareBuf = CVI_FALSE;
+		venc_attr.stVencAttr.stAttrH264e.bSingleLumaBuf = CVI_FALSE;
+
+		venc_attr.stRcAttr.enRcMode = VENC_RC_MODE_H264FIXQP;
+		venc_attr.stRcAttr.stH264FixQp.u32Gop = 30;
+		venc_attr.stRcAttr.stH264FixQp.u32SrcFrameRate = 30;
+		venc_attr.stRcAttr.stH264FixQp.fr32DstFrameRate = 30;
+		venc_attr.stRcAttr.stH264FixQp.bVariFpsEn = CVI_FALSE;
+		venc_attr.stRcAttr.stH264FixQp.u32IQp = 26;
+		venc_attr.stRcAttr.stH264FixQp.u32PQp = 28;
+
+		venc_attr.stGopAttr.enGopMode = VENC_GOPMODE_NORMALP;
+		venc_attr.stGopAttr.stNormalP.s32IPQpDelta = 2;
+
+		if (ioctl(venc_fd, CVI_VC_VENC_CREATE_CHN, &venc_attr) < 0) {
+			perror("ioctl CVI_VC_VENC_CREATE_CHN");
+			goto cleanup;
+		}
+		venc_created = 1;
+
+		recv_param.s32RecvPicNum = -1;
+		if (ioctl(venc_fd, CVI_VC_VENC_START_RECV_FRAME, &recv_param) < 0) {
+			perror("ioctl CVI_VC_VENC_START_RECV_FRAME");
+			goto cleanup;
+		}
+		venc_started = 1;
+
+		h264_buf = malloc(H264_STREAM_LIMIT);
+		if (!h264_buf) {
+			fprintf(stderr, "allocate h264 stream buffer failed\n");
+			goto cleanup;
+		}
+	}
+
 	if (stream_mode) {
 		uint8_t *buf_a = NULL;
 		uint8_t *buf_b = NULL;
@@ -587,38 +666,29 @@ int main(int argc, char **argv)
 		int first_delta_frame = 1;
 		uint8_t ready_byte = 0;
 
-		if (acquire_output_frame(vpss_up, &frame, 5000) != 0) {
-			fprintf(stderr, "initial frame lock failed\n");
-			goto cleanup;
+		if (!h264_mode) {
+			buf_a = malloc(OUTPUT_LIMIT);
+			buf_b = malloc(OUTPUT_LIMIT);
+			delta_buf = malloc(8 + 810 * 5122);
+			if (!buf_a || !buf_b || !delta_buf) {
+				fprintf(stderr, "allocate stream buffers failed\n");
+				if (buf_a) free(buf_a);
+				if (buf_b) free(buf_b);
+				if (delta_buf) free(delta_buf);
+				goto cleanup;
+			}
+			curr_buf = buf_a;
+			prev_buf = buf_b;
 		}
-		if (frame.stVFrame.u32Width != out_width || frame.stVFrame.u32Height != out_height ||
-		    frame.stVFrame.enCompressMode != COMPRESS_MODE_NONE) {
-			fprintf(stderr, "unexpected frame geometry or compression\n");
-			release_output_frame(vpss_up, &frame);
-			goto cleanup;
-		}
-		release_output_frame(vpss_up, &frame);
 
-		buf_a = malloc(OUTPUT_LIMIT);
-		buf_b = malloc(OUTPUT_LIMIT);
-		delta_buf = malloc(8 + 810 * 5122);
-		if (!buf_a || !buf_b || !delta_buf) {
-			fprintf(stderr, "allocate stream buffers failed\n");
+		if (write_all(STDOUT_FILENO, &ready_byte, 1) != 0) {
 			if (buf_a) free(buf_a);
 			if (buf_b) free(buf_b);
 			if (delta_buf) free(delta_buf);
 			goto cleanup;
 		}
-		curr_buf = buf_a;
-		prev_buf = buf_b;
 
-		if (write_all(STDOUT_FILENO, &ready_byte, 1) != 0) {
-			free(buf_a);
-			free(buf_b);
-			free(delta_buf);
-			goto cleanup;
-		}
-
+		int consecutive_timeouts = 0;
 		while (!g_stop) {
 			uint8_t cmd = 0;
 			ssize_t n = read(STDIN_FILENO, &cmd, 1);
@@ -628,16 +698,72 @@ int main(int argc, char **argv)
 			if (cmd == 'Q') {
 				break;
 			}
-			if (acquire_output_frame(vpss_up, &frame, 2000) != 0) {
-				uint8_t err_status = 1;
-				if (write_all(STDOUT_FILENO, &err_status, 1) != 0)
+			if (h264_mode || cmd == 3) {
+				if (acquire_output_frame(vpss_up, &frame, 200) != 0) {
+					consecutive_timeouts++;
+					uint8_t err_header[5] = {1, 0, 0, 0, 0};
+					if (write_all(STDOUT_FILENO, err_header, 5) != 0)
+						break;
+					if (consecutive_timeouts >= 8) {
+						/* ~2.5 to 3.5s of persistent hardware timeout / signal loss.
+						 * Break out to cleanup so hardware channels close cleanly. */
+						break;
+					}
+					usleep(250000);
+					continue;
+				}
+				consecutive_timeouts = 0;
+				VIDEO_FRAME_INFO_EX_S frame_ex = {
+					.pstFrame = &frame,
+					.s32MilliSec = 1000,
+				};
+				int send_err = ioctl(venc_fd, CVI_VC_VENC_SEND_FRAME, &frame_ex);
+				release_output_frame(vpss_up, &frame);
+				if (send_err < 0) {
+					uint8_t err_header[5] = {1, 0, 0, 0, 0};
+					if (write_all(STDOUT_FILENO, err_header, 5) != 0)
+						break;
+					usleep(250000);
+					continue;
+				}
+				ssize_t bytes_read = read(venc_fd, h264_buf, H264_STREAM_LIMIT);
+				if (bytes_read <= 0) {
+					uint8_t err_header[5] = {1, 0, 0, 0, 0};
+					if (write_all(STDOUT_FILENO, err_header, 5) != 0)
+						break;
+					usleep(250000);
+					continue;
+				}
+				uint8_t ok_header[5];
+				ok_header[0] = 0;
+				ok_header[1] = (uint8_t)(((uint32_t)bytes_read >> 24) & 0xff);
+				ok_header[2] = (uint8_t)(((uint32_t)bytes_read >> 16) & 0xff);
+				ok_header[3] = (uint8_t)(((uint32_t)bytes_read >> 8) & 0xff);
+				ok_header[4] = (uint8_t)((uint32_t)bytes_read & 0xff);
+				if (write_all(STDOUT_FILENO, ok_header, 5) != 0 ||
+				    write_all(STDOUT_FILENO, h264_buf, (size_t)bytes_read) != 0) {
 					break;
+				}
 				continue;
 			}
+			if (acquire_output_frame(vpss_up, &frame, 200) != 0) {
+				consecutive_timeouts++;
+				uint8_t err_header[5] = {1, 0, 0, 0, 0};
+				first_delta_frame = 1;
+				if (write_all(STDOUT_FILENO, err_header, 5) != 0)
+					break;
+				if (consecutive_timeouts >= 8) {
+					break;
+				}
+				usleep(250000);
+				continue;
+			}
+			consecutive_timeouts = 0;
 			if (frame.stVFrame.u32Width != out_width || frame.stVFrame.u32Height != out_height) {
 				release_output_frame(vpss_up, &frame);
-				uint8_t err_status = 1;
-				if (write_all(STDOUT_FILENO, &err_status, 1) != 0)
+				uint8_t err_header[5] = {1, 0, 0, 0, 0};
+				first_delta_frame = 1;
+				if (write_all(STDOUT_FILENO, err_header, 5) != 0)
 					break;
 				continue;
 			}
@@ -663,8 +789,9 @@ int main(int argc, char **argv)
 			}
 			release_output_frame(vpss_up, &frame);
 			if (copy_err || curr_offset != total_bytes) {
-				uint8_t err_status = 1;
-				if (write_all(STDOUT_FILENO, &err_status, 1) != 0)
+				uint8_t err_header[5] = {1, 0, 0, 0, 0};
+				first_delta_frame = 1;
+				if (write_all(STDOUT_FILENO, err_header, 5) != 0)
 					break;
 				continue;
 			}
@@ -780,12 +907,56 @@ int main(int argc, char **argv)
 			prev_buf = tmp;
 		}
 
-		memset(buf_a, 0, OUTPUT_LIMIT);
-		memset(buf_b, 0, OUTPUT_LIMIT);
-		memset(delta_buf, 0, 8 + 810 * 5122);
-		free(buf_a);
-		free(buf_b);
-		free(delta_buf);
+		if (buf_a) {
+			memset(buf_a, 0, OUTPUT_LIMIT);
+			free(buf_a);
+		}
+		if (buf_b) {
+			memset(buf_b, 0, OUTPUT_LIMIT);
+			free(buf_b);
+		}
+		if (delta_buf) {
+			memset(delta_buf, 0, 8 + 810 * 5122);
+			free(delta_buf);
+		}
+		rc = 0;
+		goto cleanup;
+	}
+
+	if (h264_mode) {
+		if (acquire_output_frame(vpss_up, &frame, 5000) != 0) {
+			fprintf(stderr, "oneshot h264 frame lock failed\n");
+			goto cleanup;
+		}
+		VIDEO_FRAME_INFO_EX_S frame_ex = {
+			.pstFrame = &frame,
+			.s32MilliSec = 2000,
+		};
+		if (ioctl(venc_fd, CVI_VC_VENC_SEND_FRAME, &frame_ex) < 0) {
+			perror("ioctl CVI_VC_VENC_SEND_FRAME");
+			release_output_frame(vpss_up, &frame);
+			goto cleanup;
+		}
+		release_output_frame(vpss_up, &frame);
+		ssize_t bytes_read = read(venc_fd, h264_buf, H264_STREAM_LIMIT);
+		if (bytes_read <= 0) {
+			perror("read venc_fd");
+			goto cleanup;
+		}
+		out_fd = open(output, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0600);
+		if (out_fd < 0) {
+			perror("open output");
+			goto cleanup;
+		}
+		if (write_all(out_fd, h264_buf, (size_t)bytes_read) != 0) {
+			perror("write output");
+			goto cleanup;
+		}
+		if (fsync(out_fd) < 0) {
+			perror("fsync output");
+			goto cleanup;
+		}
+		printf("captured=%ux%u format=h264 bytes=%zd output=%s\n", out_width, out_height, bytes_read, output);
 		rc = 0;
 		goto cleanup;
 	}
@@ -855,6 +1026,18 @@ int main(int argc, char **argv)
 release:
 	release_output_frame(vpss_up, &frame);
 cleanup:
+	if (h264_buf) {
+		memset(h264_buf, 0, H264_STREAM_LIMIT);
+		free(h264_buf);
+	}
+	if (venc_started) {
+		(void)ioctl(venc_fd, CVI_VC_VENC_STOP_RECV_FRAME);
+	}
+	if (venc_created) {
+		(void)ioctl(venc_fd, CVI_VC_VENC_DESTROY_CHN);
+	}
+	if (venc_fd >= 0)
+		close(venc_fd);
 	if (out_fd >= 0)
 		close(out_fd);
 	if (vpss_up) {

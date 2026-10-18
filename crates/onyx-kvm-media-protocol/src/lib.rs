@@ -27,6 +27,7 @@ pub const MAX_RING_BUFFER_FRAMES: usize = 4;
 
 pub const STREAM_FLAG_KEYFRAME: u8 = 0x01;
 pub const STREAM_FLAG_DELTA: u8 = 0x02;
+pub const STREAM_FLAG_STANDBY: u8 = 0x04;
 
 pub const TILE_WIDTH: u16 = 64;
 pub const TILE_HEIGHT: u16 = 40;
@@ -48,6 +49,7 @@ pub enum Operation {
     CapturePcm = 16,
     PlayPcm = 17,
     StopAudio = 18,
+    StreamAudioPcm = 19,
 }
 
 impl TryFrom<u8> for Operation {
@@ -63,6 +65,7 @@ impl TryFrom<u8> for Operation {
             16 => Ok(Self::CapturePcm),
             17 => Ok(Self::PlayPcm),
             18 => Ok(Self::StopAudio),
+            19 => Ok(Self::StreamAudioPcm),
             _ => Err(ValidationError::UnknownOperation),
         }
     }
@@ -153,6 +156,7 @@ pub enum SnapshotFormat {
     Yuv422p = 3,
     Yuv420p = 4,
     TileDeltaYuv422 = 5,
+    H264 = 6,
 }
 
 impl SnapshotFormat {
@@ -164,6 +168,7 @@ impl SnapshotFormat {
             Self::Yuv422p => "yuv422p",
             Self::Yuv420p => "yuv420p",
             Self::TileDeltaYuv422 => "tile-delta-yuv422",
+            Self::H264 => "h264",
         }
     }
 }
@@ -178,6 +183,7 @@ impl TryFrom<u8> for SnapshotFormat {
             3 => Ok(Self::Yuv422p),
             4 => Ok(Self::Yuv420p),
             5 => Ok(Self::TileDeltaYuv422),
+            6 => Ok(Self::H264),
             _ => Err(ValidationError::InvalidDimensions),
         }
     }
@@ -383,7 +389,7 @@ impl StreamFrameHeader {
         payload_bytes: u32,
         sha256: [u8; 32],
     ) -> Result<Self, ValidationError> {
-        if (flags & !(STREAM_FLAG_KEYFRAME | STREAM_FLAG_DELTA)) != 0 {
+        if (flags & !(STREAM_FLAG_KEYFRAME | STREAM_FLAG_DELTA | STREAM_FLAG_STANDBY)) != 0 {
             return Err(ValidationError::NonZeroFlags);
         }
         if width == 0 || height == 0 || width > MAX_WIDTH || height > MAX_HEIGHT {
@@ -473,7 +479,7 @@ impl StreamFrameHeader {
         let height = u16::from_be_bytes([bytes[18], bytes[19]]);
         let format = SnapshotFormat::try_from(bytes[20])?;
         let flags = bytes[21];
-        if (flags & !(STREAM_FLAG_KEYFRAME | STREAM_FLAG_DELTA)) != 0
+        if (flags & !(STREAM_FLAG_KEYFRAME | STREAM_FLAG_DELTA | STREAM_FLAG_STANDBY)) != 0
             || bytes[22] != 0
             || bytes[23] != 0
             || bytes[28..32] != [0, 0, 0, 0]
@@ -1127,6 +1133,26 @@ mod tests {
         let mut delta_flags = encoded;
         delta_flags[21] = STREAM_FLAG_DELTA;
         assert!(StreamFrameHeader::decode(delta_flags).is_ok());
+
+        let mut standby_flags = encoded;
+        standby_flags[21] = STREAM_FLAG_STANDBY;
+        assert!(StreamFrameHeader::decode(standby_flags).is_ok());
+
+        // Accepts zero-payload standby frame
+        let standby_header = StreamFrameHeader::with_flags(
+            1,
+            12345,
+            1920,
+            1080,
+            SnapshotFormat::H264,
+            STREAM_FLAG_STANDBY,
+            0,
+            [0; 32],
+        )
+        .expect("standby header creation failed");
+        assert_eq!(standby_header.payload_bytes, 0);
+        let standby_frame = StreamFrame::new(standby_header, Vec::new()).expect("standby frame creation failed");
+        assert_eq!(standby_frame.payload.len(), 0);
     }
 
     #[test]
