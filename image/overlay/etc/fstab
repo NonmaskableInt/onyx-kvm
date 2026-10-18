@@ -8,3 +8,4 @@ tmpfs           /tmp           tmpfs    mode=1777,nosuid,nodev,size=32M        0
 tmpfs           /run           tmpfs    mode=0755,nosuid,nodev,size=32M        0      0
 sysfs           /sys           sysfs    defaults                               0      0
 none            /sys/kernel/config configfs defaults                           0      0
+/dev/mmcblk0p1  /boot          vfat     gid=900,fmask=0113,dmask=0002,noatime,nofail 0 0

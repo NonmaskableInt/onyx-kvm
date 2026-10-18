@@ -9,6 +9,8 @@
 #include <tinyalsa/pcm.h>
 #include <unistd.h>
 
+int pcm_avail_update(struct pcm *pcm);
+
 enum {
     CAPTURE_CARD = 0,
     CAPTURE_DEVICE = 0,
@@ -70,6 +72,102 @@ static int self_test(void)
     return EXIT_SUCCESS;
 }
 
+static volatile sig_atomic_t stream_interrupted = 0;
+
+static void stream_signal_handler(int sig)
+{
+    (void)sig;
+    stream_interrupted = 1;
+}
+
+static int stream_audio(void)
+{
+    enum {
+        STREAM_PERIOD_FRAMES = 320,
+        STREAM_PERIOD_COUNT = 10,
+        STREAM_CHUNK_FRAMES = 1600,
+        STREAM_CHUNK_BYTES = STREAM_CHUNK_FRAMES * sizeof(int16_t),
+    };
+    static const struct pcm_config stream_config = {
+        .channels = CAPTURE_CHANNELS,
+        .rate = CAPTURE_RATE,
+        .period_size = STREAM_PERIOD_FRAMES,
+        .period_count = STREAM_PERIOD_COUNT,
+        .format = PCM_FORMAT_S16_LE,
+        .start_threshold = 1,
+        .stop_threshold = STREAM_PERIOD_FRAMES * STREAM_PERIOD_COUNT,
+        .silence_threshold = 0,
+        .silence_size = 0,
+        .avail_min = STREAM_PERIOD_FRAMES,
+    };
+    struct sigaction sa = {0};
+    sa.sa_handler = stream_signal_handler;
+    sigemptyset(&sa.sa_mask);
+    sigaction(SIGTERM, &sa, NULL);
+    sigaction(SIGINT, &sa, NULL);
+    sigaction(SIGPIPE, &sa, NULL);
+
+    int16_t *buf = calloc(1, STREAM_CHUNK_BYTES);
+    if (buf == NULL) {
+        perror("calloc");
+        return EXIT_FAILURE;
+    }
+    (void)mlock(buf, STREAM_CHUNK_BYTES);
+
+    struct pcm *pcm = pcm_open(CAPTURE_CARD, CAPTURE_DEVICE, PCM_IN, &stream_config);
+    if (pcm == NULL) {
+        fputs("pcm_open_failed\n", stderr);
+        zero_memory(buf, STREAM_CHUNK_BYTES);
+        free(buf);
+        return EXIT_FAILURE;
+    }
+    if (!pcm_is_ready(pcm)) {
+        fprintf(stderr, "pcm_not_ready=%s\n", pcm_get_error(pcm));
+        pcm_close(pcm);
+        zero_memory(buf, STREAM_CHUNK_BYTES);
+        free(buf);
+        return EXIT_FAILURE;
+    }
+
+    unsigned char ready = 0;
+    if (write(STDOUT_FILENO, &ready, 1) != 1) {
+        pcm_close(pcm);
+        zero_memory(buf, STREAM_CHUNK_BYTES);
+        free(buf);
+        return EXIT_FAILURE;
+    }
+
+    while (!stream_interrupted) {
+        (void)pcm_avail_update(pcm);
+        int n = pcm_readi(pcm, buf, STREAM_CHUNK_FRAMES);
+        if (n != STREAM_CHUNK_FRAMES) {
+            if (n < 0) {
+                pcm_prepare(pcm);
+            }
+            continue;
+        }
+
+        size_t written = 0;
+        while (written < STREAM_CHUNK_BYTES && !stream_interrupted) {
+            ssize_t nw = write(STDOUT_FILENO, ((unsigned char *)buf) + written, STREAM_CHUNK_BYTES - written);
+            if (nw <= 0) {
+                if (nw < 0 && (errno == EINTR || errno == EAGAIN)) {
+                    continue;
+                }
+                stream_interrupted = 1;
+                break;
+            }
+            written += (size_t)nw;
+        }
+    }
+
+    pcm_close(pcm);
+    zero_memory(buf, STREAM_CHUNK_BYTES);
+    (void)munlock(buf, STREAM_CHUNK_BYTES);
+    free(buf);
+    return EXIT_SUCCESS;
+}
+
 int main(int argc, char **argv)
 {
     static const struct pcm_config config = {
@@ -96,8 +194,10 @@ int main(int argc, char **argv)
 
     if (argc == 2 && strcmp(argv[1], "--self-test") == 0)
         return self_test();
+    if (argc == 2 && (strcmp(argv[1], "stream") == 0 || strcmp(argv[1], "--stream") == 0))
+        return stream_audio();
     if (argc != 1) {
-        fputs("usage: cleankvm-audio-capture-probe [--self-test]\n", stderr);
+        fputs("usage: cleankvm-audio-capture-probe [--self-test|stream]\n", stderr);
         return EXIT_FAILURE;
     }
 

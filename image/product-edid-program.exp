@@ -1,0 +1,58 @@
+#!/usr/bin/expect -f
+set timeout 30
+if {$argc < 1} {
+    puts stderr "usage: product-edid-program.exp CREDENTIAL_PATH [NAME]"
+    exit 1
+}
+set credential_path [lindex $argv 0]
+set custom_name [lindex $argv 1]
+set fh [open $credential_path r]
+set credential_text [read $fh]
+close $fh
+if {![regexp -line {^password=(.*)$} $credential_text -> password]} { exit 2 }
+
+spawn /usr/bin/sudo /usr/bin/cu -l /dev/cu.usbserial-112440 -s 115200
+expect { -re {Connected\.} {} timeout { exit 7 } }
+send "\003\r\r"
+set logged_in 0
+set tries 0
+while {$tries < 6} {
+    set timeout 2
+    expect {
+        -re {# } { set logged_in 1; break }
+        -re {login: *$} { break }
+        timeout { incr tries; send "\r" }
+    }
+}
+set timeout 30
+if {!$logged_in} {
+    send "root\r"
+    expect { -re {Password: *$} {} timeout { send "~."; exit 4 } }
+    log_user 0
+    send -- "$password\r"
+    expect { -re {# } {} timeout { log_user 1; send "~."; exit 5 } }
+}
+unset password
+unset credential_text
+log_user 1
+
+proc run_command {command} {
+    send -- "$command\r"
+    expect { -re {# } {} timeout { send "~."; exit 6 } }
+}
+
+run_command {echo ONYX_KVM_EDID_PROGRAM_BEGIN}
+run_command {test -c /dev/i2c-4 && echo I2C_GATE=passed || { echo I2C_GATE=failed; exit 91; }}
+if {$custom_name != ""} {
+    run_command "/usr/libexec/cleankvm-lt6911uxc-edid-programmer --program-name '$custom_name'; printf 'PROGRAM_RC=%s\\n' \"\$?\""
+} else {
+    run_command {/usr/sbin/onyx-kvm-update-edid; printf 'PROGRAM_RC=%s\n' "$?"}
+}
+run_command {/usr/libexec/cleankvm-lt6911uxc-edid-programmer --read}
+run_command {echo ONYX_KVM_EDID_PROGRAM_END}
+set timeout 3
+catch {send "\r~.\r"}
+catch {close}
+catch {exec /usr/bin/sudo -n /usr/bin/killall -9 cu}
+catch {exec /usr/bin/sudo -n /bin/rm -f /var/spool/uucp/LCK..cu.usbserial-112440}
+exit 0

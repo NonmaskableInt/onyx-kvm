@@ -179,6 +179,11 @@ if test -n "$expected_identity"; then
         "$identity_dir/tls-private-key.pkcs8.der"
     cmp "$expected_identity/oauth-issuer-public-key.raw" \
         "$identity_dir/oauth-issuer-public-key.raw"
+    if test -f "$expected_identity/oauth-issuer-signing-key.raw"; then
+        test "$(wc -c <"$identity_dir/oauth-issuer-signing-key.raw" | tr -d ' ')" -eq 32
+        cmp "$expected_identity/oauth-issuer-signing-key.raw" \
+            "$identity_dir/oauth-issuer-signing-key.raw"
+    fi
 fi
 case "$expected_password_hash" in
     '!'|'$6$'*) ;;
@@ -287,15 +292,27 @@ if test -n "$expected_video_modules"; then
     fi
     test -n "$installed_video" && test -d "$installed_video"
     set -- "$installed_video"/*.ko
-    test "$#" -eq 6 || {
-        printf '%s\n' 'video quarantine must contain exactly six modules' >&2
+    if test "$#" -eq 9; then
+        for name in soph_sys soph_base soph_mipi_rx soph_snsr_i2c soph_vi soph_vpss soph_jpeg mars_vcodec cvi_vc_driver; do
+            test -f "$installed_video/$name.ko"
+            cmp "$expected_video_modules/$name.ko" "$installed_video/$name.ko"
+            test "$(stat -c %a "$installed_video/$name.ko")" = 400
+        done
+        if test -f "$expected_video_modules/coda980.bin"; then
+            test -f "$rootfs/usr/share/fw_vcodec/coda980.bin"
+            cmp "$expected_video_modules/coda980.bin" "$rootfs/usr/share/fw_vcodec/coda980.bin"
+            test "$(stat -c %a "$rootfs/usr/share/fw_vcodec/coda980.bin")" = 400 -o "$(stat -c %a "$rootfs/usr/share/fw_vcodec/coda980.bin")" = 444 -o "$(stat -c %a "$rootfs/usr/share/fw_vcodec/coda980.bin")" = 644
+        fi
+    elif test "$#" -eq 6; then
+        for name in soph_sys soph_base soph_mipi_rx soph_snsr_i2c soph_vi soph_vpss; do
+            test -f "$installed_video/$name.ko"
+            cmp "$expected_video_modules/$name.ko" "$installed_video/$name.ko"
+            test "$(stat -c %a "$installed_video/$name.ko")" = 400
+        done
+    else
+        printf 'video quarantine must contain six or nine modules, found %d\n' "$#" >&2
         exit 1
-    }
-    for name in soph_sys soph_base soph_mipi_rx soph_snsr_i2c soph_vi soph_vpss; do
-        test -f "$installed_video/$name.ko"
-        cmp "$expected_video_modules/$name.ko" "$installed_video/$name.ko"
-        test "$(stat -c %a "$installed_video/$name.ko")" = 400
-    done
+    fi
     ! find "$rootfs/etc/init.d" -type f -exec grep -l 'video-quarantine\|soph_.*\.ko' '{}' + | grep -q .
 fi
 

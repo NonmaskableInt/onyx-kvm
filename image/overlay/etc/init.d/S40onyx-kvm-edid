@@ -1,0 +1,16 @@
+#!/bin/sh
+set -eu
+
+case "${1:-start}" in
+    start)
+        if [ -x /usr/sbin/onyx-kvm-update-edid ]; then
+            /usr/sbin/onyx-kvm-update-edid || true
+        fi
+        ;;
+    stop|restart|reload)
+        ;;
+    *)
+        printf 'usage: %s {start|stop|restart}\n' "$0" >&2
+        exit 1
+        ;;
+esac

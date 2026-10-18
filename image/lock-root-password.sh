@@ -37,13 +37,21 @@ if test -n "$identity_source"; then
             "$dir/tls-private-key.pkcs8.der"
         install -m 0644 "$identity_source/oauth-issuer-public-key.raw" \
             "$dir/oauth-issuer-public-key.raw"
+        if test -f "$identity_source/oauth-issuer-signing-key.raw"; then
+            install -m 0640 "$identity_source/oauth-issuer-signing-key.raw" \
+                "$dir/oauth-issuer-signing-key.raw"
+        fi
     done
 fi
 
 for dir in "$target_dir/usr/lib/onyx-kvm/video-quarantine" "$target_dir/usr/lib/cleankvm/video-quarantine"; do
     if test -d "$dir"; then
         set -- "$dir"/*.ko
-        test "$#" -eq 6
+        test "$#" -eq 6 -o "$#" -eq 9
         chmod 0400 "$@"
     fi
 done
+
+if test -f "$target_dir/usr/share/fw_vcodec/coda980.bin"; then
+    chmod 0444 "$target_dir/usr/share/fw_vcodec/coda980.bin"
+fi

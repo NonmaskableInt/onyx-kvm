@@ -8,11 +8,35 @@ work_volume=${CLEANKVM_WORK_VOLUME:-cleankvm-work-v50}
 download_volume=${CLEANKVM_DOWNLOAD_VOLUME:-cleankvm-buildroot-dl-v50}
 host_tools_volume=${CLEANKVM_HOST_TOOLS_VOLUME:-cleankvm-host-tools}
 incremental=${CLEANKVM_INCREMENTAL_ROOTFS:-0}
-credential_hash_file=${CLEANKVM_RECOVERY_PASSWORD_HASH_FILE:-}
-identity_dir=${CLEANKVM_IDENTITY_DIR:-}
 config_profile=${CLEANKVM_CONFIG_PROFILE:-phase1}
+
+default_credential_hash_file=
+if test -f "$repo_root/out/product-v64-secrets/recovery-password.sha512"; then
+    case "$config_profile" in
+        product)
+            default_credential_hash_file=$repo_root/out/product-v64-secrets/recovery-password.sha512
+            ;;
+    esac
+fi
+credential_hash_file=${CLEANKVM_RECOVERY_PASSWORD_HASH_FILE:-$default_credential_hash_file}
+
+default_identity_dir=
+if test -d "$repo_root/out/product-v64-secrets/identity"; then
+    case "$config_profile" in
+        product)
+            default_identity_dir=$repo_root/out/product-v64-secrets/identity
+            ;;
+    esac
+fi
+identity_dir=${CLEANKVM_IDENTITY_DIR:-$default_identity_dir}
 default_video_module_dir=$repo_root/out/phase3-video-modules-v1
-if test -d "$repo_root/out/phase3-video-modules-v48"; then
+if test -d "$repo_root/out/phase3-video-modules-v51"; then
+    case "$config_profile" in
+        phase3-video-foundation|product)
+            default_video_module_dir=$repo_root/out/phase3-video-modules-v51
+            ;;
+    esac
+elif test -d "$repo_root/out/phase3-video-modules-v48"; then
     case "$config_profile" in
         phase3-video-foundation|product)
             default_video_module_dir=$repo_root/out/phase3-video-modules-v48
@@ -22,7 +46,37 @@ fi
 video_module_dir=${CLEANKVM_VIDEO_MODULE_DIR:-$default_video_module_dir}
 
 default_raw_frame_probe=
-if test -f "$repo_root/out/phase3-raw-frame-probe-v50/cleankvm-raw-frame-probe"; then
+if test -f "$repo_root/out/phase3-raw-frame-probe-v55/cleankvm-raw-frame-probe"; then
+    case "$config_profile" in
+        phase3-video-foundation|product)
+            default_raw_frame_probe=$repo_root/out/phase3-raw-frame-probe-v55/cleankvm-raw-frame-probe
+            ;;
+    esac
+elif test -f "$repo_root/out/phase3-raw-frame-probe-v54/cleankvm-raw-frame-probe"; then
+    case "$config_profile" in
+        phase3-video-foundation|product)
+            default_raw_frame_probe=$repo_root/out/phase3-raw-frame-probe-v54/cleankvm-raw-frame-probe
+            ;;
+    esac
+elif test -f "$repo_root/out/phase3-raw-frame-probe-v53/cleankvm-raw-frame-probe"; then
+    case "$config_profile" in
+        phase3-video-foundation|product)
+            default_raw_frame_probe=$repo_root/out/phase3-raw-frame-probe-v53/cleankvm-raw-frame-probe
+            ;;
+    esac
+elif test -f "$repo_root/out/phase3-raw-frame-probe-v52/cleankvm-raw-frame-probe"; then
+    case "$config_profile" in
+        phase3-video-foundation|product)
+            default_raw_frame_probe=$repo_root/out/phase3-raw-frame-probe-v52/cleankvm-raw-frame-probe
+            ;;
+    esac
+elif test -f "$repo_root/out/phase3-raw-frame-probe-v51/cleankvm-raw-frame-probe"; then
+    case "$config_profile" in
+        phase3-video-foundation|product)
+            default_raw_frame_probe=$repo_root/out/phase3-raw-frame-probe-v51/cleankvm-raw-frame-probe
+            ;;
+    esac
+elif test -f "$repo_root/out/phase3-raw-frame-probe-v50/cleankvm-raw-frame-probe"; then
     case "$config_profile" in
         phase3-video-foundation|product)
             default_raw_frame_probe=$repo_root/out/phase3-raw-frame-probe-v50/cleankvm-raw-frame-probe
@@ -63,7 +117,21 @@ if test -f "$repo_root/out/phase3a-playback-probe-v1/cleankvm-audio-playback-pro
 fi
 audio_playback_probe=${CLEANKVM_AUDIO_PLAYBACK_PROBE:-$default_audio_playback_probe}
 
-edid_programmer=${CLEANKVM_EDID_PROGRAMMER:-}
+default_edid_programmer=
+if test -f "$repo_root/out/lt6911uxc-edid-programmer-v2/cleankvm-lt6911uxc-edid-programmer"; then
+    case "$config_profile" in
+        product)
+            default_edid_programmer=$repo_root/out/lt6911uxc-edid-programmer-v2/cleankvm-lt6911uxc-edid-programmer
+            ;;
+    esac
+elif test -f "$repo_root/out/lt6911uxc-edid-programmer-v1/cleankvm-lt6911uxc-edid-programmer"; then
+    case "$config_profile" in
+        product)
+            default_edid_programmer=$repo_root/out/lt6911uxc-edid-programmer-v1/cleankvm-lt6911uxc-edid-programmer
+            ;;
+    esac
+fi
+edid_programmer=${CLEANKVM_EDID_PROGRAMMER:-$default_edid_programmer}
 lt_backup=${CLEANKVM_LT_BACKUP:-}
 identity_source=
 set --
@@ -173,6 +241,19 @@ fi
             install -m 0755 "$hidsrc" cleankvm/phase1-overlay/usr/bin/onyx-kvm-hid-broker
             ln -sf onyx-kvm-hid-broker cleankvm/phase1-overlay/usr/bin/cleankvm-hid-broker
         fi
+
+        mkdir -p cleankvm/phase1-overlay/usr/lib/onyx-kvm/dev
+        if [ -f /repo/out/dev-dropbear-v1/dropbear ]; then
+            install -m 0755 /repo/out/dev-dropbear-v1/dropbear cleankvm/phase1-overlay/usr/lib/onyx-kvm/dev/dropbear
+            if [ -e /repo/out/dev-dropbear-v1/dropbearkey ]; then
+                cp -a /repo/out/dev-dropbear-v1/dropbearkey cleankvm/phase1-overlay/usr/lib/onyx-kvm/dev/dropbearkey
+            fi
+            mkdir -p buildroot/output/target/usr/lib/onyx-kvm/dev 2>/dev/null || true
+            install -m 0755 /repo/out/dev-dropbear-v1/dropbear buildroot/output/target/usr/lib/onyx-kvm/dev/dropbear 2>/dev/null || true
+            if [ -e /repo/out/dev-dropbear-v1/dropbearkey ]; then
+                cp -a /repo/out/dev-dropbear-v1/dropbearkey buildroot/output/target/usr/lib/onyx-kvm/dev/dropbearkey 2>/dev/null || true
+            fi
+        fi
         # The SDK work volume is deliberately reusable, but Buildroot overlays
         # are additive. Remove every optional artifact from both the source
         # overlay and an incremental target before installing the artifacts
@@ -220,6 +301,13 @@ fi
                 install -m 0444 "$module" \
                     "cleankvm/phase1-overlay/usr/lib/cleankvm/video-quarantine/$(basename "$module")"
             done
+            if [ -f /video-modules/coda980.bin ]; then
+                mkdir -p cleankvm/phase1-overlay/usr/share/fw_vcodec
+                install -m 0444 /video-modules/coda980.bin cleankvm/phase1-overlay/usr/share/fw_vcodec/coda980.bin
+            elif [ -f /work/sdk/ramdisk/rootfs/common_musl_riscv64/usr/share/fw_vcodec/coda980.bin ]; then
+                mkdir -p cleankvm/phase1-overlay/usr/share/fw_vcodec
+                install -m 0444 /work/sdk/ramdisk/rootfs/common_musl_riscv64/usr/share/fw_vcodec/coda980.bin cleankvm/phase1-overlay/usr/share/fw_vcodec/coda980.bin
+            fi
         fi
         # Incremental profile changes must not carry generated device nodes from
         # an earlier audio image into a non-audio filesystem. These nodes are
@@ -320,6 +408,9 @@ fi
         fi
         if [ -n "$CLEANKVM_LT_BACKUP" ]; then
             chmod 0500 /work/sdk/buildroot/output/target/usr/libexec/cleankvm-lt6911uxc-flash-backup
+        fi
+        if [ -f /work/sdk/buildroot/output/target/usr/share/fw_vcodec/coda980.bin ]; then
+            chmod 0444 /work/sdk/buildroot/output/target/usr/share/fw_vcodec/coda980.bin
         fi
         hid_broker=
         video_modules=

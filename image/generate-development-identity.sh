@@ -45,8 +45,11 @@ openssl pkey -pubin -in "$issuer_public_pem" -outform DER -out "$temporary_der"
 test "$(wc -c <"$temporary_der" | tr -d ' ')" -eq 44
 tail -c 32 "$temporary_der" >"$issuer_public_raw"
 test "$(wc -c <"$issuer_public_raw" | tr -d ' ')" -eq 32
+issuer_signing_raw="$output_dir/oauth-issuer-signing-key.raw"
+openssl pkey -in "$issuer_key" -outform DER | tail -c 32 >"$issuer_signing_raw"
+test "$(wc -c <"$issuer_signing_raw" | tr -d ' ')" -eq 32
 
-chmod 0600 "$tls_key" "$issuer_key"
+chmod 0600 "$tls_key" "$issuer_key" "$issuer_signing_raw"
 chmod 0600 "$tls_key_der"
 chmod 0644 "$tls_certificate" "$tls_certificate_der" "$issuer_public_pem" \
     "$issuer_public_raw"

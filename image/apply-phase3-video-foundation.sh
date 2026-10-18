@@ -26,11 +26,25 @@ if test -n "$module_dir"; then
     module_target="$sdk_dir/cleankvm/phase1-overlay/usr/lib/cleankvm/video-quarantine"
     mkdir -p "$module_target"
     set -- "$module_dir"/*.ko
-    test "$#" -eq 6
-    for name in soph_sys soph_base soph_mipi_rx soph_snsr_i2c soph_vi soph_vpss; do
-        test -f "$module_dir/$name.ko"
-        install -m 0444 "$module_dir/$name.ko" "$module_target/$name.ko"
-    done
+    if test "$#" -eq 9; then
+        for name in soph_sys soph_base soph_mipi_rx soph_snsr_i2c soph_vi soph_vpss soph_jpeg mars_vcodec cvi_vc_driver; do
+            test -f "$module_dir/$name.ko"
+            install -m 0444 "$module_dir/$name.ko" "$module_target/$name.ko"
+        done
+    elif test "$#" -eq 6; then
+        for name in soph_sys soph_base soph_mipi_rx soph_snsr_i2c soph_vi soph_vpss; do
+            test -f "$module_dir/$name.ko"
+            install -m 0444 "$module_dir/$name.ko" "$module_target/$name.ko"
+        done
+    else
+        printf 'unexpected number of video modules: %d (expected 6 or 9)\n' "$#" >&2
+        exit 1
+    fi
+    if test -f "$module_dir/coda980.bin"; then
+        fw_target="$sdk_dir/cleankvm/phase1-overlay/usr/share/fw_vcodec"
+        mkdir -p "$fw_target"
+        install -m 0444 "$module_dir/coda980.bin" "$fw_target/coda980.bin"
+    fi
     (cd "$module_dir" && sha256sum -c SHA256SUMS)
     cp "$repo_root/image/lock-root-password.sh" "$sdk_dir/cleankvm/lock-root-password.sh"
     chmod 0755 "$sdk_dir/cleankvm/lock-root-password.sh"

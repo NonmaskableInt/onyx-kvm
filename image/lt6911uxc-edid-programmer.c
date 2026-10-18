@@ -108,7 +108,7 @@ io_fail:
     return -1;
 }
 
-static int program_edid(void) {
+static int program_edid(const uint8_t *payload) {
     static const uint8_t zero_page[PAGE_SIZE] = {0};
     uint8_t status = 0;
     unsigned i;
@@ -128,7 +128,7 @@ static int program_edid(void) {
     PUT(SYS,0x5a,0x80); PUT(SYS,0x5a,0x84); PUT(SYS,0x5a,0x80);
     for (i = 0; i != 9; ++i) {
         PUT(SYS,0x5e,0xdf); PUT(SYS,0x5a,0x20); PUT(SYS,0x5a,0x00); PUT(SYS,0x58,0x21);
-        if (put_block(SYS, 0x59, i == 8 ? zero_page : e21_edid + i * PAGE_SIZE, PAGE_SIZE)) goto io_fail;
+        if (put_block(SYS, 0x59, i == 8 ? zero_page : payload + i * PAGE_SIZE, PAGE_SIZE)) goto io_fail;
         PUT(SYS,0x5b,0x01); PUT(SYS,0x5c,i == 8 ? 0x81 : 0x80); PUT(SYS,0x5d,i == 8 ? 0 : i * PAGE_SIZE);
         PUT(SYS,0x5e,0xc0); PUT(SYS,0x5a,0x90); PUT(SYS,0x5a,0x80);
         PUT(SYS,0x5a,i == 8 ? 0x88 : 0x84); PUT(SYS,0x5a,0x80);
@@ -140,17 +140,77 @@ io_fail:
     return -1;
 }
 
+static int prepare_named_edid(uint8_t *out, const char *name) {
+    size_t len = strlen(name);
+    size_t i;
+    unsigned sum;
+    uint8_t desc[13];
+
+    if (len == 0 || len > 13) {
+        fprintf(stderr, "error: EDID name length must be between 1 and 13 ASCII characters\n");
+        return -1;
+    }
+    for (i = 0; i < len; ++i) {
+        if ((unsigned char)name[i] < 32 || (unsigned char)name[i] > 126) {
+            fprintf(stderr, "error: EDID name must contain only printable ASCII characters\n");
+            return -1;
+        }
+    }
+    memcpy(out, e21_edid, EDID_SIZE);
+
+    memcpy(desc, name, len);
+    if (len < 13) {
+        desc[len] = 0x0a;
+        for (i = len + 1; i < 13; ++i) {
+            desc[i] = 0x20;
+        }
+    }
+
+    /* Descriptor 2 (offset 72): tag 0xFF (Display Serial Number) -> text at offset 77..89 */
+    memcpy(out + 77, desc, 13);
+    /* Descriptor 3 (offset 90): tag 0xFC (Display Product Name) -> text at offset 95..107 */
+    memcpy(out + 95, desc, 13);
+
+    /* Recalculate Block 0 checksum at byte 127 */
+    sum = 0;
+    for (i = 0; i < 127; ++i) {
+        sum += out[i];
+    }
+    out[127] = (uint8_t)((256 - (sum & 0xff)) & 0xff);
+
+    if (!valid_edid(out)) {
+        fprintf(stderr, "error: constructed EDID failed structural validation\n");
+        return -1;
+    }
+    return 0;
+}
+
 int main(int argc, char **argv) {
     uint8_t before[EDID_SIZE], after[EDID_SIZE];
+    uint8_t custom_edid[EDID_SIZE];
+    const uint8_t *target_payload = NULL;
+    int do_read_only = 0;
     int result = 1;
-    if (argc != 2 || strcmp(argv[1], "--program-e21") != 0) {
-        fprintf(stderr, "usage: %s --program-e21\n", argv[0]);
+
+    if (argc == 2 && strcmp(argv[1], "--program-e21") == 0) {
+        target_payload = e21_edid;
+    } else if (argc == 3 && strcmp(argv[1], "--program-name") == 0) {
+        if (prepare_named_edid(custom_edid, argv[2])) {
+            return 1;
+        }
+        target_payload = custom_edid;
+    } else if (argc == 2 && strcmp(argv[1], "--read") == 0) {
+        do_read_only = 1;
+    } else {
+        fprintf(stderr, "usage: %s [--program-e21 | --program-name <NAME> | --read]\n", argv[0]);
         return 2;
     }
-    if (!valid_edid(e21_edid)) {
-        fputs("embedded E21 EDID validation failed\n", stderr);
+
+    if (target_payload != NULL && !valid_edid(target_payload)) {
+        fputs("target EDID validation failed\n", stderr);
         return 1;
     }
+
     fd = open(I2C_PATH, O_RDWR | O_CLOEXEC);
     if (fd < 0 || ioctl(fd, I2C_SLAVE, I2C_ADDRESS) < 0) {
         perror("opening fixed LT6911UXC endpoint");
@@ -160,23 +220,40 @@ int main(int argc, char **argv) {
         perror("pre-write EDID read");
         goto resume;
     }
-    printf("pre-write-edid=%s\n", valid_edid(before) ? "valid" : "invalid");
-    if (!memcmp(before, e21_edid, EDID_SIZE)) {
-        puts("E21 EDID already installed; no write performed");
+
+    if (do_read_only) {
+        char name[14];
+        int i;
+        memset(name, 0, sizeof(name));
+        for (i = 0; i < 13; ++i) {
+            uint8_t c = before[95 + i];
+            if (c == 0x0a || c < 32 || c > 126) break;
+            name[i] = (char)c;
+        }
+        printf("current_edid_valid=%s\n", valid_edid(before) ? "true" : "false");
+        printf("current_product_name=%s\n", name);
         result = 0;
         goto resume;
     }
-    if (program_edid()) {
-        perror("bounded E21 program sequence");
+
+    printf("pre-write-edid=%s\n", valid_edid(before) ? "valid" : "invalid");
+    if (!memcmp(before, target_payload, EDID_SIZE)) {
+        puts("Target EDID already installed; no write performed");
+        result = 0;
+        goto resume;
+    }
+    if (program_edid(target_payload)) {
+        perror("bounded EDID program sequence");
         goto resume;
     }
     sleep(1);
-    if (read_edid(after) || memcmp(after, e21_edid, EDID_SIZE)) {
+    if (read_edid(after) || memcmp(after, target_payload, EDID_SIZE)) {
         fputs("post-write byte-for-byte verification failed\n", stderr);
         goto resume;
     }
-    puts("E21 EDID programmed and verified; remove power before HDMI testing");
+    puts("Target EDID programmed and verified; power cycle HDMI source to re-enumerate");
     result = 0;
+
 resume:
     bank = 0xff;
     if (put(SYS, 0xee, 0x00)) {

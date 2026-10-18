@@ -4,3 +4,4 @@ iface lo inet loopback
 auto eth0
 iface eth0 inet dhcp
 	pre-up /usr/sbin/onyx-kvm-wait-carrier eth0 10
+	hostname onyx-kvm
