@@ -2,6 +2,19 @@
 set -eu
 
 repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+
+# The SDK has tracked paths that differ only by case, so a checkout on a
+# case-insensitive host (macOS) always looks modified. Verify the clean
+# case-sensitive checkout in the source volume instead, inside the builder.
+if [ -z "${ONYX_KVM_SDK_DIR:-}" ] && [ "$(uname)" = "Darwin" ]; then
+    . "$repo_root/image/default-env.sh"
+    exec "$CONTAINER_ENGINE" run --rm --arch amd64 --network none \
+        -v "$ONYX_KVM_SOURCE_VOLUME:/source:ro" -v "$repo_root:/repo:ro" \
+        -e ONYX_KVM_SDK_DIR=/source/sdk \
+        -e ONYX_KVM_ALLOW_UNRESOLVED_SOURCES="${ONYX_KVM_ALLOW_UNRESOLVED_SOURCES:-0}" \
+        "$ONYX_KVM_BUILDER_TAG" sh /repo/image/verify-sources.sh
+fi
+
 lock_file="$repo_root/image/sources.lock"
 builder_lock="$repo_root/image/builder.lock"
 sdk_dir=${ONYX_KVM_SDK_DIR:-"$repo_root/dl/LicheeRV-Nano-Build"}
@@ -16,11 +29,11 @@ test -f "$lock_file" || fail "missing image/sources.lock"
 test -f "$builder_lock" || fail "missing image/builder.lock"
 test -d "$sdk_dir/.git" || fail "missing SDK checkout at $sdk_dir"
 
-actual_sdk_revision=$(git -C "$sdk_dir" rev-parse HEAD)
+actual_sdk_revision=$(git -c safe.directory="*" -C "$sdk_dir" rev-parse HEAD)
 test "$actual_sdk_revision" = "$expected_sdk_revision" ||
     fail "SDK revision is $actual_sdk_revision, expected $expected_sdk_revision"
 
-if test -n "$(git -C "$sdk_dir" status --porcelain --untracked-files=no)"; then
+if test -n "$(git -c safe.directory="*" -C "$sdk_dir" status --porcelain --untracked-files=no)"; then
     fail "SDK checkout has tracked modifications"
 fi
 

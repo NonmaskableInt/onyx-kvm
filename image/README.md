@@ -26,7 +26,10 @@ and refuses every `PENDING-REVIEW` and `NO-LICENSE-GRANT` entry. `build.sh`,
 builds set `ONYX_KVM_ALLOW_UNRESOLVED_SOURCES=1` (OPEN_ITEMS B1); the result is
 not releasable. Development images that need `kvm.dev.exec` also set
 `ONYX_KVM_DEV_TOOLS=1` for `build-rust-daemon.sh` and the rootfs build.
-`apply-osdrv-patch.sh` applies patch 0028 to the pinned sophgo-osdrv checkout.
+`apply-osdrv-patch.sh` applies patch 0028 to the pinned sophgo-osdrv checkout, and
+`build-phase3-video-modules.sh OUTPUT_DIR` builds the nine video modules and
+the VPU firmware from the pinned sources (OPEN_ITEMS B5); point
+`ONYX_KVM_VIDEO_MODULE_DIR` at its output for a rootfs build.
 
 The kernel fragment in `configs/phase1-kernel.fragment` documents the recovery
 image boundary. The U-Boot fragment in `configs/phase1-uboot.fragment` reduces
