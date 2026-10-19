@@ -24,18 +24,10 @@ struct Config {
 
 fn main() -> ExitCode {
     let config = Config {
-        socket: env_path_any("ONYX_KVM_HID_SOCKET", "CLEANKVM_HID_SOCKET", DEFAULT_SOCKET),
-        enable: env_path_any("ONYX_KVM_HID_ENABLE", "CLEANKVM_HID_ENABLE", DEFAULT_ENABLE),
-        keyboard: env_path_any(
-            "ONYX_KVM_HID_KEYBOARD",
-            "CLEANKVM_HID_KEYBOARD",
-            DEFAULT_KEYBOARD,
-        ),
-        pointer: env_path_any(
-            "ONYX_KVM_HID_POINTER",
-            "CLEANKVM_HID_POINTER",
-            DEFAULT_POINTER,
-        ),
+        socket: env_path("ONYX_KVM_HID_SOCKET", DEFAULT_SOCKET),
+        enable: env_path("ONYX_KVM_HID_ENABLE", DEFAULT_ENABLE),
+        keyboard: env_path("ONYX_KVM_HID_KEYBOARD", DEFAULT_KEYBOARD),
+        pointer: env_path("ONYX_KVM_HID_POINTER", DEFAULT_POINTER),
     };
     match run(&config) {
         Ok(()) => ExitCode::SUCCESS,
@@ -46,10 +38,8 @@ fn main() -> ExitCode {
     }
 }
 
-fn env_path_any(name: &str, fallback_name: &str, default: &str) -> PathBuf {
-    env::var_os(name)
-        .or_else(|| env::var_os(fallback_name))
-        .map_or_else(|| PathBuf::from(default), PathBuf::from)
+fn env_path(name: &str, default: &str) -> PathBuf {
+    env::var_os(name).map_or_else(|| PathBuf::from(default), PathBuf::from)
 }
 
 fn run(config: &Config) -> io::Result<()> {

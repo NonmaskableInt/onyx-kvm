@@ -13,7 +13,7 @@ Nano configuration, not a NanoKVM Lite security profile.
 The SDK cannot be checked out faithfully on the default case-insensitive macOS
 filesystem because it contains tracked paths that differ only by case. A clean
 checkout was therefore created in the case-sensitive Linux volume
-`cleankvm-sdk`. Its worktree was clean at the pinned commit. The full SDK
+`onyx-kvm-sdk`. Its worktree was clean at the pinned commit. The full SDK
 SHA-256 hashes a commit-based `git archive --format=tar` stream. Component
 SHA-256 values hash their recursive `git ls-tree` manifests, avoiding the
 non-deterministic timestamp used when archiving a tree object directly.
@@ -35,7 +35,7 @@ non-deterministic timestamp used when archiving a tree object directly.
 - The stock partition definition creates writable boot and root partitions.
 - Vendor documentation expects a mutable Ubuntu build host and separately
   downloaded host-tool binaries. That process is not acceptable release
-  provenance for CleanKVM.
+  provenance for Onyx KVM.
 - The first offline boot-chain compile confirmed that the SDK does not include
   its required `riscv64-unknown-linux-musl` compiler. SOPHGO's official
   `host-tools` repository provides the expected GCC 10.2.0 binaries. U-Boot,
@@ -64,7 +64,7 @@ non-deterministic timestamp used when archiving a tree object directly.
 
 ## Decision
 
-Do not build or flash the vendor defconfig as CleanKVM. Phase 1 must derive a
+Do not build or flash the vendor defconfig as Onyx KVM. Phase 1 must derive a
 minimal board configuration with only boot-critical firmware, serial console,
 SD storage, watchdog/thermal observation, and wired Ethernet. Wi-Fi, audio,
 video, HID, virtual media, package management, SSH, and web services stay off.
@@ -82,7 +82,7 @@ properties, not unfinished-error bypasses.
   Static strings identify EL1/AArch64 and EL3-style runtime services. The build
   selects this file only when `BOOT_CPU=aarch64`; SG2002 RISC-V instead builds
   and packages OpenSBI `fw_dynamic.bin` from the pinned source. The BL31 binary
-  is therefore excluded from CleanKVM Phase 1.
+  is therefore excluded from Onyx KVM Phase 1.
 - The RISC-V FIP rule still supplies the opaque 8,192-byte
   `fsbl/test/cv181x/ddr_param.bin`
   (`sha256:5b7d44720997f018621fe4a462111b2d53954a5d1e2a794c83dd1dd6516eebaa`).
@@ -122,7 +122,7 @@ properties, not unfinished-error bypasses.
   video or audio phases may admit only the smallest individually identified
   artifacts after source/license correspondence and sandboxing review.
 - The SDK contains crypt-tool configuration and a key-generation helper. No
-  vendor or example key is permitted to become a CleanKVM signing identity;
+  vendor or example key is permitted to become a Onyx KVM signing identity;
   release keys must be generated and held outside the source tree.
 
 ## Required before approval

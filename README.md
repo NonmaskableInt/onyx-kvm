@@ -5,11 +5,24 @@ Sipeed NanoKVM Lite (SG2002). Network-facing services and device control are
 implemented in Rust. Vendor-specific multimedia code is isolated behind a
 small, auditable video adapter.
 
-The independently assembled Phase 1 recovery checkpoint now boots repeatedly
-on target hardware and has passed memory and wired-DHCP qualification. It is
-still a **development image**, not an approved release image; see
-[docs/PHASE1_ACCEPTANCE.md](docs/PHASE1_ACCEPTANCE.md) for the evidence and
-claim boundary.
+## Status
+
+The image is a hardware-qualified **development** build, not an approved
+release. As of product release candidate v80 it boots from an independently
+assembled SD image and provides, on a NanoKVM Lite:
+
+- authenticated HTTPS web console and MCP (2025-11-25) with scoped,
+  audience-bound Ed25519 tokens;
+- USB keyboard and pointer (HID broker), with host wake;
+- 1080p60 HDMI capture, hardware H.264 and tile-delta streaming (video broker);
+- opt-in, metrics-only microphone capture and a fixed-tone speaker test
+  (audio brokers), each behind its own gate and off by default.
+
+Virtual media, continuous audio, A/B updates, verified boot, an SBOM and a
+second-builder reproduction are not done; see
+[docs/OPEN_ITEMS.md](docs/OPEN_ITEMS.md) for what is open and
+[docs/ROADMAP.md](docs/ROADMAP.md) for the phase plan. Start from the
+[documentation index](docs/README.md).
 
 ## Goals
 
@@ -22,14 +35,15 @@ claim boundary.
   same authorization and policy layer.
 - Keep HID, virtual-media, update, and reboot operations out of the
   network-facing process.
-- Produce checksums, an SBOM, provenance metadata, and reproducible images.
+- Produce checksums, an SBOM, provenance metadata, and reproducible images
+  (planned; see OPEN_ITEMS B1 to B4).
 
 ## Repository layout
 
 - `crates/onyx-kvm-core`: hardware-neutral domain types and authorization
   policy.
-- `crates/onyx-kvm-mcp`: bounded MCP 2025-11-25 stdio server and default-deny
-  tool handling.
+- `crates/onyx-kvm-mcp`: bounded MCP 2025-11-25 server (stdio and HTTPS
+  transport glue), Ed25519 JWT validation, and default-deny tool handling.
 - `crates/onyx-kvm-memtest`: bounded, address-sensitive and March-style Rust
   memory qualification utility for controlled hardware testing.
 - `crates/onyx-kvm-hid-broker`: privileged, fail-closed HID broker and USB gadget writer.
@@ -37,32 +51,41 @@ claim boundary.
 - `crates/onyx-kvm-audio-brokers`: isolated audio capture and playback brokers.
 - `crates/onyx-kvm-media-protocol`: shared fixed-size media and snapshot wire protocols.
 - `crates/onyx-kvm-evidence`: hardware and security evidence collector.
-- `crates/onyx-kvmd`: local recovery and authenticated HTTPS MCP daemon.
+- `crates/onyx-kvmd`: authenticated HTTPS daemon: web console, MCP endpoint,
+  pairing and setup, media streaming.
 - `image/`: independently built image integration and pinned inputs.
 - `docs/`: architecture, security model, and bring-up records.
 
-The vendor SDK is currently a quarantined discovery input. The source and
-build gates intentionally refuse to produce an image until its components,
-licenses, and Linux builder are pinned; see
-[docs/SDK_AUDIT.md](docs/SDK_AUDIT.md).
+The vendor SDK is a pinned, quarantined board-support input. Its commit,
+component digests and licenses are recorded in `image/sources.lock`;
+`image/verify-sources.sh` refuses to pass while any entry is `PENDING-REVIEW`
+(FSBL and the multimedia stack still are). The image build does not yet run that
+gate itself; see [docs/SDK_AUDIT.md](docs/SDK_AUDIT.md) and
+[docs/OPEN_ITEMS.md](docs/OPEN_ITEMS.md) B1.
 
 ## Developer checks
 
 ```sh
-cargo fmt --check
-cargo test --workspace --locked
-cargo clippy --workspace --locked --all-targets -- -D warnings
+cargo test --workspace --locked          # required; passes
+cargo fmt --check                        # target gate; currently fails (OPEN_ITEMS Q1)
+cargo clippy --workspace --locked --all-targets -- -D warnings   # target gate; currently fails (Q1)
 ```
 
-Build the local recovery daemon as a self-contained SG2002 userspace binary:
+Build the on-target Rust binaries (static `riscv64gc-unknown-linux-musl`,
+cross-linked with `rust-lld`) with the scripts in `image/`, for example:
 
 ```sh
-cargo rustc --release --target riscv64gc-unknown-linux-musl \
-  --package onyx-kvmd --offline -- \
-  -C linker=rust-lld -C link-self-contained=yes \
-  -C target-feature=+crt-static
+image/build-rust-daemon.sh           # onyx-kvmd
+image/build-rust-hid-broker.sh
+image/build-rust-video-broker.sh
+image/build-rust-audio-brokers.sh
 ```
 
-See [docs/ROADMAP.md](docs/ROADMAP.md) for the staged hardware plan.
-The Phase 0 procedure and read-only collector are documented in
-[docs/HARDWARE_EVIDENCE.md](docs/HARDWARE_EVIDENCE.md).
+The image build, verification and flashing workflow is in
+[image/README.md](image/README.md). The `onyx-kvm` naming standard and the
+migration from the earlier CleanKVM name are in
+[docs/NAMING.md](docs/NAMING.md). Contributor and hardware rules are in
+[AGENTS.md](AGENTS.md).
+
+See [docs/HARDWARE_EVIDENCE.md](docs/HARDWARE_EVIDENCE.md) for the Phase 0
+stock-device collector.

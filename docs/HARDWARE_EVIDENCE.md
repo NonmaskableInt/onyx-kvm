@@ -8,14 +8,14 @@ Build the statically linked collector for the target:
 
 ```sh
 cargo build --release --target riscv64gc-unknown-linux-musl \
-  --package cleankvm-evidence
+  --package onyx-kvm-evidence
 ```
 
 Copy only the resulting binary to removable media. On the device, choose a new
 output directory on that media:
 
 ```sh
-./cleankvm-evidence /mnt/evidence/stock-board-1
+./onyx-kvm-evidence /mnt/evidence/stock-board-1
 ```
 
 The collector performs read-only probes. It refuses to use an existing output

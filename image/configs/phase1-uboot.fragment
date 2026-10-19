@@ -1,4 +1,4 @@
-# CleanKVM Phase 1 U-Boot policy.
+# Onyx KVM Phase 1 U-Boot policy.
 # U-Boot is a fixed-function SD/FAT FIT loader. Linux owns the SG2002 internal
 # Ethernet PHY power/reset sequence; the boot loader contains no network core.
 
@@ -78,7 +78,7 @@ CONFIG_ENV_IS_NOWHERE=y
 # CONFIG_GZIP is not set
 # Vendor U-Boot's FIT symbol unconditionally selects MD5 and SHA-1 alongside
 # SHA-256, and its ZLIB library defaults on. Their commands are disabled and
-# CleanKVM's FIT declares only SHA-256; removing the libraries requires a
+# Onyx KVM's FIT declares only SHA-256; removing the libraries requires a
 # reviewed source change rather than an ineffective Kconfig request.
 # CONFIG_MTD is not set
 # CONFIG_SPI is not set

@@ -1,5 +1,5 @@
 /*
- * Bounded LT6911UXC E21 EDID programmer for CleanKVM.
+ * Bounded LT6911UXC E21 EDID programmer for Onyx KVM.
  *
  * Derived from Sipeed NanoKVM nanokvm_update_edid.c at commit
  * bd070b2f5ce27d22618e8a1c8d2bdca543429882. GPL-3.0-or-later.

@@ -3,8 +3,8 @@
 /etc/onyx-kvm/tls-private-key.pkcs8.der f 0640 0 900 - - - - -
 /etc/onyx-kvm/oauth-issuer-public-key.raw f 0644 0 0 - - - - -
 /etc/onyx-kvm/oauth-issuer-signing-key.raw f 0640 0 900 - - - - -
-/etc/cleankvm d 0750 0 900 - - - - -
-/etc/cleankvm/tls-certificate.der f 0644 0 0 - - - - -
-/etc/cleankvm/tls-private-key.pkcs8.der f 0640 0 900 - - - - -
-/etc/cleankvm/oauth-issuer-public-key.raw f 0644 0 0 - - - - -
-/etc/cleankvm/oauth-issuer-signing-key.raw f 0640 0 900 - - - - -
+/etc/onyx-kvm d 0750 0 900 - - - - -
+/etc/onyx-kvm/tls-certificate.der f 0644 0 0 - - - - -
+/etc/onyx-kvm/tls-private-key.pkcs8.der f 0640 0 900 - - - - -
+/etc/onyx-kvm/oauth-issuer-public-key.raw f 0644 0 0 - - - - -
+/etc/onyx-kvm/oauth-issuer-signing-key.raw f 0640 0 900 - - - - -

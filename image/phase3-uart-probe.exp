@@ -45,7 +45,7 @@ proc run_command {command} {
     }
 }
 
-run_command {echo CLEANKVM_PHASE3_EVIDENCE_V1}
+run_command {echo ONYX_KVM_PHASE3_EVIDENCE_V1}
 run_command {printf 'MODEL='; tr -d '\000' </proc/device-tree/model 2>/dev/null || echo unavailable; echo}
 run_command {printf 'COMPATIBLE='; tr '\000' ',' </proc/device-tree/compatible 2>/dev/null || echo unavailable; echo}
 run_command {echo '[I2C_ADAPTERS]'}
@@ -64,6 +64,6 @@ run_command {echo '[ALSA_CARDS]'; test -r /proc/asound/cards && sed -n '1,80p' /
 run_command {echo '[ALSA_PCM]'; test -r /proc/asound/pcm && sed -n '1,80p' /proc/asound/pcm || echo absent}
 run_command {echo '[RESERVED_MEMORY_NODES]'}
 run_command {if test -d /proc/device-tree/reserved-memory; then find /proc/device-tree/reserved-memory -mindepth 1 -maxdepth 1 -type d -exec basename '{}' \; | LC_ALL=C sort; else echo absent; fi}
-run_command {echo CLEANKVM_PHASE3_EVIDENCE_END}
+run_command {echo ONYX_KVM_PHASE3_EVIDENCE_END}
 send "~."
 expect eof

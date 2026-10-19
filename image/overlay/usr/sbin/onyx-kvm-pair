@@ -9,9 +9,6 @@ token_input=${1:-}
 pin_input=${2:-}
 
 run_dir=/run/onyx-kvm
-if [ ! -d "$run_dir" ] && [ -d /run/cleankvm ]; then
-    run_dir=/run/cleankvm
-fi
 mkdir -p "$run_dir"
 chmod 2750 "$run_dir"
 
@@ -43,12 +40,6 @@ chown root:900 "$run_dir/pairing-code"
 printf '%s\n' "$token_input" > "$run_dir/pending-session-token"
 chmod 0640 "$run_dir/pending-session-token"
 chown root:900 "$run_dir/pending-session-token"
-
-# Ensure backward-compatible path exists if cleankvm path is accessed
-if [ "$run_dir" = /run/onyx-kvm ] && [ -e /run/cleankvm ]; then
-    ln -sf /run/onyx-kvm/pairing-code /run/cleankvm/pairing-code 2>/dev/null || true
-    ln -sf /run/onyx-kvm/pending-session-token /run/cleankvm/pending-session-token 2>/dev/null || true
-fi
 
 printf '\n===================================================\n'
 printf '           Onyx KVM Pairing Ceremony\n'

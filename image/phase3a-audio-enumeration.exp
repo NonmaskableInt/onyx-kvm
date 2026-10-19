@@ -43,9 +43,9 @@ proc run_command {command} {
     }
 }
 
-run_command {echo CLEANKVM_PHASE3A_ENUMERATION_V1}
+run_command {echo ONYX_KVM_PHASE3A_ENUMERATION_V1}
 run_command {printf 'UPTIME='; cut -d' ' -f1 /proc/uptime; printf 'TAINT='; cat /proc/sys/kernel/tainted}
-run_command {echo '[SERVICES]'; for p in cleankvmd cleankvm-hid-broker; do printf "$p="; pidof "$p" || echo absent; done}
+run_command {echo '[SERVICES]'; for p in onyx-kvmd onyx-kvm-hid-broker; do printf "$p="; pidof "$p" || echo absent; done}
 run_command {echo '[NETWORK]'; ip -4 -br addr 2>/dev/null || ip -4 addr; netstat -lnt 2>/dev/null || true}
 run_command {echo '[SOUND_SYSFS]'; for n in /sys/class/sound/*; do test -e "$n" && { printf '%s -> ' "${n##*/}"; readlink -f "$n"; }; done}
 run_command {echo '[CARD_IDS]'; for n in /sys/class/sound/card*/id; do test -r "$n" && { printf '%s=' "${n%/id}"; cat "$n"; }; done}
@@ -55,6 +55,6 @@ run_command {echo '[AUDIO_DT_STATUS]'; find /sys/firmware/devicetree/base -type 
 run_command {echo '[AUDIO_LOG]'; dmesg | grep -Ei 'alsa|asoc|audio|sound|cv18.*(adc|dac|i2s)' | tail -80 || true}
 run_command {echo '[PCM_OPEN_AUDIT]'; found=0; for f in /proc/[0-9]*/fd/*; do target=$(readlink "$f" 2>/dev/null || true); case "$target" in /dev/snd/*) echo "$f -> $target"; found=1;; esac; done; test "$found" = 1 || echo none}
 run_command {echo '[CONTAINMENT]'; printf 'MODULES='; awk 'NR<=5 {print}' /proc/modules 2>/dev/null; printf 'MEDIA_NODES='; for n in /dev/video* /dev/media* /dev/v4l-subdev* /dev/cvi-*; do test -e "$n" && printf '%s,' "$n"; done; echo; printf 'UAC='; find /sys/kernel/config/usb_gadget -type d \( -name 'uac.*' -o -name 'uac1.*' -o -name 'uac2.*' \) 2>/dev/null | head -10}
-run_command {echo CLEANKVM_PHASE3A_ENUMERATION_END}
+run_command {echo ONYX_KVM_PHASE3A_ENUMERATION_END}
 send "~."
 expect eof

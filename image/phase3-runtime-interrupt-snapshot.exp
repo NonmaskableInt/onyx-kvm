@@ -1,6 +1,6 @@
 #!/usr/bin/expect -f
 
-# Capture a read-only runtime inventory from either stock or CleanKVM. The
+# Capture a read-only runtime inventory from either stock or Onyx KVM. The
 # credential is supplied from an ignored/local file and is never printed.
 set timeout 60
 set credential_path [lindex $argv 0]

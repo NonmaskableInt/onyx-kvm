@@ -45,8 +45,8 @@ proc run_command {command} {
     }
 }
 
-set module_dir /usr/lib/cleankvm/video-quarantine
-run_command {echo CLEANKVM_PHASE3_MODULE_TEST_V1}
+set module_dir /usr/lib/onyx-kvm/video-quarantine
+run_command {echo ONYX_KVM_PHASE3_MODULE_TEST_V1}
 run_command {printf 'PRE_TAINT='; cat /proc/sys/kernel/tainted}
 run_command {printf 'PRELOADED='; awk '$1 ~ /^soph_/ {printf "%s,", $1}' /proc/modules; echo}
 
@@ -68,6 +68,6 @@ foreach module {soph_vpss soph_vi soph_snsr_i2c soph_mipi_rx soph_base soph_sys}
 run_command {echo '[VIDEO_NODES_AFTER_UNLOAD]'; for n in /dev/video* /dev/media* /dev/v4l-subdev* /dev/cvi-*; do test -e "$n" && echo "$n"; done}
 run_command {printf 'FINAL_LOADED='; awk '$1 ~ /^soph_/ {printf "%s,", $1}' /proc/modules; echo}
 run_command {printf 'POST_TAINT='; cat /proc/sys/kernel/tainted}
-run_command {echo CLEANKVM_PHASE3_MODULE_TEST_END}
+run_command {echo ONYX_KVM_PHASE3_MODULE_TEST_END}
 send "~."
 expect eof

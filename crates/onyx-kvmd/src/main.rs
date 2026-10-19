@@ -1,3 +1,9 @@
+#![allow(
+    clippy::too_many_lines,
+    clippy::too_many_arguments,
+    clippy::needless_raw_string_hashes
+)]
+
 use std::io;
 
 mod https;

@@ -2,10 +2,12 @@
 set -eu
 
 repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-engine=${CONTAINER_ENGINE:-podman}
-builder=${CLEANKVM_BUILDER_TAG:-localhost/cleankvm-builder:ubuntu-22.04-amd64}
-work_volume=${CLEANKVM_WORK_VOLUME:-cleankvm-work-v4}
-download_volume=${CLEANKVM_DOWNLOAD_VOLUME:-cleankvm-buildroot-dl-v2}
+. "$repo_root/image/default-env.sh"
+
+engine=$CONTAINER_ENGINE
+builder=$ONYX_KVM_BUILDER_TAG
+work_volume=$ONYX_KVM_WORK_VOLUME
+download_volume=${ONYX_KVM_DOWNLOAD_VOLUME:-onyx-kvm-buildroot-dl-v2}
 
 command -v "$engine" >/dev/null 2>&1 || {
     printf 'missing container engine: %s\n' "$engine" >&2

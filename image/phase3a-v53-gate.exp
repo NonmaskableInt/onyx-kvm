@@ -7,13 +7,13 @@ send "\r"
 after 800
 switch -- $mode {
     capture {
-        send -- "rm -f /run/cleankvm/audio-output-enabled; touch /run/cleankvm/audio-capture-enabled; echo V53_CAPTURE_GATE_READY\r"
+        send -- "rm -f /run/onyx-kvm/audio-output-enabled; touch /run/onyx-kvm/audio-capture-enabled; echo V53_CAPTURE_GATE_READY\r"
     }
     output {
-        send -- "rm -f /run/cleankvm/audio-capture-enabled; touch /run/cleankvm/audio-output-enabled; echo V53_OUTPUT_GATE_READY\r"
+        send -- "rm -f /run/onyx-kvm/audio-capture-enabled; touch /run/onyx-kvm/audio-output-enabled; echo V53_OUTPUT_GATE_READY\r"
     }
     cleanup {
-        send -- "rm -f /run/cleankvm/audio-capture-enabled /run/cleankvm/audio-output-enabled; printf 'SOUND_FDS='; for p in /proc/\[0-9\]*/fd/*; do t=\$(readlink \"\$p\" 2>/dev/null || true); case \"\$t\" in /dev/snd/*) printf '%s,' \"\$p\";; esac; done; echo; echo V53_AUDIO_GATES_CLEAN; exit\r"
+        send -- "rm -f /run/onyx-kvm/audio-capture-enabled /run/onyx-kvm/audio-output-enabled; printf 'SOUND_FDS='; for p in /proc/\[0-9\]*/fd/*; do t=\$(readlink \"\$p\" 2>/dev/null || true); case \"\$t\" in /dev/snd/*) printf '%s,' \"\$p\";; esac; done; echo; echo V53_AUDIO_GATES_CLEAN; exit\r"
     }
     default { send "\r~."; exit 2 }
 }

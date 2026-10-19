@@ -219,7 +219,7 @@ def main() -> int:
     parser.add_argument(
         "--label",
         type=str,
-        help="Filter candidate by volume label substring (case-insensitive, e.g. CLEANKVM).",
+        help="Filter candidate by volume label substring (case-insensitive, e.g. ONYXKVM).",
     )
     parser.add_argument(
         "--max-gb",

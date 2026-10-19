@@ -2,7 +2,7 @@
 
 ## Process split
 
-`cleankvmd` owns TLS, bearer validation, MCP, rate limits, and session policy.
+`onyx-kvmd` owns TLS, bearer validation, MCP, rate limits, and session policy.
 It cannot open multimedia, ALSA, raw block, USB gadget, I2C, or GPIO devices.
 It sends typed, bounded requests to local brokers after authorization.
 

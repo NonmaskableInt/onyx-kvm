@@ -45,14 +45,14 @@ proc run_command {command} {
 }
 
 if {$mode eq "update"} {
-    run_command {/etc/init.d/S50cleankvmd stop 2>/dev/null || true; /etc/init.d/S47cleankvm-video-broker stop 2>/dev/null || true; killall cleankvmd cleankvm-video-broker 2>/dev/null || true; rm -f /run/cleankvm/video.sock /tmp/cleankvmd /tmp/cleankvm-video-broker}
-    run_command {wget -q -O /tmp/cleankvmd http://192.168.2.1:18080/phase2-rust/cleankvmd && test "$(sha256sum /tmp/cleankvmd | awk '{print $1}')" = "98fe72b6bfd80114708a97f9418f513564a5b2fa93100738933c61c436d8af20" && install -m 0755 /tmp/cleankvmd /usr/bin/cleankvmd && rm -f /tmp/cleankvmd && echo CLEANKVMD_UPDATED_OK}
-    run_command {wget -q -O /tmp/cleankvm-video-broker http://192.168.2.1:18080/phase3-rust/cleankvm-video-broker && test "$(sha256sum /tmp/cleankvm-video-broker | awk '{print $1}')" = "bcee855c38024d79ae927b5ada05d59939b26e11ca2ac7457a176ee1041f108d" && install -m 0755 /tmp/cleankvm-video-broker /usr/bin/cleankvm-video-broker && rm -f /tmp/cleankvm-video-broker && echo BROKER_UPDATED_OK}
-    run_command {/etc/init.d/S47cleankvm-video-broker start && /etc/init.d/S50cleankvmd start && sleep 1 && touch /run/cleankvm/video-enabled && printf 'PIDS=%s,%s\n' "$(pidof cleankvm-video-broker)" "$(pidof cleankvmd)"}
+    run_command {/etc/init.d/S50onyx-kvmd stop 2>/dev/null || true; /etc/init.d/S47onyx-kvm-video-broker stop 2>/dev/null || true; killall onyx-kvmd onyx-kvm-video-broker 2>/dev/null || true; rm -f /run/onyx-kvm/video.sock /tmp/onyx-kvmd /tmp/onyx-kvm-video-broker}
+    run_command {wget -q -O /tmp/onyx-kvmd http://192.168.2.1:18080/phase2-rust/onyx-kvmd && test "$(sha256sum /tmp/onyx-kvmd | awk '{print $1}')" = "98fe72b6bfd80114708a97f9418f513564a5b2fa93100738933c61c436d8af20" && install -m 0755 /tmp/onyx-kvmd /usr/bin/onyx-kvmd && rm -f /tmp/onyx-kvmd && echo ONYX_KVMD_UPDATED_OK}
+    run_command {wget -q -O /tmp/onyx-kvm-video-broker http://192.168.2.1:18080/phase3-rust/onyx-kvm-video-broker && test "$(sha256sum /tmp/onyx-kvm-video-broker | awk '{print $1}')" = "bcee855c38024d79ae927b5ada05d59939b26e11ca2ac7457a176ee1041f108d" && install -m 0755 /tmp/onyx-kvm-video-broker /usr/bin/onyx-kvm-video-broker && rm -f /tmp/onyx-kvm-video-broker && echo BROKER_UPDATED_OK}
+    run_command {/etc/init.d/S47onyx-kvm-video-broker start && /etc/init.d/S50onyx-kvmd start && sleep 1 && touch /run/onyx-kvm/video-enabled && printf 'PIDS=%s,%s\n' "$(pidof onyx-kvm-video-broker)" "$(pidof onyx-kvmd)"}
 } elseif {$mode eq "enable"} {
-    run_command {touch /run/cleankvm/video-enabled && ls -l /run/cleankvm/video-enabled /run/cleankvm/video.sock}
+    run_command {touch /run/onyx-kvm/video-enabled && ls -l /run/onyx-kvm/video-enabled /run/onyx-kvm/video.sock}
 } elseif {$mode eq "read"} {
-    run_command {rm -f /run/cleankvm/video-enabled; sync; sha256sum /usr/bin/cleankvmd /usr/bin/cleankvm-video-broker; test ! -e /run/cleankvm-frame.yuv422p; echo FRAME_ABSENT_RC=$?; test ! -e /dev/mem; echo DEVMEM_ABSENT_RC=$?; printf 'FINAL_LOADED='; awk '$1 ~ /^soph_/ {printf "%s,", $1}' /proc/modules; echo; printf 'POST_TAINT='; cat /proc/sys/kernel/tainted}
+    run_command {rm -f /run/onyx-kvm/video-enabled; sync; sha256sum /usr/bin/onyx-kvmd /usr/bin/onyx-kvm-video-broker; test ! -e /run/onyx-kvm-frame.yuv422p; echo FRAME_ABSENT_RC=$?; test ! -e /dev/mem; echo DEVMEM_ABSENT_RC=$?; printf 'FINAL_LOADED='; awk '$1 ~ /^soph_/ {printf "%s,", $1}' /proc/modules; echo; printf 'POST_TAINT='; cat /proc/sys/kernel/tainted}
 }
 send "~."
 expect eof

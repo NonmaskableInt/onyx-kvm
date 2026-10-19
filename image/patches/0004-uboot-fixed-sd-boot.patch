@@ -16,7 +16,7 @@ index 74c61fb..e84147a 100644
  		#define CONFIG_BOOTCOMMAND	"cvi_update_rtos"
  	#elif CONFIG_SD_BOOT
 -		#define CONFIG_BOOTCOMMAND	"run loadenvcmd ; " SHOWLOGOCMD "run sdboot || run sdbootauto"
-+		/* CleanKVM: do not import unsigned uEnv.txt or enter an automatic
++		/* Onyx KVM: do not import unsigned uEnv.txt or enter an automatic
 +		 * update fallback. Boot exactly one SHA-256-described FIT from the
 +		 * first FAT partition on the SD card.
 +		 */

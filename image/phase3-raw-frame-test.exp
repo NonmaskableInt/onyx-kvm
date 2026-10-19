@@ -45,10 +45,10 @@ proc run_command {command} {
     }
 }
 
-set module_dir /usr/lib/cleankvm/video-quarantine
-set frame /run/cleankvm-frame.yuv422p
-run_command {echo CLEANKVM_PHASE3_RAW_FRAME_TEST_V2}
-run_command {rm -f /run/cleankvm-frame.yuv422p}
+set module_dir /usr/lib/onyx-kvm/video-quarantine
+set frame /run/onyx-kvm-frame.yuv422p
+run_command {echo ONYX_KVM_PHASE3_RAW_FRAME_TEST_V2}
+run_command {rm -f /run/onyx-kvm-frame.yuv422p}
 run_command {test ! -e /dev/mem; echo DEVMEM_ABSENT_RC=$?}
 run_command {printf 'PRE_TAINT='; cat /proc/sys/kernel/tainted}
 run_command {printf 'PRELOADED='; awk '$1 ~ /^soph_/ {printf "%s,", $1}' /proc/modules; echo}
@@ -58,10 +58,10 @@ foreach module {soph_sys soph_base soph_mipi_rx soph_snsr_i2c soph_vi soph_vpss}
     run_command "insmod $module_dir/$module.ko; echo LOAD_${module}_RC=\$?"
 }
 run_command {echo '[VIDEO_NODES_AFTER_LOAD]'; for n in /dev/video* /dev/media* /dev/v4l-subdev* /dev/cvi-*; do test -e "$n" && echo "$n"; done}
-run_command {/usr/libexec/cleankvm-raw-frame-probe 0; echo PROBE_RC=$?}
+run_command {/usr/libexec/onyx-kvm-raw-frame-probe 0; echo PROBE_RC=$?}
 run_command {echo '[MIPI_RX_LIVE_STATUS]'; cat /proc/mipi-rx}
-run_command {if test -f /run/cleankvm-frame.yuv422p; then stat -c 'FRAME_MODE=%a FRAME_UID=%u FRAME_GID=%g FRAME_BYTES=%s' /run/cleankvm-frame.yuv422p; sha256sum /run/cleankvm-frame.yuv422p | sed 's/ .*/  FRAME/'; else echo FRAME_ABSENT; fi}
-run_command {rm -f /run/cleankvm-frame.yuv422p; test ! -e /run/cleankvm-frame.yuv422p; echo FRAME_CLEANUP_RC=$?}
+run_command {if test -f /run/onyx-kvm-frame.yuv422p; then stat -c 'FRAME_MODE=%a FRAME_UID=%u FRAME_GID=%g FRAME_BYTES=%s' /run/onyx-kvm-frame.yuv422p; sha256sum /run/onyx-kvm-frame.yuv422p | sed 's/ .*/  FRAME/'; else echo FRAME_ABSENT; fi}
+run_command {rm -f /run/onyx-kvm-frame.yuv422p; test ! -e /run/onyx-kvm-frame.yuv422p; echo FRAME_CLEANUP_RC=$?}
 
 foreach module {soph_vpss soph_vi soph_snsr_i2c soph_mipi_rx soph_base soph_sys} {
     run_command "rmmod $module; echo UNLOAD_${module}_RC=\$?"
@@ -70,6 +70,6 @@ run_command {printf 'FINAL_LOADED='; awk '$1 ~ /^soph_/ {printf "%s,", $1}' /pro
 run_command {echo '[VIDEO_NODES_AFTER_UNLOAD]'; for n in /dev/video* /dev/media* /dev/v4l-subdev* /dev/cvi-*; do test -e "$n" && echo "$n"; done}
 run_command {printf 'POST_TAINT='; cat /proc/sys/kernel/tainted}
 run_command {dmesg | tail -n 40}
-run_command {echo CLEANKVM_PHASE3_RAW_FRAME_TEST_END}
+run_command {echo ONYX_KVM_PHASE3_RAW_FRAME_TEST_END}
 send "~."
 expect eof

@@ -10,9 +10,9 @@
 +module_param(cif_diagnostic_stock_rx0n_mclk1, bool, 0444);
 +MODULE_PARM_DESC(cif_diagnostic_stock_rx0n_mclk1,
 +		 "temporarily select stock beta CAM_MCLK1 function on RX0N");
-+static void __iomem *cleankvm_rx0n_mux;
-+static u32 cleankvm_rx0n_mux_saved;
-+static bool cleankvm_rx0n_mux_applied;
++static void __iomem *onyx_kvm_rx0n_mux;
++static u32 onyx_kvm_rx0n_mux_saved;
++static bool onyx_kvm_rx0n_mux_applied;
  
  static int bypass_mac_clk;
  module_param(bypass_mac_clk, int, 0644);
@@ -21,49 +21,49 @@
  		iounmap(mux);
  }
 +
-+static void cleankvm_apply_stock_rx0n_mux(struct device *device)
++static void onyx_kvm_apply_stock_rx0n_mux(struct device *device)
 +{
 +	u32 value;
  
 +	if (!cif_diagnostic_stock_rx0n_mclk1)
 +		return;
-+	cleankvm_rx0n_mux = ioremap(0x0300118c, sizeof(u32));
-+	if (!cleankvm_rx0n_mux) {
-+		dev_err(device, "cleankvm-rx0n-mux map failed\n");
++	onyx_kvm_rx0n_mux = ioremap(0x0300118c, sizeof(u32));
++	if (!onyx_kvm_rx0n_mux) {
++		dev_err(device, "onyx-kvm-rx0n-mux map failed\n");
 +		return;
 +	}
-+	cleankvm_rx0n_mux_saved = readl(cleankvm_rx0n_mux);
-+	value = (cleankvm_rx0n_mux_saved & ~0x7U) | 0x5U;
-+	writel(value, cleankvm_rx0n_mux);
-+	value = readl(cleankvm_rx0n_mux);
++	onyx_kvm_rx0n_mux_saved = readl(onyx_kvm_rx0n_mux);
++	value = (onyx_kvm_rx0n_mux_saved & ~0x7U) | 0x5U;
++	writel(value, onyx_kvm_rx0n_mux);
++	value = readl(onyx_kvm_rx0n_mux);
 +	if ((value & 0x7U) != 0x5U) {
-+		dev_err(device, "cleankvm-rx0n-mux apply failed saved=%08x readback=%08x\n",
-+			cleankvm_rx0n_mux_saved, value);
-+		writel(cleankvm_rx0n_mux_saved, cleankvm_rx0n_mux);
-+		iounmap(cleankvm_rx0n_mux);
-+		cleankvm_rx0n_mux = NULL;
++		dev_err(device, "onyx-kvm-rx0n-mux apply failed saved=%08x readback=%08x\n",
++			onyx_kvm_rx0n_mux_saved, value);
++		writel(onyx_kvm_rx0n_mux_saved, onyx_kvm_rx0n_mux);
++		iounmap(onyx_kvm_rx0n_mux);
++		onyx_kvm_rx0n_mux = NULL;
 +		return;
 +	}
-+	cleankvm_rx0n_mux_applied = true;
-+	dev_info(device, "cleankvm-rx0n-mux applied saved=%08x active=%08x\n",
-+		 cleankvm_rx0n_mux_saved, value);
++	onyx_kvm_rx0n_mux_applied = true;
++	dev_info(device, "onyx-kvm-rx0n-mux applied saved=%08x active=%08x\n",
++		 onyx_kvm_rx0n_mux_saved, value);
 +}
 +
-+static void cleankvm_restore_rx0n_mux(struct device *device)
++static void onyx_kvm_restore_rx0n_mux(struct device *device)
 +{
 +	u32 value;
 +
-+	if (!cleankvm_rx0n_mux)
++	if (!onyx_kvm_rx0n_mux)
 +		return;
-+	if (cleankvm_rx0n_mux_applied) {
-+		writel(cleankvm_rx0n_mux_saved, cleankvm_rx0n_mux);
-+		value = readl(cleankvm_rx0n_mux);
-+		dev_info(device, "cleankvm-rx0n-mux restored=%08x expected=%08x\n",
-+			 value, cleankvm_rx0n_mux_saved);
++	if (onyx_kvm_rx0n_mux_applied) {
++		writel(onyx_kvm_rx0n_mux_saved, onyx_kvm_rx0n_mux);
++		value = readl(onyx_kvm_rx0n_mux);
++		dev_info(device, "onyx-kvm-rx0n-mux restored=%08x expected=%08x\n",
++			 value, onyx_kvm_rx0n_mux_saved);
 +	}
-+	iounmap(cleankvm_rx0n_mux);
-+	cleankvm_rx0n_mux = NULL;
-+	cleankvm_rx0n_mux_applied = false;
++	iounmap(onyx_kvm_rx0n_mux);
++	onyx_kvm_rx0n_mux = NULL;
++	onyx_kvm_rx0n_mux_applied = false;
 +}
 +
  static int cvi_cif_probe(struct platform_device *pdev)
@@ -73,7 +73,7 @@
  		dev_err(&pdev->dev, "cif: can't init procfs.\n");
  #endif
  
-+	cleankvm_apply_stock_rx0n_mux(&pdev->dev);
++	onyx_kvm_apply_stock_rx0n_mux(&pdev->dev);
  	return 0;
  }
  
@@ -81,7 +81,7 @@
  		return -EINVAL;
  	}
  
-+	cleankvm_restore_rx0n_mux(&pdev->dev);
++	onyx_kvm_restore_rx0n_mux(&pdev->dev);
 +
  	/* rm cif_cb */
  	if (cif_rm_cb())

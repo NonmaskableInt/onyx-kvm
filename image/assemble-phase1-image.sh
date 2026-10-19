@@ -2,8 +2,8 @@
 set -eu
 
 repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-artifact_dir=${CLEANKVM_ARTIFACT_DIR:-"$repo_root/out/phase1"}
-expected_boot_sha256=${CLEANKVM_EXPECTED_BOOT_SHA256:-}
+artifact_dir=${ONYX_KVM_ARTIFACT_DIR:-"$repo_root/out/phase1"}
+expected_boot_sha256=${ONYX_KVM_EXPECTED_BOOT_SHA256:-}
 
 test -f "$artifact_dir/boot.sd"
 test -f "$artifact_dir/rootfs.ext4"
@@ -30,8 +30,8 @@ python3 "$repo_root/image/verify-sd-image.py" \
     "$artifact_dir/boot.sd" \
     "$artifact_dir/rootfs.ext4" \
     "$artifact_dir/fip.bin"
-if [ "$img_name" != "cleankvm-phase1.img" ]; then
-    ln -sf "$img_name" "$artifact_dir/cleankvm-phase1.img"
+if [ "$img_name" != "onyx-kvm-phase1.img" ]; then
+    ln -sf "$img_name" "$artifact_dir/onyx-kvm-phase1.img"
 fi
 (cd "$artifact_dir" && \
     shasum -a 256 boot.sd rootfs.ext4 fip.bin phase1.its "$img_name" > SHA256SUMS && \

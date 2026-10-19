@@ -2,7 +2,7 @@
 set -eu
 
 repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-sdk_dir=${CLEANKVM_SDK_DIR:-"$repo_root/dl/LicheeRV-Nano-Build"}
+sdk_dir=${ONYX_KVM_SDK_DIR:-"$repo_root/dl/LicheeRV-Nano-Build"}
 
 "$repo_root/image/verify-sources.sh"
 

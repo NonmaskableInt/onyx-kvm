@@ -51,11 +51,11 @@ proc run_command {command} {
     }
 }
 
-set module_dir /usr/lib/cleankvm/video-quarantine
-set frame /run/cleankvm-frame.yuv422p
+set module_dir /usr/lib/onyx-kvm/video-quarantine
+set frame /run/onyx-kvm-frame.yuv422p
 
-run_command {echo CLEANKVM_PHASE3_PLATFORM_SETTLE_SWEEP_BEGIN}
-run_command {rm -f /run/cleankvm-frame.yuv422p /tmp/settle-sweep.log}
+run_command {echo ONYX_KVM_PHASE3_PLATFORM_SETTLE_SWEEP_BEGIN}
+run_command {rm -f /run/onyx-kvm-frame.yuv422p /tmp/settle-sweep.log}
 run_command {test ! -e /dev/mem; echo DEVMEM_ABSENT_RC=$?}
 run_command {printf 'PRE_TAINT='; cat /proc/sys/kernel/tainted; printf 'PRELOADED='; awk '$1 ~ /^soph_/ {printf "%s,", $1}' /proc/modules; echo}
 
@@ -68,8 +68,8 @@ foreach settle $settles {
     foreach mod {soph_sys soph_base soph_mipi_rx soph_snsr_i2c soph_vi soph_vpss} {
         run_command "insmod $module_dir/$mod.ko; echo LOAD_${test}_${mod}_RC=\$?"
     }
-    run_command "/usr/libexec/cleankvm-raw-frame-probe 0 1080 $settle 0,0,0,0,0 2,4,3,1,0 > /tmp/settle-sweep.log 2>&1; rc=\$?; echo PROBE_${test}_RC=\$rc"
-    run_command "grep -E 'CLEANKVM_LANE_PROFILE|CLEANKVM_MIPI_T|Devno EccErr|^ *0 +|Digital:|VISofCh0Cnt|VIPreFECh0Cnt|CVI_VI_GetChnFrame' /tmp/settle-sweep.log || true"
+    run_command "/usr/libexec/onyx-kvm-raw-frame-probe 0 1080 $settle 0,0,0,0,0 2,4,3,1,0 > /tmp/settle-sweep.log 2>&1; rc=\$?; echo PROBE_${test}_RC=\$rc"
+    run_command "grep -E 'ONYX_KVM_LANE_PROFILE|ONYX_KVM_MIPI_T|Devno EccErr|^ *0 +|Digital:|VISofCh0Cnt|VIPreFECh0Cnt|CVI_VI_GetChnFrame' /tmp/settle-sweep.log || true"
     run_command "echo SETTLE_SWEEP_${test}_FINAL_MIPI; cat /proc/mipi-rx"
     run_command "if test -f $frame; then stat -c 'FRAME_BYTES=%s' $frame; sha256sum $frame; else echo FRAME_ABSENT; fi"
     run_command "rm -f $frame /tmp/settle-sweep.log"
@@ -80,9 +80,9 @@ foreach settle $settles {
     run_command "echo SETTLE_SWEEP_${test}_END"
 }
 
-run_command {rm -f /tmp/settle-sweep.log /run/cleankvm-frame.yuv422p}
+run_command {rm -f /tmp/settle-sweep.log /run/onyx-kvm-frame.yuv422p}
 run_command {printf 'FINAL_LOADED='; awk '$1 ~ /^soph_/ {printf "%s,", $1}' /proc/modules; echo}
 run_command {printf 'POST_TAINT='; cat /proc/sys/kernel/tainted}
-run_command {echo CLEANKVM_PHASE3_PLATFORM_SETTLE_SWEEP_END}
+run_command {echo ONYX_KVM_PHASE3_PLATFORM_SETTLE_SWEEP_END}
 send "~."
 expect eof

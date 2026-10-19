@@ -9,7 +9,7 @@ dropbear_key_bin=/usr/lib/onyx-kvm/dev/dropbearkey
 dropbear_pid=/run/dropbear.pid
 
 is_dev_mode() {
-    [ -f /boot/DEV_MODE ] || [ -f /boot/dev_mode ] || [ -f /run/onyx-kvm/dev-mode ] || [ -f /run/cleankvm/dev-mode ]
+    [ -f /boot/DEV_MODE ] || [ -f /boot/dev_mode ] || [ -f /run/onyx-kvm/dev-mode ]
 }
 
 start_dev_mode() {
@@ -70,7 +70,7 @@ start_dev_mode() {
 }
 
 stop_dev_mode() {
-    rm -f /run/onyx-kvm/dev-mode /run/cleankvm/dev-mode 2>/dev/null || true
+    rm -f /run/onyx-kvm/dev-mode 2>/dev/null || true
 
     if [ -f "$dropbear_pid" ]; then
         kill "$(cat "$dropbear_pid")" 2>/dev/null || true

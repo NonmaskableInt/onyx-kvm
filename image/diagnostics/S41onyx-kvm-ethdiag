@@ -9,7 +9,7 @@ report()
 	iface=eth0
 	base=/sys/class/net/$iface
 
-	echo "CleanKVM Ethernet diagnostic: $label" >/dev/console
+	echo "Onyx KVM Ethernet diagnostic: $label" >/dev/console
 	if ! test -d "$base"; then
 		echo "  eth0: absent" >/dev/console
 		return

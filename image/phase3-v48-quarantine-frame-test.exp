@@ -1,7 +1,7 @@
 #!/usr/bin/expect -f
 
-# Verify that the flashed v48 CleanKVM image captures a complete 1920x1080 YUV422P
-# frame directly from its built-in /usr/lib/cleankvm/video-quarantine module set
+# Verify that the flashed v48 Onyx KVM image captures a complete 1920x1080 YUV422P
+# frame directly from its built-in /usr/lib/onyx-kvm/video-quarantine module set
 # (with permanent 0x48 pad pull-downs and 0x3 MIPI RX pinmux enforced by patch 0027),
 # and cleanly reverse-unloads all six modules.
 set timeout 120
@@ -74,10 +74,10 @@ proc run_checked {command marker} {
     }
 }
 
-set module_dir /usr/lib/cleankvm/video-quarantine
-run_command {echo CLEANKVM_V48_QUARANTINE_FRAME_TEST_START}
+set module_dir /usr/lib/onyx-kvm/video-quarantine
+run_command {echo ONYX_KVM_V48_QUARANTINE_FRAME_TEST_START}
 run_checked "actual=\$(sha256sum $module_dir/soph_mipi_rx.ko | awk '{print \$1}'); echo QUARANTINE_MIPI_RX_SHA256=\$actual; test \"\$actual\" = \"$expected_module_sha\"" QUARANTINE_HASH_OK
-run_command {rm -f /run/cleankvm-frame.yuv422p; test ! -e /dev/mem; echo DEVMEM_ABSENT_RC=$?}
+run_command {rm -f /run/onyx-kvm-frame.yuv422p; test ! -e /dev/mem; echo DEVMEM_ABSENT_RC=$?}
 run_command {printf 'PRE_TAINT='; cat /proc/sys/kernel/tainted; printf 'PRELOADED='; awk '$1 ~ /^soph_/ {printf "%s,", $1}' /proc/modules; echo}
 run_command "insmod $module_dir/soph_sys.ko; echo LOAD_soph_sys_RC=\$?"
 run_command "insmod $module_dir/soph_base.ko; echo LOAD_soph_base_RC=\$?"
@@ -85,16 +85,16 @@ run_command "insmod $module_dir/soph_mipi_rx.ko lane_phase=0,8,8,3,3 csi_ck_phas
 foreach module {soph_snsr_i2c soph_vi soph_vpss} {
     run_command "insmod $module_dir/$module.ko; echo LOAD_${module}_RC=\$?"
 }
-run_command "/usr/libexec/cleankvm-raw-frame-probe 0 1080 8 0,0,0,0,0 2,4,3,1,0; echo PROBE_RC=\$?"
+run_command "/usr/libexec/onyx-kvm-raw-frame-probe 0 1080 8 0,0,0,0,0 2,4,3,1,0; echo PROBE_RC=\$?"
 run_command {echo '[PAD_INIT]'; dmesg | grep 'init pad_ctrl' | tail -10}
 run_command {echo '[PINMUX_READBACK]'; dmesg | grep 'cif pinmux' | tail -10}
 run_command {echo '[MIPI_RX]'; cat /proc/mipi-rx}
-run_command {if test -f /run/cleankvm-frame.yuv422p; then printf 'FRAME_BYTES=%s\n' "$(wc -c </run/cleankvm-frame.yuv422p)"; sha256sum /run/cleankvm-frame.yuv422p; else echo FRAME_ABSENT; fi}
-run_command {rm -f /run/cleankvm-frame.yuv422p; test ! -e /run/cleankvm-frame.yuv422p; echo FRAME_CLEANUP_RC=$?}
+run_command {if test -f /run/onyx-kvm-frame.yuv422p; then printf 'FRAME_BYTES=%s\n' "$(wc -c </run/onyx-kvm-frame.yuv422p)"; sha256sum /run/onyx-kvm-frame.yuv422p; else echo FRAME_ABSENT; fi}
+run_command {rm -f /run/onyx-kvm-frame.yuv422p; test ! -e /run/onyx-kvm-frame.yuv422p; echo FRAME_CLEANUP_RC=$?}
 foreach module {soph_vpss soph_vi soph_snsr_i2c soph_mipi_rx soph_base soph_sys} {
     run_command "rmmod $module; echo UNLOAD_${module}_RC=\$?"
 }
 run_command {printf 'FINAL_LOADED='; awk '$1 ~ /^soph_/ {printf "%s,", $1}' /proc/modules; echo; printf 'POST_TAINT='; cat /proc/sys/kernel/tainted}
-run_command {echo CLEANKVM_V48_QUARANTINE_FRAME_TEST_END}
+run_command {echo ONYX_KVM_V48_QUARANTINE_FRAME_TEST_END}
 send "~."
 expect eof

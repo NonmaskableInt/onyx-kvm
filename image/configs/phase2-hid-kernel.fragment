@@ -1,4 +1,4 @@
-# CleanKVM Phase 2 HID: device-side USB only.
+# Onyx KVM Phase 2 HID: device-side USB only.
 # Layer this after the Phase-1 kernel profile. Host USB, generic HID/input,
 # storage, networking, serial, audio, and video gadget functions stay absent.
 

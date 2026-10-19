@@ -2,12 +2,14 @@
 set -eu
 
 repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-engine=${CONTAINER_ENGINE:-podman}
-builder=${CLEANKVM_BUILDER_TAG:-localhost/cleankvm-builder:ubuntu-22.04-amd64}
-source_volume=${CLEANKVM_SOURCE_VOLUME:-cleankvm-sdk}
-work_volume=${CLEANKVM_WORK_VOLUME:-cleankvm-work-v5}
-daemon_binary="$repo_root/out/phase2-rust/cleankvmd"
-memtest_binary="$repo_root/out/phase2-rust/cleankvm-memtest"
+. "$repo_root/image/default-env.sh"
+
+engine=$CONTAINER_ENGINE
+builder=$ONYX_KVM_BUILDER_TAG
+source_volume=$ONYX_KVM_SOURCE_VOLUME
+work_volume=$ONYX_KVM_WORK_VOLUME
+daemon_binary="$repo_root/out/phase2-rust/onyx-kvmd"
+memtest_binary="$repo_root/out/phase2-rust/onyx-kvm-memtest"
 
 test -f "$daemon_binary" || {
     printf '%s\n' 'missing target daemon; run image/build-rust-daemon.sh first' >&2
@@ -42,8 +44,8 @@ fi
         /repo/image/verify-sdk-snapshot.sh /work/sdk
         /repo/image/replace-ddr-compat.sh /work/sdk
         /repo/image/apply-phase1-config.sh /work/sdk \
-            /repo/out/phase2-rust/cleankvmd \
-            /repo/out/phase2-rust/cleankvm-memtest
+            /repo/out/phase2-rust/onyx-kvmd \
+            /repo/out/phase2-rust/onyx-kvm-memtest
         /repo/image/validate-phase1-config.sh /work/sdk
         chown -R 1000:1000 /work/sdk
     '
@@ -52,14 +54,14 @@ fi
     -v "$work_volume:/work:ro" \
     "$builder" sh -lc '
         set -eu
-        test -f /work/sdk/cleankvm/phase1-overlay/etc/network/interfaces
-        test -x /work/sdk/cleankvm/phase1-overlay/usr/bin/cleankvmd
-        test -x /work/sdk/cleankvm/phase1-overlay/usr/bin/cleankvm-memtest
-        grep -qF "# CleanKVM Phase 1 generated configuration" \
+        test -f /work/sdk/onyx-kvm/phase1-overlay/etc/network/interfaces
+        test -x /work/sdk/onyx-kvm/phase1-overlay/usr/bin/onyx-kvmd
+        test -x /work/sdk/onyx-kvm/phase1-overlay/usr/bin/onyx-kvm-memtest
+        grep -qF "# Onyx KVM Phase 1 generated configuration" \
             /work/sdk/build/boards/sg200x/sg2002_licheervnano_sd/linux/sg2002_licheervnano_sd_defconfig
-        grep -qF "# CleanKVM Phase 1 generated configuration" \
+        grep -qF "# Onyx KVM Phase 1 generated configuration" \
             /work/sdk/buildroot/configs/cvitek_SG200X_musl_riscv64_defconfig
-        grep -qF "# CleanKVM Phase 1 generated configuration" \
+        grep -qF "# Onyx KVM Phase 1 generated configuration" \
             /work/sdk/build/boards/sg200x/sg2002_licheervnano_sd/u-boot/sg2002_licheervnano_sd_defconfig
         test "$(wc -c </work/sdk/fsbl/test/cv181x/ddr_param.bin)" -eq 512
         test "$(sha256sum /work/sdk/fsbl/test/cv181x/ddr_param.bin | cut -d " " -f 1)" = \

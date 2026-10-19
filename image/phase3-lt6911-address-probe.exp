@@ -37,7 +37,7 @@ unset password
 unset credential_text
 log_user 1
 
-send -- "echo CLEANKVM_LT6911_ADDRESS_PROBE_V1\r"
+send -- "echo ONYX_KVM_LT6911_ADDRESS_PROBE_V1\r"
 expect -re {# $}
 send -- "for b in 3 4; do echo I2C_BUS=\$b; i2cdetect -r -y \$b 0x2b 0x2c; done\r"
 expect {
@@ -49,7 +49,7 @@ expect {
     -re {# $} {}
     timeout { send "~."; exit 6 }
 }
-send -- "echo CLEANKVM_LT6911_ADDRESS_PROBE_END\r"
+send -- "echo ONYX_KVM_LT6911_ADDRESS_PROBE_END\r"
 expect -re {# $}
 send "~."
 expect eof

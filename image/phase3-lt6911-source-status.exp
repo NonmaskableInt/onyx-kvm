@@ -28,7 +28,7 @@ proc run_command {command} {
     send -- "$command\r"
     expect { -re {# $} {} timeout { send "~."; exit 6 } }
 }
-run_command {echo CLEANKVM_LT6911_SOURCE_STATUS_V2_BEGIN}
+run_command {echo ONYX_KVM_LT6911_SOURCE_STATUS_V2_BEGIN}
 run_command {test -c /dev/i2c-4 && printf 'TAINT=' && cat /proc/sys/kernel/tainted}
 # Sipeed's UXC polling path stops the embedded MCU while reading status.
 run_command {i2cset -y 4 0x2b 0xff 0x80 && i2cset -y 4 0x2b 0xee 0x01 && echo MCU_STOP=passed}
@@ -39,6 +39,6 @@ run_command {i2cset -y 4 0x2b 0xff 0x85 && printf 'CSI_VACTIVE=' && i2ctransfer 
 # Resume even when a status value is unexpected; no value gate precedes cleanup.
 run_command {i2cset -y 4 0x2b 0xff 0x80; i2cset -y 4 0x2b 0xee 0x00; echo MCU_RESUME_RC=$?}
 run_command {printf 'FINAL_TAINT='; cat /proc/sys/kernel/tainted; printf 'I2C_FDS='; for p in /proc/[0-9]*/fd/*; do test "$(readlink "$p" 2>/dev/null)" = /dev/i2c-4 && printf '%s,' "$p"; done; echo}
-run_command {echo CLEANKVM_LT6911_SOURCE_STATUS_V2_END}
+run_command {echo ONYX_KVM_LT6911_SOURCE_STATUS_V2_END}
 send "~."
 expect eof

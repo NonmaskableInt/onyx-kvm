@@ -4,14 +4,14 @@ Updated: 2026-09-13
 
 ## Resolution
 
-CleanKVM has proved that the NanoKVM Lite LT6911UXC acknowledges on I2C bus 4
+Onyx KVM has proved that the NanoKVM Lite LT6911UXC acknowledges on I2C bus 4
 at address `0x2b`, its reset line works, the SoC MIPI pads are muxed correctly,
 and the exact stock receiver profile is accepted. Both reset-pulse and
 power-on-state tests report no CSI clock or lane activity. The attached Mac also
 does not enumerate NanoKVM as a display, indicating absent usable HPD/EDID.
 
 Sipeed published the corresponding source under GPL-3.0 in the official NanoKVM
-repository. CleanKVM pins commit `bd070b2f5ce27d22618e8a1c8d2bdca543429882`;
+repository. Onyx KVM pins commit `bd070b2f5ce27d22618e8a1c8d2bdca543429882`;
 the reference source SHA-256 is
 `68829704293fbbb050f4ccb95b8bae7e891d7c71c4ff1d95ca64c7a66f93df06`.
 This closes the protocol-source blocker. Hardware admission is still pending.
@@ -40,7 +40,7 @@ This closes the protocol-source blocker. Hardware admission is still pending.
 
 The upstream UXC path suspends the MCU, erases the EDID area, checks and
 acknowledges status `0xee`, writes eight 32-byte EDID pages plus a zero metadata
-page, checks status again, and reads all eight pages back. CleanKVM limits its
+page, checks status again, and reads all eight pages back. Onyx KVM limits its
 derivative to the hardware-established UXC endpoint and adds an exact argument
 gate, pre-read, checksum validation, matching-payload no-op, byte comparison,
 and unconditional MCU resume. Arbitrary payloads, other chip variants,

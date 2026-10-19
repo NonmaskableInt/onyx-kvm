@@ -4,7 +4,7 @@ set -eu
 # Read-only Phase 3/3a hardware inventory. The script deliberately performs no
 # I2C transactions, GPIO exports, module loads, mixer changes, or PCM opens.
 
-printf '%s\n' 'CLEANKVM_PHASE3_EVIDENCE_V1'
+printf '%s\n' 'ONYX_KVM_PHASE3_EVIDENCE_V1'
 printf 'MODEL='
 tr -d '\000' </proc/device-tree/model 2>/dev/null || printf '%s' unavailable
 printf '\n'
@@ -58,4 +58,4 @@ find /proc/device-tree -type f -name status 2>/dev/null | while IFS= read -r sta
             ;;
     esac
 done
-printf '%s\n' 'CLEANKVM_PHASE3_EVIDENCE_END'
+printf '%s\n' 'ONYX_KVM_PHASE3_EVIDENCE_END'

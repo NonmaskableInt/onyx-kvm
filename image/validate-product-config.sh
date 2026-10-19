@@ -69,4 +69,4 @@ if grep -Eq '=m$' "$kernel_out/.config"; then
     exit 1
 fi
 
-printf '%s\n' 'normalized combined CleanKVM product configuration passed'
+printf '%s\n' 'normalized combined Onyx KVM product configuration passed'

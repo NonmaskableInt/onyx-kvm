@@ -3,7 +3,7 @@ set -eu
 
 repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 engine=${CONTAINER_ENGINE:-podman}
-tag=${CLEANKVM_BUILDER_TAG:-localhost/cleankvm-builder:ubuntu-22.04-amd64}
+tag=${ONYX_KVM_BUILDER_TAG:-localhost/onyx-kvm-builder:ubuntu-22.04-amd64}
 
 command -v "$engine" >/dev/null 2>&1 || {
     printf 'missing container engine: %s\n' "$engine" >&2

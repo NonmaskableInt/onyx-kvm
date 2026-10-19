@@ -1,4 +1,4 @@
-# CleanKVM Phase 3a audio enumeration profile.
+# Onyx KVM Phase 3a audio enumeration profile.
 # Admit only the internal CV182XA analog ADC/DAC path. Enumeration does not
 # authorize opening a PCM device or exposing audio over USB or the network.
 CONFIG_SOUND=y

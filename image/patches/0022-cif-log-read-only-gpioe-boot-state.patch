@@ -5,7 +5,7 @@
  static struct proc_dir_entry *cif_proc_entry;
  #endif
 +
-+static void cleankvm_log_gpioe_boot_state(struct device *device)
++static void onyx_kvm_log_gpioe_boot_state(struct device *device)
 +{
 +	void __iomem *mux;
 +	void __iomem *gpio_e;
@@ -13,13 +13,13 @@
 +	mux = ioremap(0x03001000, 0x1000);
 +	gpio_e = ioremap(0x05021000, 0x54);
 +	if (!mux || !gpio_e) {
-+		dev_err(device, "cleankvm-gpioe-snapshot map_failed mux=%u gpio_e=%u\n",
++		dev_err(device, "onyx-kvm-gpioe-snapshot map_failed mux=%u gpio_e=%u\n",
 +			mux != NULL, gpio_e != NULL);
 +		goto out;
 +	}
 +
 +	dev_err(device,
-+		"cleankvm-gpioe-snapshot pwr_on_mux=%08x pwr_gpio0_mux=%08x pwr_gpio2_mux=%08x out=%08x dir=%08x sample=%08x\n",
++		"onyx-kvm-gpioe-snapshot pwr_on_mux=%08x pwr_gpio0_mux=%08x pwr_gpio2_mux=%08x out=%08x dir=%08x sample=%08x\n",
 +		readl(mux + 0x09c), readl(mux + 0x0a4),
 +		readl(mux + 0x0ac), readl(gpio_e),
 +		readl(gpio_e + 0x04), readl(gpio_e + 0x50));
@@ -36,7 +36,7 @@
  	int rc = 0;
  	struct cvi_cif_dev *dev;
  
-+	cleankvm_log_gpioe_boot_state(&pdev->dev);
++	onyx_kvm_log_gpioe_boot_state(&pdev->dev);
 +
  	/* allocate main cif state structure */
  	dev = devm_kzalloc(&pdev->dev, sizeof(*dev), GFP_KERNEL);

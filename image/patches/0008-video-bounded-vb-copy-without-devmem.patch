@@ -127,7 +127,7 @@ index adafd16d9..8f8442574 100644
  	VPSS_MODE_S stVPSSMode;
  
 -	pthread_once(&lp_off_once, _sys_low_power_off);
-+	/* CleanKVM does not execute register-writing helper programs. */
++	/* Onyx KVM does not execute register-writing helper programs. */
  
  	s32ret = base_dev_open();
  	if (s32ret != CVI_SUCCESS) {
@@ -139,7 +139,7 @@ index adafd16d9..8f8442574 100644
 -		CVI_TRACE_SYS(CVI_DBG_ERR, "devmem open failed.\n");
 -		return CVI_ERR_SYS_NOTREADY;
 -	}
-+	/* CleanKVM copies validated live VB blocks through /dev/cvi-base. */
++	/* Onyx KVM copies validated live VB blocks through /dev/cvi-base. */
  
  	if (_SYS_MMAP() != CVI_SUCCESS) {
  		CVI_TRACE_SYS(CVI_DBG_ERR, "_SYS_MMAP failed.\n");
@@ -188,7 +188,7 @@ index adafd16d9..8f8442574 100644
  	hashmapRemove(ionHashmap, (void *)(uintptr_t)u64PhyAddr);
 -	if (pVirAddr)
 -		devm_unmap(pVirAddr, ion_data->size);
-+	/* CleanKVM never exposes a physical-memory userspace mapping. */
++	/* Onyx KVM never exposes a physical-memory userspace mapping. */
 +	(void)pVirAddr;
  	ionFree(ion_data);
  	free(ion_data);
@@ -251,7 +251,7 @@ index 38fc5c41b..eb714e912 100644
  		}								\
  	} while (0)
  
-+#define CLEANKVM_VB_COPY_MAX (4U * 1024U * 1024U)
++#define ONYX_KVM_VB_COPY_MAX (4U * 1024U * 1024U)
 +
  #define CHECK_VB_POOL_VALID_WEAK(x)							\
  	do {									\
@@ -270,7 +270,7 @@ index 38fc5c41b..eb714e912 100644
 +			ret = -EFAULT;
 +			break;
 +		}
-+		if (!req.size || req.size > CLEANKVM_VB_COPY_MAX) {
++		if (!req.size || req.size > ONYX_KVM_VB_COPY_MAX) {
 +			ret = -EINVAL;
 +			break;
 +		}

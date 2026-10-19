@@ -9,7 +9,7 @@ import termios
 import time
 
 SERIAL = "/dev/cu.usbserial-112440"
-REMOTE_DUMP = "/run/cleankvm-lt6911-flash-800000.bin"
+REMOTE_DUMP = "/run/onyx-kvm-lt6911-flash-800000.bin"
 
 credential_path, log_path, dump_path = sys.argv[1:4]
 credential = open(credential_path, encoding="utf-8").read()
@@ -66,12 +66,12 @@ try:
         password = ""
         credential = ""
         read_until(rb"\r?\n# ", 10)
-    command("echo CLEANKVM_LT_FLASH_BACKUP_V29_BEGIN")
+    command("echo ONYX_KVM_LT_FLASH_BACKUP_V29_BEGIN")
     command("printf 'UPTIME='; cut -d' ' -f1 /proc/uptime; printf 'TAINT='; cat /proc/sys/kernel/tainted")
-    command("printf 'BACKUP_SHA256='; sha256sum /usr/libexec/cleankvm-lt6911uxc-flash-backup | cut -d' ' -f1")
+    command("printf 'BACKUP_SHA256='; sha256sum /usr/libexec/onyx-kvm-lt6911uxc-flash-backup | cut -d' ' -f1")
     command("test -c /dev/i2c-4 && test ! -e /dev/snd/controlC0 && test ! -e %s && echo CONTAINMENT_GATE=passed || { echo CONTAINMENT_GATE=failed; exit 91; }" % REMOTE_DUMP)
     command("printf 'BASELINE_MODULES='; awk 'END {print NR}' /proc/modules; printf 'BASELINE_I2C_FDS='; for p in /proc/[0-9]*/fd/*; do test \"$(readlink \"$p\" 2>/dev/null)\" = /dev/i2c-4 && printf '%%s,' \"$p\"; done; echo")
-    result = command("/usr/libexec/cleankvm-lt6911uxc-flash-backup --dump-stock-range; printf 'BACKUP_RC=%s\\n' \"$?\"", 1500)
+    result = command("/usr/libexec/onyx-kvm-lt6911uxc-flash-backup --dump-stock-range; printf 'BACKUP_RC=%s\\n' \"$?\"", 1500)
     command("printf 'FINAL_TAINT='; cat /proc/sys/kernel/tainted; printf 'FINAL_I2C_FDS='; for p in /proc/[0-9]*/fd/*; do test \"$(readlink \"$p\" 2>/dev/null)\" = /dev/i2c-4 && printf '%%s,' \"$p\"; done; echo")
     if not re.search(rb"BACKUP_RC=0(?:\r?\n)", result):
         raise RuntimeError("device rejected the flash read; no transfer attempted")
@@ -91,7 +91,7 @@ try:
     os.fsync(output)
     os.close(output)
     print(f"HOST_DUMP_BYTES={len(dump)} HOST_DUMP_SHA256={digest}")
-    command("echo CLEANKVM_LT_FLASH_BACKUP_V29_END")
+    command("echo ONYX_KVM_LT_FLASH_BACKUP_V29_END")
 finally:
     password = ""
     credential = ""

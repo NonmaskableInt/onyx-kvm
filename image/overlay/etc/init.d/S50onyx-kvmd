@@ -4,14 +4,8 @@ export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
 pidfile=/run/onyx-kvmd.pid
 daemon=/usr/bin/onyx-kvmd
-if [ ! -x "$daemon" ] && [ -x /usr/bin/cleankvmd ]; then
-    daemon=/usr/bin/cleankvmd
-fi
 
 identity_dir=/etc/onyx-kvm
-if [ ! -d "$identity_dir" ] && [ -d /etc/cleankvm ]; then
-    identity_dir=/etc/cleankvm
-fi
 
 case "${1:-}" in
     start)
@@ -30,8 +24,8 @@ case "${1:-}" in
             sleep 1
         done
         curr_hostname=$(hostname 2>/dev/null || echo "")
-        origins="https://onyx-kvm-recovery:8443,https://cleankvm-recovery:8443"
-        mcp_resources="https://onyx-kvm-recovery:8443/mcp,https://cleankvm-recovery:8443/mcp"
+        origins="https://onyx-kvm-recovery:8443"
+        mcp_resources="https://onyx-kvm-recovery:8443/mcp"
         if [ -n "$curr_hostname" ]; then
             origins="$origins,https://$curr_hostname:8443,https://$curr_hostname.local:8443"
             mcp_resources="$mcp_resources,https://$curr_hostname:8443/mcp,https://$curr_hostname.local:8443/mcp"
@@ -42,22 +36,13 @@ case "${1:-}" in
         export ONYX_KVM_HTTPS_ORIGIN="$origins"
         export ONYX_KVM_MCP_RESOURCE="$mcp_resources"
         export ONYX_KVM_AUTHORIZATION_SERVER=https://onyx-kvm-owner
-        export ONYX_KVM_TOKEN_ISSUER=https://onyx-kvm-owner,https://cleankvm-owner
+        export ONYX_KVM_TOKEN_ISSUER=https://onyx-kvm-owner
         export ONYX_KVM_TLS_CERTIFICATE_DER="$identity_dir/tls-certificate.der"
         export ONYX_KVM_TLS_PRIVATE_KEY_DER="$identity_dir/tls-private-key.pkcs8.der"
         export ONYX_KVM_ISSUER_PUBLIC_KEY_RAW="$identity_dir/oauth-issuer-public-key.raw"
         if [ -r "$identity_dir/oauth-issuer-signing-key.raw" ]; then
             export ONYX_KVM_ISSUER_SIGNING_KEY_RAW="$identity_dir/oauth-issuer-signing-key.raw"
-            export CLEANKVM_ISSUER_SIGNING_KEY_RAW="$ONYX_KVM_ISSUER_SIGNING_KEY_RAW"
         fi
-        export CLEANKVM_HTTPS_BIND="$ONYX_KVM_HTTPS_BIND"
-        export CLEANKVM_HTTPS_ORIGIN="$ONYX_KVM_HTTPS_ORIGIN"
-        export CLEANKVM_MCP_RESOURCE="$ONYX_KVM_MCP_RESOURCE"
-        export CLEANKVM_AUTHORIZATION_SERVER="$ONYX_KVM_AUTHORIZATION_SERVER"
-        export CLEANKVM_TOKEN_ISSUER="$ONYX_KVM_TOKEN_ISSUER"
-        export CLEANKVM_TLS_CERTIFICATE_DER="$ONYX_KVM_TLS_CERTIFICATE_DER"
-        export CLEANKVM_TLS_PRIVATE_KEY_DER="$ONYX_KVM_TLS_PRIVATE_KEY_DER"
-        export CLEANKVM_ISSUER_PUBLIC_KEY_RAW="$ONYX_KVM_ISSUER_PUBLIC_KEY_RAW"
         start-stop-daemon -S -b -m -p "$pidfile" -c 900:900 -x "$daemon"
         ;;
     stop)

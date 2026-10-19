@@ -4,13 +4,13 @@ Phase 2 introduces keyboard and relative-pointer output without giving the
 network-facing daemon access to a USB gadget device. The design has two
 processes:
 
-- `cleankvmd` terminates HTTPS, validates the OAuth token and MCP lifecycle,
+- `onyx-kvmd` terminates HTTPS, validates the OAuth token and MCP lifecycle,
   and applies the shared authorization policy as unprivileged UID/GID 900.
-- `cleankvm-hid-broker` has no network listener. It accepts only a local Unix
+- `onyx-kvm-hid-broker` has no network listener. It accepts only a local Unix
   socket and writes fixed-size reports to `/dev/hidg0` and `/dev/hidg1`. The
-  socket is owned by `root:cleankvm` with mode `0660`, and every connection is
+  socket is owned by `root:onyx-kvm` with mode `0660`, and every connection is
   independently checked with Linux `SO_PEERCRED`; only the dedicated
-  `cleankvm` UID 900 is authorized.
+  `onyx-kvm` UID 900 is authorized.
 
 The broker protocol is intentionally non-extensible at this stage: a five-byte
 magic/version/type/length header followed by exactly eight keyboard bytes or

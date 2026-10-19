@@ -2,17 +2,17 @@ diff --git a/osdrv/interdrv/v2/cif/chip/mars/cif.c b/osdrv/interdrv/v2/cif/chip/
 index d9fcad46c..aeedeea73 100644
 --- a/osdrv/interdrv/v2/cif/chip/mars/cif.c
 +++ b/osdrv/interdrv/v2/cif/chip/mars/cif.c
-@@ -119,6 +119,14 @@ static void __iomem *cleankvm_rx0n_mux;
- static u32 cleankvm_rx0n_mux_saved;
- static bool cleankvm_rx0n_mux_applied;
+@@ -119,6 +119,14 @@ static void __iomem *onyx_kvm_rx0n_mux;
+ static u32 onyx_kvm_rx0n_mux_saved;
+ static bool onyx_kvm_rx0n_mux_applied;
  
-+/* CleanKVM permanent MIPI pinmux configuration:
++/* Onyx KVM permanent MIPI pinmux configuration:
 + * The LT6911UXC uses all five MIPI RX pairs (10 pads from 0x0300116c to 0x03001190).
 + * Function 3 selects MIPI RX mode for all 10 pads. We save the pre-probe state
 + * and restore it on module unload to maintain strict fail-closed cleanliness.
 + */
-+static u32 cleankvm_saved_pinmux[10];
-+static bool cleankvm_pinmux_applied;
++static u32 onyx_kvm_saved_pinmux[10];
++static bool onyx_kvm_pinmux_applied;
 +
  static int bypass_mac_clk;
  module_param(bypass_mac_clk, int, 0644);
@@ -93,12 +93,12 @@ index d9fcad46c..aeedeea73 100644
 +			if (pinmux) {
 +				int k;
 +				for (k = 0; k < 10; k++) {
-+					cleankvm_saved_pinmux[k] = readl(pinmux + k * 4);
++					onyx_kvm_saved_pinmux[k] = readl(pinmux + k * 4);
 +					writel(0x3, pinmux + k * 4);
 +					pr_info("cif pinmux [0x%08x] 0x%08x -> 0x%08x\n",
-+						0x0300116c + k * 4, cleankvm_saved_pinmux[k], readl(pinmux + k * 4));
++						0x0300116c + k * 4, onyx_kvm_saved_pinmux[k], readl(pinmux + k * 4));
 +				}
-+				cleankvm_pinmux_applied = true;
++				onyx_kvm_pinmux_applied = true;
 +			}
 +		}
 +		for (i = 0; i < 6; i++) {
@@ -116,19 +116,19 @@ index d9fcad46c..aeedeea73 100644
 @@ -3526,6 +3552,19 @@ static int cvi_cif_remove(struct platform_device *pdev)
  	}
  
- 	cleankvm_restore_rx0n_mux(&pdev->dev);
-+	if (cleankvm_pinmux_applied) {
+ 	onyx_kvm_restore_rx0n_mux(&pdev->dev);
++	if (onyx_kvm_pinmux_applied) {
 +		void __iomem *pinmux = ioremap(0x0300116c, 0x28);
 +		if (pinmux) {
 +			int k;
 +			for (k = 0; k < 10; k++) {
-+				writel(cleankvm_saved_pinmux[k], pinmux + k * 4);
++				writel(onyx_kvm_saved_pinmux[k], pinmux + k * 4);
 +				pr_info("cif pinmux restore [0x%08x] -> 0x%08x\n",
 +					0x0300116c + k * 4, readl(pinmux + k * 4));
 +			}
 +			iounmap(pinmux);
 +		}
-+		cleankvm_pinmux_applied = false;
++		onyx_kvm_pinmux_applied = false;
 +	}
  
  	/* rm cif_cb */

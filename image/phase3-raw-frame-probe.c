@@ -130,7 +130,7 @@ static int snapshot_mipi(unsigned int elapsed_ms)
 	int fd;
 
 	written = snprintf(label, sizeof(label),
-		"[CLEANKVM_MIPI_T%u_MS]\n", elapsed_ms);
+		"[ONYX_KVM_MIPI_T%u_MS]\n", elapsed_ms);
 	if (written < 0 || written >= (ssize_t)sizeof(label) ||
 	    write(STDOUT_FILENO, label, (size_t)written) != written)
 		return -1;
@@ -154,7 +154,7 @@ static int snapshot_proc(const char *path, const char *tag)
 	ssize_t count, written;
 	int fd;
 
-	written = snprintf(label, sizeof(label), "[CLEANKVM_%s]\n", tag);
+	written = snprintf(label, sizeof(label), "[ONYX_KVM_%s]\n", tag);
 	if (written < 0 || written >= (ssize_t)sizeof(label) ||
 	    write(STDOUT_FILENO, label, (size_t)written) != written)
 		return -1;
@@ -255,7 +255,7 @@ int main(int argc, char **argv)
 		/* 24: 4-lane MIPI (clk=2, 0,1,3,4) - PN swap all data lanes */
 		{{2, 0, 1, 3, 4}, {0, 1, 1, 1, 1}, 0},
 	};
-	const char *output = "/run/cleankvm-frame.yuv422p";
+	const char *output = "/run/onyx-kvm-frame.yuv422p";
 	VB_CONFIG_S vb = {0};
 	VI_DEV_ATTR_S dev = {0};
 	VI_DEV_BIND_PIPE_S bind = {0};
@@ -436,7 +436,7 @@ int main(int argc, char **argv)
 	mipi.img_size.width = WIDTH;
 	mipi.img_size.height = HEIGHT;
 	if (!stream_mode) {
-		printf("CLEANKVM_LANE_PROFILE=%u DEV=%u TARGET_HEIGHT=%u HS_SETTLE=%u PN=%u,%u,%u,%u,%u LANES=%d,%d,%d,%d,%d\n",
+		printf("ONYX_KVM_LANE_PROFILE=%u DEV=%u TARGET_HEIGHT=%u HS_SETTLE=%u PN=%u,%u,%u,%u,%u LANES=%d,%d,%d,%d,%d\n",
 			lane_profile, mipi_dev, target_height, target_hs_settle,
 			mipi.mipi_attr.pn_swap[0], mipi.mipi_attr.pn_swap[1],
 			mipi.mipi_attr.pn_swap[2], mipi.mipi_attr.pn_swap[3],
@@ -445,7 +445,7 @@ int main(int argc, char **argv)
 			mipi.mipi_attr.lane_id[2], mipi.mipi_attr.lane_id[3],
 			mipi.mipi_attr.lane_id[4]);
 	} else {
-		fprintf(stderr, "CLEANKVM_LANE_PROFILE=%u DEV=%u TARGET_HEIGHT=%u HS_SETTLE=%u PN=%u,%u,%u,%u,%u LANES=%d,%d,%d,%d,%d\n",
+		fprintf(stderr, "ONYX_KVM_LANE_PROFILE=%u DEV=%u TARGET_HEIGHT=%u HS_SETTLE=%u PN=%u,%u,%u,%u,%u LANES=%d,%d,%d,%d,%d\n",
 			lane_profile, mipi_dev, target_height, target_hs_settle,
 			mipi.mipi_attr.pn_swap[0], mipi.mipi_attr.pn_swap[1],
 			mipi.mipi_attr.pn_swap[2], mipi.mipi_attr.pn_swap[3],

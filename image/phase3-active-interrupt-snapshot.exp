@@ -1,6 +1,6 @@
 #!/usr/bin/expect -f
 
-# Capture CleanKVM video IRQ deltas during one bounded pull-preserved probe,
+# Capture Onyx KVM video IRQ deltas during one bounded pull-preserved probe,
 # followed by the established reverse unload and cleanup.
 set timeout 180
 set credential_path [lindex $argv 0]
@@ -82,20 +82,20 @@ for {set offset 0} {$offset < $encoded_length} {incr offset 384} {
 unset encoded
 log_user 1
 
-set module_dir /usr/lib/cleankvm/video-quarantine
-set frame /run/cleankvm-frame.yuv422p
-run_command {echo CLEANKVM_PHASE3_ACTIVE_IRQ_TRANSFER_V1}
+set module_dir /usr/lib/onyx-kvm/video-quarantine
+set frame /run/onyx-kvm-frame.yuv422p
+run_command {echo ONYX_KVM_PHASE3_ACTIVE_IRQ_TRANSFER_V1}
 run_command {base64 -d /tmp/soph_mipi_rx.ko.gz.b64 >/tmp/soph_mipi_rx.ko.gz; rm -f /tmp/soph_mipi_rx.ko.gz.b64}
 run_checked "actual=\$(sha256sum /tmp/soph_mipi_rx.ko.gz | awk '{print \$1}'); echo GZIP_SHA256=\$actual; test \"\$actual\" = \"$expected_gzip_sha\"" GZIP_HASH_OK
 run_checked {gzip -dc /tmp/soph_mipi_rx.ko.gz >/tmp/soph_mipi_rx.ko; rm -f /tmp/soph_mipi_rx.ko.gz; chmod 400 /tmp/soph_mipi_rx.ko} GZIP_DECODE_OK
 run_checked "actual=\$(sha256sum /tmp/soph_mipi_rx.ko | awk '{print \$1}'); echo MODULE_SHA256=\$actual; test \"\$actual\" = \"$expected_module_sha\"" MODULE_HASH_OK
-run_command {rm -f /run/cleankvm-frame.yuv422p; test ! -e /dev/mem; echo DEVMEM_ABSENT_RC=$?}
+run_command {rm -f /run/onyx-kvm-frame.yuv422p; test ! -e /dev/mem; echo DEVMEM_ABSENT_RC=$?}
 run_command {printf 'PRE_TAINT='; cat /proc/sys/kernel/tainted; printf 'PRELOADED='; awk '$1 ~ /^soph_/ {printf "%s,", $1}' /proc/modules; echo}
 
 set configs {
     {active_irq 0,0,12,0,0 16 0}
 }
-run_command {echo CLEANKVM_PHASE3_ACTIVE_IRQ_SNAPSHOT_V1}
+run_command {echo ONYX_KVM_PHASE3_ACTIVE_IRQ_SNAPSHOT_V1}
 set test 0
 foreach config $configs {
     incr test
@@ -109,10 +109,10 @@ foreach config $configs {
     }
     run_command "dmesg | grep 'preserved pad PU/PD' | tail -5"
     run_command "echo IRQ_PRE_PROBE; cat /proc/interrupts"
-    run_command "/usr/libexec/cleankvm-raw-frame-probe 0 1080 $settle 0,0,0,0,0 2,4,3,1,0 > /tmp/timing-sweep.log 2>&1 & echo \$! >/tmp/timing-sweep.pid; echo PROBE_STARTED"
+    run_command "/usr/libexec/onyx-kvm-raw-frame-probe 0 1080 $settle 0,0,0,0,0 2,4,3,1,0 > /tmp/timing-sweep.log 2>&1 & echo \$! >/tmp/timing-sweep.pid; echo PROBE_STARTED"
     run_command "sleep 1; echo IRQ_T1000; cat /proc/interrupts; echo MIPI_T1000; cat /proc/mipi-rx; echo VI_T1000; cat /proc/cvitek/vi_dbg 2>/dev/null || cat /proc/vi_dbg 2>/dev/null || true"
     run_command "sleep 2; echo IRQ_T3000; cat /proc/interrupts; echo MIPI_T3000; cat /proc/mipi-rx; echo VI_T3000; cat /proc/cvitek/vi_dbg 2>/dev/null || cat /proc/vi_dbg 2>/dev/null || true"
-    run_command "pid=\$(cat /tmp/timing-sweep.pid); kill \$pid 2>/dev/null || true; wait \$pid; rc=\$?; rm -f /tmp/timing-sweep.pid; echo PROBE_${test}_RC=\$rc; grep -E 'CLEANKVM_LANE_PROFILE|CLEANKVM_MIPI_T|Devno EccErr|^ *0 +|Digital:|hs_(hst|idle|sync|err)|VISofCh0Cnt|pxl=|lines=|CVI_VI_GetChnFrame' /tmp/timing-sweep.log || true"
+    run_command "pid=\$(cat /tmp/timing-sweep.pid); kill \$pid 2>/dev/null || true; wait \$pid; rc=\$?; rm -f /tmp/timing-sweep.pid; echo PROBE_${test}_RC=\$rc; grep -E 'ONYX_KVM_LANE_PROFILE|ONYX_KVM_MIPI_T|Devno EccErr|^ *0 +|Digital:|hs_(hst|idle|sync|err)|VISofCh0Cnt|pxl=|lines=|CVI_VI_GetChnFrame' /tmp/timing-sweep.log || true"
     run_command "echo IRQ_TEST_${test}_FINAL_MIPI; cat /proc/mipi-rx"
     run_command "if test -f $frame; then stat -c 'FRAME_BYTES=%s' $frame; sha256sum $frame; else echo FRAME_ABSENT; fi"
     run_command "rm -f $frame /tmp/timing-sweep.log"
@@ -122,8 +122,8 @@ foreach config $configs {
     run_command "printf 'IRQ_TEST_${test}_REMAINDER='; awk '\$1 ~ /^soph_/ {printf \"%s,\", \$1}' /proc/modules; echo"
     run_command "echo IRQ_TEST_${test}_END"
 }
-run_command {rm -f /tmp/soph_mipi_rx.ko /tmp/timing-sweep.log /run/cleankvm-frame.yuv422p; test ! -e /tmp/soph_mipi_rx.ko; echo MODULE_CLEANUP_RC=$?}
-run_command {printf 'FINAL_LOADED='; awk '$1 ~ /^soph_/ {printf "%s,", $1}' /proc/modules; echo; printf 'POST_TAINT='; cat /proc/sys/kernel/tainted; test ! -e /run/cleankvm-frame.yuv422p; echo FINAL_FRAME_ABSENT_RC=$?}
-run_command {echo CLEANKVM_PHASE3_ACTIVE_IRQ_SNAPSHOT_END}
+run_command {rm -f /tmp/soph_mipi_rx.ko /tmp/timing-sweep.log /run/onyx-kvm-frame.yuv422p; test ! -e /tmp/soph_mipi_rx.ko; echo MODULE_CLEANUP_RC=$?}
+run_command {printf 'FINAL_LOADED='; awk '$1 ~ /^soph_/ {printf "%s,", $1}' /proc/modules; echo; printf 'POST_TAINT='; cat /proc/sys/kernel/tainted; test ! -e /run/onyx-kvm-frame.yuv422p; echo FINAL_FRAME_ABSENT_RC=$?}
+run_command {echo ONYX_KVM_PHASE3_ACTIVE_IRQ_SNAPSHOT_END}
 send "~."
 expect eof

@@ -1,4 +1,4 @@
-# CleanKVM Phase 1 recovery userspace.
+# Onyx KVM Phase 1 recovery userspace.
 # Wired DHCP is allowed; inbound and discovery services are absent.
 
 BR2_riscv=y
@@ -20,8 +20,8 @@ BR2_TOOLCHAIN_EXTERNAL_OPENMP=y
 
 BR2_INIT_BUSYBOX=y
 BR2_ROOTFS_DEVICE_CREATION_DYNAMIC_DEVTMPFS=y
-BR2_TARGET_GENERIC_HOSTNAME="cleankvm-recovery"
-BR2_TARGET_GENERIC_ISSUE="CleanKVM recovery image (development; not trusted)"
+BR2_TARGET_GENERIC_HOSTNAME="onyx-kvm-recovery"
+BR2_TARGET_GENERIC_ISSUE="Onyx KVM recovery image (development; not trusted)"
 BR2_TARGET_GENERIC_ROOT_PASSWD="*"
 BR2_TARGET_GENERIC_GETTY=y
 BR2_TARGET_GENERIC_GETTY_PORT="console"
@@ -32,7 +32,7 @@ BR2_PACKAGE_BUSYBOX=y
 
 # The Rust binary is already stripped with its own LLVM toolchain. The older
 # vendor GNU strip mis-handles this static ELF and truncates it to zero bytes.
-BR2_STRIP_EXCLUDE_FILES="cleankvmd cleankvm-memtest"
+BR2_STRIP_EXCLUDE_FILES="onyx-kvmd onyx-kvm-memtest"
 
 BR2_TARGET_ROOTFS_EXT2=y
 BR2_TARGET_ROOTFS_EXT2_4=y

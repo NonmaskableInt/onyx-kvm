@@ -2,16 +2,27 @@
 set -eu
 
 repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-engine=${CONTAINER_ENGINE:-podman}
-builder=${CLEANKVM_BUILDER_TAG:-localhost/cleankvm-builder:ubuntu-22.04-amd64}
-work_volume=${CLEANKVM_WORK_VOLUME:-cleankvm-work-v50}
-host_tools_volume=${CLEANKVM_HOST_TOOLS_VOLUME:-cleankvm-host-tools}
-source_archive=${TINYALSA_SOURCE_ARCHIVE:-/private/tmp/tinyalsa-v2.0.0.tar.gz}
-output_dir=${CLEANKVM_AUDIO_PLAYBACK_PROBE_OUTPUT_DIR:-$repo_root/out/phase3a-playback-probe-v1}
+. "$repo_root/image/default-env.sh"
+
+engine=$CONTAINER_ENGINE
+builder=$ONYX_KVM_BUILDER_TAG
+work_volume=$ONYX_KVM_WORK_VOLUME
+host_tools_volume=$ONYX_KVM_HOST_TOOLS_VOLUME
+source_archive=$TINYALSA_SOURCE_ARCHIVE
+output_dir=${ONYX_KVM_AUDIO_PLAYBACK_PROBE_OUTPUT_DIR:-$repo_root/out/phase3a-playback-probe-v1}
 expected=573ae0b2d3480851c1d2a12503ead2beea27f92d44ed47b74b553ba947994ef1
 
-test -f "$source_archive"
-test "$(shasum -a 256 "$source_archive" | cut -d' ' -f1)" = "$expected"
+if [ ! -f "$source_archive" ]; then
+    printf 'error: tinyalsa source archive not found at %s\n' "$source_archive" >&2
+    printf 'run explicit source fetch or place tinyalsa-v2.0.0.tar.gz at %s\n' "$source_archive" >&2
+    exit 1
+fi
+
+actual_sha=$(shasum -a 256 "$source_archive" | cut -d' ' -f1)
+if [ "$actual_sha" != "$expected" ]; then
+    printf 'error: tinyalsa checksum mismatch: expected %s, got %s\n' "$expected" "$actual_sha" >&2
+    exit 1
+fi
 mkdir -p "$output_dir"
 
 "$engine" run --rm --arch amd64 --network none \
@@ -32,11 +43,11 @@ mkdir -p "$output_dir"
             -fstack-protector-strong -D_FORTIFY_SOURCE=2 \
             -Wall -Wextra -Werror -I include \
             /repo/image/phase3a-playback-probe.c src/libtinyalsa.a \
-            -Wl,--gc-sections -ldl -o /output/cleankvm-audio-playback-probe
-        "${tool}strip" /output/cleankvm-audio-playback-probe
-        "${tool}readelf" -h /output/cleankvm-audio-playback-probe > /output/ELF.txt
-        ! "${tool}nm" -u /output/cleankvm-audio-playback-probe | grep .
+            -Wl,--gc-sections -ldl -o /output/onyx-kvm-audio-playback-probe
+        "${tool}strip" /output/onyx-kvm-audio-playback-probe
+        "${tool}readelf" -h /output/onyx-kvm-audio-playback-probe > /output/ELF.txt
+        ! "${tool}nm" -u /output/onyx-kvm-audio-playback-probe | grep .
     '
 
-(cd "$output_dir" && sha256sum cleankvm-audio-playback-probe ELF.txt > SHA256SUMS && sha256sum -c SHA256SUMS)
-printf 'built offline bounded audio playback probe: %s\n' "$output_dir/cleankvm-audio-playback-probe"
+(cd "$output_dir" && sha256sum onyx-kvm-audio-playback-probe ELF.txt > SHA256SUMS && sha256sum -c SHA256SUMS)
+printf 'built offline bounded audio playback probe: %s\n' "$output_dir/onyx-kvm-audio-playback-probe"

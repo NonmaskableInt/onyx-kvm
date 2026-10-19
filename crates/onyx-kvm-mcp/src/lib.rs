@@ -179,8 +179,6 @@ struct JwtClaims<'a> {
     onyx_mutation: Option<bool>,
     #[serde(default)]
     onyx_kvm_mutation: Option<bool>,
-    #[serde(default)]
-    cleankvm_mutation: Option<bool>,
 }
 
 impl BearerTokenValidator for Ed25519JwtValidator<'_> {
@@ -242,7 +240,6 @@ impl BearerTokenValidator for Ed25519JwtValidator<'_> {
             .collect::<Result<Vec<_>, _>>()?;
         let mutation_enabled = claims
             .onyx_kvm_mutation
-            .or(claims.cleankvm_mutation)
             .or(claims.onyx_mutation)
             .unwrap_or(false);
         Ok(ValidatedClaims {
@@ -807,9 +804,15 @@ impl<'a> Server<'a> {
         if self.authorize(name).is_err() {
             return error(id, -32603, "Policy denied device reboot");
         }
-        let _ = std::fs::write("/run/onyx-kvm/reboot-trigger", b"reboot\n");
-        let _ = std::fs::write("/run/cleankvm/reboot-trigger", b"reboot\n");
-        let _ = std::process::Command::new("/sbin/reboot").spawn();
+        let trigger_res = std::fs::write("/run/onyx-kvm/reboot-trigger", b"reboot\n");
+        let spawn_res = std::process::Command::new("/sbin/reboot").spawn();
+        if trigger_res.is_err() && spawn_res.is_err() {
+            return error(
+                id,
+                -32603,
+                "Failed to trigger reboot: neither trigger file nor reboot command succeeded",
+            );
+        }
 
         let result = json!({
             "status": "rebooting",
@@ -865,10 +868,10 @@ impl<'a> Server<'a> {
             .unwrap_or(60)
             .clamp(1, 200) as usize;
 
-        let output = std::process::Command::new("dmesg")
-            .output()
-            .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
-            .unwrap_or_else(|e| format!("dmesg execution failed: {e}"));
+        let output = std::process::Command::new("dmesg").output().map_or_else(
+            |e| format!("dmesg execution failed: {e}"),
+            |o| String::from_utf8_lossy(&o.stdout).to_string(),
+        );
 
         let all_lines: Vec<&str> = output.lines().collect();
         let total = all_lines.len();
@@ -915,8 +918,7 @@ impl<'a> Server<'a> {
         })()
         .unwrap_or_else(|| "unknown".into());
 
-        let dev_mode_active = std::path::Path::new("/run/onyx-kvm/dev-mode").exists()
-            || std::path::Path::new("/run/cleankvm/dev-mode").exists();
+        let dev_mode_active = std::path::Path::new("/run/onyx-kvm/dev-mode").exists();
         let dev_mode_boot = std::path::Path::new("/boot/DEV_MODE").exists()
             || std::path::Path::new("/boot/dev_mode").exists();
 
@@ -986,7 +988,10 @@ impl<'a> Server<'a> {
                 }
                 if let Some(resp) = response {
                     let mut lines = resp.lines();
-                    let rc = lines.next().and_then(|l| l.parse::<i32>().ok()).unwrap_or(-1);
+                    let rc = lines
+                        .next()
+                        .and_then(|l| l.parse::<i32>().ok())
+                        .unwrap_or(-1);
                     let out = lines.collect::<Vec<_>>().join("\n");
                     (rc, out)
                 } else {
@@ -1015,6 +1020,7 @@ impl<'a> Server<'a> {
         )
     }
 
+    #[allow(clippy::too_many_lines)]
     fn call_dev_mode(&self, id: &Value, arguments: Option<&Value>) -> String {
         if self.authorize("kvm.system.dev_mode").is_err() {
             return error(id, -32603, "Policy denied dev_mode control");
@@ -1028,8 +1034,7 @@ impl<'a> Server<'a> {
             "status" => {
                 let boot_flag = std::path::Path::new("/boot/DEV_MODE").exists()
                     || std::path::Path::new("/boot/dev_mode").exists();
-                let run_flag = std::path::Path::new("/run/onyx-kvm/dev-mode").exists()
-                    || std::path::Path::new("/run/cleankvm/dev-mode").exists();
+                let run_flag = std::path::Path::new("/run/onyx-kvm/dev-mode").exists();
                 let ssh_keys = std::fs::read_to_string("/boot/ssh_authorized_keys").ok();
                 let result = json!({
                     "devModeBootConfig": boot_flag,
@@ -1047,15 +1052,31 @@ impl<'a> Server<'a> {
             }
             "enable" => {
                 let _ = std::process::Command::new("mount").arg("/boot").status();
-                let _ = std::fs::write("/boot/DEV_MODE", b"");
+                if let Err(e) = std::fs::write("/boot/DEV_MODE", b"") {
+                    return error(id, -32603, &format!("Failed to write /boot/DEV_MODE: {e}"));
+                }
                 if let Some(keys) = arguments
                     .and_then(|a| a.get("authorizedKeys"))
                     .and_then(Value::as_str)
                 {
-                    let _ = std::fs::write("/boot/ssh_authorized_keys", keys);
+                    if let Err(e) = std::fs::write("/boot/ssh_authorized_keys", keys) {
+                        return error(
+                            id,
+                            -32603,
+                            &format!("Failed to write /boot/ssh_authorized_keys: {e}"),
+                        );
+                    }
                 }
-                let _ = std::fs::create_dir_all("/run/onyx-kvm");
-                let _ = std::fs::write("/run/onyx-kvm/dev-mode", b"");
+                if let Err(e) = std::fs::create_dir_all("/run/onyx-kvm") {
+                    return error(id, -32603, &format!("Failed to create /run/onyx-kvm: {e}"));
+                }
+                if let Err(e) = std::fs::write("/run/onyx-kvm/dev-mode", b"") {
+                    return error(
+                        id,
+                        -32603,
+                        &format!("Failed to write /run/onyx-kvm/dev-mode: {e}"),
+                    );
+                }
                 let _ = std::process::Command::new("sync").status();
                 if std::path::Path::new("/etc/init.d/S35onyx-kvm-devmode").exists() {
                     let _ = std::process::Command::new("/etc/init.d/S35onyx-kvm-devmode")
@@ -1081,7 +1102,6 @@ impl<'a> Server<'a> {
                 let _ = std::fs::remove_file("/boot/DEV_MODE");
                 let _ = std::fs::remove_file("/boot/dev_mode");
                 let _ = std::fs::remove_file("/run/onyx-kvm/dev-mode");
-                let _ = std::fs::remove_file("/run/cleankvm/dev-mode");
                 let _ = std::process::Command::new("sync").status();
                 if std::path::Path::new("/etc/init.d/S35onyx-kvm-devmode").exists() {
                     let _ = std::process::Command::new("/etc/init.d/S35onyx-kvm-devmode")
@@ -1448,7 +1468,11 @@ fn dev_mode_tool() -> Value {
 }
 
 fn run_command_fallback(cmd: &str) -> (i32, String) {
-    match std::process::Command::new("/bin/sh").arg("-c").arg(cmd).output() {
+    match std::process::Command::new("/bin/sh")
+        .arg("-c")
+        .arg(cmd)
+        .output()
+    {
         Ok(output) => {
             let rc = output.status.code().unwrap_or(-1);
             let mut out = String::from_utf8_lossy(&output.stdout).to_string();
@@ -1474,7 +1498,7 @@ fn query_lt6911_i2c() -> (bool, Option<String>, Option<u16>, Option<u16>, String
     let halt_status = std::process::Command::new("i2cset")
         .args(["-y", "4", "0x2b", "0xff", "0x80"])
         .status();
-    if halt_status.is_err() || !halt_status.unwrap().success() {
+    if !halt_status.is_ok_and(|status| status.success()) {
         return (false, None, None, None, "i2cset bank 0x80 failed".into());
     }
     let _ = std::process::Command::new("i2cset")
@@ -1510,7 +1534,7 @@ fn query_lt6911_i2c() -> (bool, Option<String>, Option<u16>, Option<u16>, String
             })
             .collect();
         if bytes.len() >= 2 {
-            Some(((bytes[0] as u16) << 8) | (bytes[1] as u16))
+            Some((u16::from(bytes[0]) << 8) | u16::from(bytes[1]))
         } else {
             None
         }
@@ -1529,8 +1553,7 @@ fn query_lt6911_i2c() -> (bool, Option<String>, Option<u16>, Option<u16>, String
 
     let hdmi_locked = sig_output
         .as_deref()
-        .map(|s| s.eq_ignore_ascii_case("0x55") || s == "85")
-        .unwrap_or(false);
+        .is_some_and(|s| s.eq_ignore_ascii_case("0x55") || s == "85");
 
     (hdmi_locked, sig_output, csi_w, csi_h, "ok".into())
 }
@@ -1751,7 +1774,9 @@ fn key_name_to_hid(name: &str) -> Option<(u8, u8)> {
 
 fn parse_modifiers(value: Option<&Value>) -> u8 {
     let mut mask = 0u8;
-    let Some(val) = value else { return 0; };
+    let Some(val) = value else {
+        return 0;
+    };
     if let Some(arr) = val.as_array() {
         for item in arr {
             if let Some(s) = item.as_str() {
@@ -1847,7 +1872,7 @@ fn parse_pointer_action(arguments: Option<&Value>) -> Result<Vec<[u8; 4]>, &'sta
                 if let Some(byte) = value.as_u64() {
                     u8::try_from(byte).ok()
                 } else if let Some(signed) = value.as_i64() {
-                    i8::try_from(signed).ok().map(|s| s as u8)
+                    i8::try_from(signed).ok().map(|s| s.to_le_bytes()[0])
                 } else {
                     None
                 }
@@ -1871,20 +1896,25 @@ fn parse_pointer_action(arguments: Option<&Value>) -> Result<Vec<[u8; 4]>, &'sta
             "middle" => 4,
             _ => return Err("click must be 'left', 'right', or 'middle'"),
         };
-        return Ok(vec![
-            [button, 0, 0, 0],
-            [0, 0, 0, 0],
-        ]);
+        return Ok(vec![[button, 0, 0, 0], [0, 0, 0, 0]]);
     }
     if object.contains_key("dx")
         || object.contains_key("dy")
         || object.contains_key("wheel")
         || object.contains_key("buttons")
     {
-        let buttons = object.get("buttons").and_then(Value::as_u64).unwrap_or(0) as u8;
-        let dx = object.get("dx").and_then(Value::as_i64).unwrap_or(0).clamp(-127, 127) as i8 as u8;
-        let dy = object.get("dy").and_then(Value::as_i64).unwrap_or(0).clamp(-127, 127) as i8 as u8;
-        let wheel = object.get("wheel").and_then(Value::as_i64).unwrap_or(0).clamp(-127, 127) as i8 as u8;
+        let buttons = object
+            .get("buttons")
+            .and_then(Value::as_u64)
+            .and_then(|b| u8::try_from(b).ok())
+            .unwrap_or(0);
+        let clamp_to_wire = |val: Option<i64>| -> u8 {
+            let clamped = i8::try_from(val.unwrap_or(0).clamp(-127, 127)).unwrap_or(0);
+            clamped.to_le_bytes()[0]
+        };
+        let dx = clamp_to_wire(object.get("dx").and_then(Value::as_i64));
+        let dy = clamp_to_wire(object.get("dy").and_then(Value::as_i64));
+        let wheel = clamp_to_wire(object.get("wheel").and_then(Value::as_i64));
         return Ok(vec![[buttons, dx, dy, wheel]]);
     }
     Err("Pointer arguments must specify 'click', 'dx'/'dy', or 'report'")
@@ -2080,6 +2110,7 @@ fn discard_line<R: BufRead>(input: &mut R) -> io::Result<()> {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::{
         AudioCaptureTransport, AudioOutputTransport, BearerTokenValidator, CaptureMetrics,
@@ -2358,21 +2389,30 @@ mod tests {
             &mut server,
             r#"{"jsonrpc":"2.0","id":17,"method":"tools/call","params":{"name":"kvm.pointer.send","arguments":{"dx":10,"dy":5}}}"#,
         );
-        assert_eq!(pointer_move["result"]["structuredContent"]["accepted"], true);
+        assert_eq!(
+            pointer_move["result"]["structuredContent"]["accepted"],
+            true
+        );
         assert_eq!(hid.pointer.get(), Some([0, 10, 5, 0]));
 
         let pointer_click = response(
             &mut server,
             r#"{"jsonrpc":"2.0","id":18,"method":"tools/call","params":{"name":"kvm.pointer.send","arguments":{"click":"left"}}}"#,
         );
-        assert_eq!(pointer_click["result"]["structuredContent"]["accepted"], true);
+        assert_eq!(
+            pointer_click["result"]["structuredContent"]["accepted"],
+            true
+        );
         assert_eq!(hid.pointer.get(), Some([0, 0, 0, 0]));
 
         let pointer_signed = response(
             &mut server,
             r#"{"jsonrpc":"2.0","id":19,"method":"tools/call","params":{"name":"kvm.pointer.send","arguments":{"report":[0,-1,0,0]}}}"#,
         );
-        assert_eq!(pointer_signed["result"]["structuredContent"]["accepted"], true);
+        assert_eq!(
+            pointer_signed["result"]["structuredContent"]["accepted"],
+            true
+        );
         assert_eq!(hid.pointer.get(), Some([0, 255, 0, 0]));
 
         let malformed = response(
@@ -2488,7 +2528,7 @@ mod tests {
     fn ed25519_jwt_validation_extracts_authenticated_claims() {
         let (token, public_key) = signed_token(
             r#"{"alg":"EdDSA","typ":"at+jwt"}"#,
-            r#"{"iss":"https://issuer.example","aud":"https://kvm.example/mcp","exp":200,"scope":"kvm:read kvm:video","cleankvm_mutation":false}"#,
+            r#"{"iss":"https://issuer.example","aud":"https://kvm.example/mcp","exp":200,"scope":"kvm:read kvm:video","onyx_kvm_mutation":false}"#,
         );
         let validator = Ed25519JwtValidator::new("https://issuer.example", &public_key);
         let claims = validator
@@ -2511,30 +2551,39 @@ mod tests {
             "https://test-kvm/mcp",
             "kvm:read kvm:video kvm:control",
             true,
-            1234567890,
+            1_234_567_890,
         );
         let validator = Ed25519JwtValidator::new("https://test-issuer", &public_key);
         let claims = validator.validate(&token).expect("valid mint_token JWT");
         assert_eq!(claims.audience, "https://test-kvm/mcp");
-        assert_eq!(claims.expires_at_unix_seconds, 1234567890);
-        assert_eq!(claims.scopes, vec![Scope::Read, Scope::Video, Scope::Control]);
+        assert_eq!(claims.expires_at_unix_seconds, 1_234_567_890);
+        assert_eq!(
+            claims.scopes,
+            vec![Scope::Read, Scope::Video, Scope::Control]
+        );
         assert!(claims.mutation_enabled);
     }
 
     #[test]
-    fn validate_actual_v59_token() {
-        if let (Ok(token), Ok(pub_key)) = (
-            std::fs::read_to_string("../../out/product-v59-secrets/operator-token.jwt"),
-            std::fs::read("../../out/product-v59-secrets/identity/oauth-issuer-public-key.raw"),
-        ) {
-            let issuer = "https://onyx-kvm-owner,https://cleankvm-owner";
-            let validator = Ed25519JwtValidator::new(issuer, &pub_key);
-            let Ok(claims) = validator.validate(token.trim()) else {
-                panic!("token validation failed");
-            };
-            assert_eq!(claims.audience, "https://onyx-kvm-recovery:8443/mcp");
-            assert!(claims.mutation_enabled);
-        }
+    fn validate_operator_token_fixture() {
+        let seed = [7u8; 32];
+        let signing_key = SigningKey::from_bytes(&seed);
+        let pub_key = signing_key.verifying_key().to_bytes();
+        let issuer = "https://onyx-kvm-owner";
+        let audience = "https://onyx-kvm-recovery:8443/mcp";
+        let token = super::mint_token(
+            &seed,
+            issuer,
+            audience,
+            "kvm:read kvm:video kvm:audio-capture kvm:audio-output kvm:control kvm:admin",
+            true,
+            2_000_000_000,
+        );
+        let validator = Ed25519JwtValidator::new(issuer, &pub_key);
+        let claims = validator.validate(&token).expect("token validation failed");
+        assert_eq!(claims.audience, audience);
+        assert!(claims.mutation_enabled);
+        assert_eq!(claims.scopes.len(), 6);
     }
 
     #[test]
@@ -2760,7 +2809,10 @@ mod tests {
             mutation_enabled: false,
         };
         let mut server = Server::remote_ready("https://kvm.example/mcp", 100, read_grant);
-        let list = response(&mut server, r#"{"jsonrpc":"2.0","id":40,"method":"tools/list"}"#);
+        let list = response(
+            &mut server,
+            r#"{"jsonrpc":"2.0","id":40,"method":"tools/list"}"#,
+        );
         let tool_names: Vec<&str> = list["result"]["tools"]
             .as_array()
             .unwrap()
@@ -2797,7 +2849,10 @@ mod tests {
             mutation_enabled: true,
         };
         let mut server = Server::remote_ready("https://kvm.example/mcp", 100, admin_mut_grant);
-        let list = response(&mut server, r#"{"jsonrpc":"2.0","id":43,"method":"tools/list"}"#);
+        let list = response(
+            &mut server,
+            r#"{"jsonrpc":"2.0","id":43,"method":"tools/list"}"#,
+        );
         let tool_names: Vec<&str> = list["result"]["tools"]
             .as_array()
             .unwrap()
@@ -2830,7 +2885,10 @@ mod tests {
             mutation_enabled: false,
         };
         let mut server = Server::remote_ready("https://kvm.example/mcp", 100, read_grant);
-        let list = response(&mut server, r#"{"jsonrpc":"2.0","id":50,"method":"tools/list"}"#);
+        let list = response(
+            &mut server,
+            r#"{"jsonrpc":"2.0","id":50,"method":"tools/list"}"#,
+        );
         let tool_names: Vec<&str> = list["result"]["tools"]
             .as_array()
             .unwrap()
@@ -2855,7 +2913,10 @@ mod tests {
             mutation_enabled: false,
         };
         let mut server = Server::remote_ready("https://kvm.example/mcp", 100, admin_grant);
-        let list = response(&mut server, r#"{"jsonrpc":"2.0","id":52,"method":"tools/list"}"#);
+        let list = response(
+            &mut server,
+            r#"{"jsonrpc":"2.0","id":52,"method":"tools/list"}"#,
+        );
         let tool_names: Vec<&str> = list["result"]["tools"]
             .as_array()
             .unwrap()
@@ -2898,7 +2959,10 @@ mod tests {
             mutation_enabled: false,
         };
         let mut server = Server::remote_ready("https://kvm.example/mcp", 100, admin_no_mut);
-        let list = response(&mut server, r#"{"jsonrpc":"2.0","id":60,"method":"tools/list"}"#);
+        let list = response(
+            &mut server,
+            r#"{"jsonrpc":"2.0","id":60,"method":"tools/list"}"#,
+        );
         let tool_names: Vec<&str> = list["result"]["tools"]
             .as_array()
             .unwrap()
@@ -2921,7 +2985,10 @@ mod tests {
             mutation_enabled: true,
         };
         let mut server = Server::remote_ready("https://kvm.example/mcp", 100, admin_mut);
-        let list = response(&mut server, r#"{"jsonrpc":"2.0","id":62,"method":"tools/list"}"#);
+        let list = response(
+            &mut server,
+            r#"{"jsonrpc":"2.0","id":62,"method":"tools/list"}"#,
+        );
         let tool_names: Vec<&str> = list["result"]["tools"]
             .as_array()
             .unwrap()
@@ -2945,4 +3012,3 @@ mod tests {
         assert_eq!(dev_exec_disabled["result"]["isError"], true);
     }
 }
-

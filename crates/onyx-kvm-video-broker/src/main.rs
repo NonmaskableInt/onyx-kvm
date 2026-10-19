@@ -1,7 +1,5 @@
 use onyx_kvm_media_protocol::{Operation, SNAPSHOT_RESPONSE_BYTES, WireHeader};
-use onyx_kvm_video_broker::{
-    FRAME_LEN, decode_and_authorize, summarize_frame_fast,
-};
+use onyx_kvm_video_broker::{FRAME_LEN, decode_and_authorize, summarize_frame_fast};
 use std::env;
 use std::fs::{self, File, Permissions};
 use std::io::{self, Read, Write};
@@ -58,31 +56,11 @@ struct Config {
 
 fn main() -> ExitCode {
     let config = Config {
-        socket: env_path_any(
-            "ONYX_KVM_VIDEO_SOCKET",
-            "CLEANKVM_VIDEO_SOCKET",
-            DEFAULT_SOCKET,
-        ),
-        enable: env_path_any(
-            "ONYX_KVM_VIDEO_ENABLE",
-            "CLEANKVM_VIDEO_ENABLE",
-            DEFAULT_ENABLE,
-        ),
-        module_dir: env_path_any(
-            "ONYX_KVM_VIDEO_MODULE_DIR",
-            "CLEANKVM_VIDEO_MODULE_DIR",
-            DEFAULT_MODULE_DIR,
-        ),
-        probe_bin: env_path_any(
-            "ONYX_KVM_VIDEO_PROBE_BIN",
-            "CLEANKVM_VIDEO_PROBE_BIN",
-            DEFAULT_PROBE_BIN,
-        ),
-        frame_path: env_path_any(
-            "ONYX_KVM_VIDEO_FRAME_PATH",
-            "CLEANKVM_VIDEO_FRAME_PATH",
-            DEFAULT_FRAME_PATH,
-        ),
+        socket: env_path("ONYX_KVM_VIDEO_SOCKET", DEFAULT_SOCKET),
+        enable: env_path("ONYX_KVM_VIDEO_ENABLE", DEFAULT_ENABLE),
+        module_dir: env_path("ONYX_KVM_VIDEO_MODULE_DIR", DEFAULT_MODULE_DIR),
+        probe_bin: env_path("ONYX_KVM_VIDEO_PROBE_BIN", DEFAULT_PROBE_BIN),
+        frame_path: env_path("ONYX_KVM_VIDEO_FRAME_PATH", DEFAULT_FRAME_PATH),
     };
     match run(&config) {
         Ok(()) => ExitCode::SUCCESS,
@@ -93,10 +71,8 @@ fn main() -> ExitCode {
     }
 }
 
-fn env_path_any(primary: &str, fallback: &str, default: &str) -> PathBuf {
-    env::var_os(primary)
-        .or_else(|| env::var_os(fallback))
-        .map_or_else(|| PathBuf::from(default), PathBuf::from)
+fn env_path(name: &str, default: &str) -> PathBuf {
+    env::var_os(name).map_or_else(|| PathBuf::from(default), PathBuf::from)
 }
 
 fn run(config: &Config) -> io::Result<()> {
@@ -145,7 +121,6 @@ fn serve(mut stream: UnixStream, config: &Config) -> io::Result<()> {
         ));
     }
     remove_if_exists(&config.frame_path)?;
-    remove_if_exists(Path::new("/run/cleankvm-frame.yuv422p"))?;
     let _guard = ModuleCleanupGuard {
         frame_path: &config.frame_path,
     };
@@ -180,12 +155,12 @@ fn serve(mut stream: UnixStream, config: &Config) -> io::Result<()> {
         let enabled = File::open(&config.enable).is_ok();
         let (operation, request) = decode_and_authorize(&frame, enabled)
             .map_err(|error| io::Error::new(io::ErrorKind::PermissionDenied, error.to_string()))?;
-        let needs_spawn = streaming_probe.as_ref().map_or(true, |p| {
+        let needs_spawn = streaming_probe.as_ref().is_none_or(|p| {
             p.width != request.width || p.height != request.height || p.format != request.format
         });
         if needs_spawn {
-            let can_spawn = last_spawn_attempt
-                .map_or(true, |t| t.elapsed() >= Duration::from_millis(500));
+            let can_spawn =
+                last_spawn_attempt.is_none_or(|t| t.elapsed() >= Duration::from_millis(500));
             if can_spawn {
                 last_spawn_attempt = Some(std::time::Instant::now());
                 streaming_probe = match StreamingProbe::spawn(
@@ -213,9 +188,7 @@ fn serve(mut stream: UnixStream, config: &Config) -> io::Result<()> {
                         operation != Operation::StreamFrame,
                     )
                     .map_err(|error| {
-                        eprintln!(
-                            "onyx-kvm-video-broker: summarize_frame_fast failed: {error:?}"
-                        );
+                        eprintln!("onyx-kvm-video-broker: summarize_frame_fast failed: {error:?}");
                         io::Error::new(io::ErrorKind::InvalidData, error.to_string())
                     })?;
                     (Some(snapshot), Some(bytes))
@@ -242,12 +215,15 @@ fn serve(mut stream: UnixStream, config: &Config) -> io::Result<()> {
         };
         match operation {
             Operation::Snapshot => {
-                let snapshot = snapshot.ok_or_else(|| io::Error::other("no snapshot frame available"))?;
+                let snapshot =
+                    snapshot.ok_or_else(|| io::Error::other("no snapshot frame available"))?;
                 stream.write_all(&snapshot.encode())?;
             }
             Operation::SnapshotFrame => {
-                let snapshot = snapshot.ok_or_else(|| io::Error::other("no snapshot frame available"))?;
-                let mut bytes = bytes.ok_or_else(|| io::Error::other("no frame bytes available"))?;
+                let snapshot =
+                    snapshot.ok_or_else(|| io::Error::other("no snapshot frame available"))?;
+                let mut bytes =
+                    bytes.ok_or_else(|| io::Error::other("no frame bytes available"))?;
                 let payload_bytes = u32::try_from(SNAPSHOT_RESPONSE_BYTES + bytes.len())
                     .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "payload too large"))?;
                 let header = WireHeader {
@@ -262,7 +238,9 @@ fn serve(mut stream: UnixStream, config: &Config) -> io::Result<()> {
             Operation::StreamFrame => {
                 if let (Some(snapshot), Some(mut bytes)) = (snapshot, bytes) {
                     let payload_bytes = u32::try_from(SNAPSHOT_RESPONSE_BYTES + bytes.len())
-                        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "payload too large"))?;
+                        .map_err(|_| {
+                            io::Error::new(io::ErrorKind::InvalidData, "payload too large")
+                        })?;
                     let header = WireHeader {
                         operation,
                         payload_bytes,
@@ -312,13 +290,7 @@ fn authenticate_peer(_stream: &UnixStream) -> io::Result<()> {
 }
 
 fn resolve_probe_bin(config: &Config) -> &Path {
-    if config.probe_bin.exists() {
-        config.probe_bin.as_path()
-    } else if Path::new("/usr/libexec/cleankvm-raw-frame-probe").exists() {
-        Path::new("/usr/libexec/cleankvm-raw-frame-probe")
-    } else {
-        config.probe_bin.as_path()
-    }
+    config.probe_bin.as_path()
 }
 
 struct StreamingProbe {
@@ -348,21 +320,15 @@ impl StreamingProbe {
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
             .spawn()?;
-        let stdin = match child.stdin.take() {
-            Some(s) => s,
-            None => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return Err(io::Error::other("no stdin for probe"));
-            }
+        let Some(stdin) = child.stdin.take() else {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(io::Error::other("no stdin for probe"));
         };
-        let mut stdout = match child.stdout.take() {
-            Some(s) => s,
-            None => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return Err(io::Error::other("no stdout for probe"));
-            }
+        let Some(mut stdout) = child.stdout.take() else {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(io::Error::other("no stdout for probe"));
         };
 
         let mut ready = [0_u8; 1];
@@ -444,12 +410,8 @@ fn capture_frame_payload(
     compute_digest: bool,
 ) -> io::Result<(onyx_kvm_media_protocol::VideoSnapshot, Vec<u8>)> {
     remove_if_exists(&config.frame_path)?;
-    remove_if_exists(Path::new("/run/cleankvm-frame.yuv422p"))?;
     let probe_bin = resolve_probe_bin(config);
-    let out_path = config
-        .frame_path
-        .to_str()
-        .unwrap_or("/run/cleankvm-frame.yuv422p");
+    let out_path = config.frame_path.to_str().unwrap_or(DEFAULT_FRAME_PATH);
     let height_str = height.to_string();
     let mode_arg = match format {
         onyx_kvm_media_protocol::SnapshotFormat::H264 => "oneshot-h264",
@@ -472,23 +434,14 @@ fn capture_frame_payload(
     if !status.success() {
         return Err(io::Error::other("raw frame probe exited with failure"));
     }
-    let actual_frame_path = if config.frame_path.exists() {
-        config.frame_path.as_path()
-    } else if Path::new("/run/cleankvm-frame.yuv422p").exists() {
-        Path::new("/run/cleankvm-frame.yuv422p")
-    } else {
-        config.frame_path.as_path()
-    };
-    let file = File::open(actual_frame_path)?;
+    let file = File::open(&config.frame_path)?;
     let max_read = match format {
         onyx_kvm_media_protocol::SnapshotFormat::H264 => 2 * 1024 * 1024,
         _ => usize::from(width) * usize::from(height) * 2,
     };
     let mut bytes = Vec::new();
-    file.take((max_read + 1) as u64)
-        .read_to_end(&mut bytes)?;
+    file.take((max_read + 1) as u64).read_to_end(&mut bytes)?;
     remove_if_exists(&config.frame_path)?;
-    remove_if_exists(Path::new("/run/cleankvm-frame.yuv422p"))?;
     let snapshot = summarize_frame_fast(&bytes, format, width, height, compute_digest)
         .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error.to_string()))?;
     Ok((snapshot, bytes))

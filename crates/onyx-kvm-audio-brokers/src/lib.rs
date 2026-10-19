@@ -63,9 +63,9 @@ pub fn run(kind: Kind) -> ExitCode {
     let (socket, gate, probe) = kind.defaults();
     let config = Config {
         kind,
-        socket: env_path_any("ONYX_KVM_AUDIO_SOCKET", "CLEANKVM_AUDIO_SOCKET", socket),
-        gate: env_path_any("ONYX_KVM_AUDIO_GATE", "CLEANKVM_AUDIO_GATE", gate),
-        probe: env_path_any("ONYX_KVM_AUDIO_PROBE", "CLEANKVM_AUDIO_PROBE", probe),
+        socket: env_path("ONYX_KVM_AUDIO_SOCKET", socket),
+        gate: env_path("ONYX_KVM_AUDIO_GATE", gate),
+        probe: env_path("ONYX_KVM_AUDIO_PROBE", probe),
     };
     match serve_forever(&config) {
         Ok(()) => ExitCode::SUCCESS,
@@ -76,10 +76,8 @@ pub fn run(kind: Kind) -> ExitCode {
     }
 }
 
-fn env_path_any(name: &str, fallback_name: &str, default: &str) -> PathBuf {
-    env::var_os(name)
-        .or_else(|| env::var_os(fallback_name))
-        .map_or_else(|| PathBuf::from(default), PathBuf::from)
+fn env_path(name: &str, default: &str) -> PathBuf {
+    env::var_os(name).map_or_else(|| PathBuf::from(default), PathBuf::from)
 }
 
 fn serve_forever(config: &Config) -> io::Result<()> {
@@ -111,7 +109,11 @@ fn serve_forever(config: &Config) -> io::Result<()> {
 
 const STREAM_CHUNK_BYTES: usize = 3200;
 
-fn serve_capture_stream(mut stream: UnixStream, config: &Config, probe_path: &Path) -> io::Result<()> {
+fn serve_capture_stream(
+    mut stream: UnixStream,
+    config: &Config,
+    probe_path: &Path,
+) -> io::Result<()> {
     stream.set_read_timeout(None)?;
     stream.set_write_timeout(Some(Duration::from_secs(5)))?;
 
@@ -168,19 +170,7 @@ fn serve_one(mut stream: UnixStream, config: &Config) -> io::Result<()> {
     stream.read_exact(&mut header)?;
     stream.read_exact(&mut payload)?;
 
-    let probe_path = if config.probe.exists() {
-        config.probe.as_path()
-    } else {
-        let fallback = match config.kind {
-            Kind::Capture => Path::new("/usr/libexec/cleankvm-audio-capture-probe"),
-            Kind::Playback => Path::new("/usr/libexec/cleankvm-audio-playback-probe"),
-        };
-        if fallback.exists() {
-            fallback
-        } else {
-            config.probe.as_path()
-        }
-    };
+    let probe_path = config.probe.as_path();
 
     let wire_header = WireHeader::decode(header).map_err(|_| invalid("invalid wire header"))?;
     if config.kind == Kind::Capture && wire_header.operation == Operation::StreamAudioPcm {

@@ -32,13 +32,13 @@ send "\003\025"
 send -s "stty -echo\r"
 after 1000
 if {$action eq "enable"} {
-    set command {touch /run/cleankvm/video-enabled; test -f /run/cleankvm/video-enabled; echo VIDEO_GATE_ENABLE_RC=$?}
+    set command {touch /run/onyx-kvm/video-enabled; test -f /run/onyx-kvm/video-enabled; echo VIDEO_GATE_ENABLE_RC=$?}
 } else {
-    set command {rm -f /run/cleankvm/video-enabled; test ! -e /run/cleankvm/video-enabled; echo VIDEO_GATE_DISABLE_RC=$?; test ! -e /run/cleankvm-frame.yuv422p; echo FRAME_ABSENT_RC=$?; test ! -e /dev/mem; echo DEVMEM_ABSENT_RC=$?; printf 'FINAL_MODULES='; awk '$1 ~ /^soph_/ {printf "%s,", $1}' /proc/modules; echo; printf 'POST_TAINT='; cat /proc/sys/kernel/tainted; test ! -e /run/cleankvm/audio-capture-enabled; echo MICROPHONE_DISABLED_RC=$?; test ! -e /run/cleankvm/audio-output-enabled; echo SPEAKER_DISABLED_RC=$?}
+    set command {rm -f /run/onyx-kvm/video-enabled; test ! -e /run/onyx-kvm/video-enabled; echo VIDEO_GATE_DISABLE_RC=$?; test ! -e /run/onyx-kvm-frame.yuv422p; echo FRAME_ABSENT_RC=$?; test ! -e /dev/mem; echo DEVMEM_ABSENT_RC=$?; printf 'FINAL_MODULES='; awk '$1 ~ /^soph_/ {printf "%s,", $1}' /proc/modules; echo; printf 'POST_TAINT='; cat /proc/sys/kernel/tainted; test ! -e /run/onyx-kvm/audio-capture-enabled; echo MICROPHONE_DISABLED_RC=$?; test ! -e /run/onyx-kvm/audio-output-enabled; echo SPEAKER_DISABLED_RC=$?}
 }
 send "\025"
-send -s -- "$command; echo __CLEANKVM_GATE_DONE__\r"
-expect { -re {__CLEANKVM_GATE_DONE__} {} timeout { send "~."; exit 8 } }
+send -s -- "$command; echo __ONYX_KVM_GATE_DONE__\r"
+expect { -re {__ONYX_KVM_GATE_DONE__} {} timeout { send "~."; exit 8 } }
 send -s "stty echo\r"
 after 500
 send "\r~."

@@ -2,11 +2,15 @@
 set -eu
 
 repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-engine=${CONTAINER_ENGINE:-podman}
-builder=${CLEANKVM_BUILDER_TAG:-localhost/cleankvm-builder:ubuntu-22.04-amd64}
-work_volume=${CLEANKVM_WORK_VOLUME:-cleankvm-work-v50}
-host_tools_volume=${CLEANKVM_HOST_TOOLS_VOLUME:-cleankvm-host-tools}
-artifact_dir=${CLEANKVM_ARTIFACT_DIR:-"$repo_root/out/phase1"}
+. "$repo_root/image/default-env.sh"
+
+"$repo_root/image/verify-sources.sh"
+
+engine=$CONTAINER_ENGINE
+builder=$ONYX_KVM_BUILDER_TAG
+work_volume=$ONYX_KVM_WORK_VOLUME
+host_tools_volume=$ONYX_KVM_HOST_TOOLS_VOLUME
+artifact_dir=${ONYX_KVM_ARTIFACT_DIR:-"$repo_root/out/phase1"}
 
 mkdir -p "$artifact_dir"
 
@@ -18,7 +22,7 @@ mkdir -p "$artifact_dir"
     "$builder" bash -lc '
         set -eu
         sdk=/work/sdk
-        stage=/tmp/cleankvm-package
+        stage=/tmp/onyx-kvm-package
         kernel="$sdk/linux_5.10/build/sg2002_licheervnano_sd/arch/riscv/boot/Image"
         kernel_config="$sdk/linux_5.10/build/sg2002_licheervnano_sd/.config"
         dtb="$sdk/linux_5.10/build/sg2002_licheervnano_sd/arch/riscv/boot/dts/cvitek/sg2002_licheervnano_sd.dtb"

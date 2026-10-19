@@ -45,34 +45,34 @@ after 300
 
 switch -- $action {
     video-enable {
-        send -- "touch /run/onyx-kvm/video-enabled /run/cleankvm/video-enabled 2>/dev/null; test -f /run/onyx-kvm/video-enabled || test -f /run/cleankvm/video-enabled; echo VIDEO_GATE_RC=\$?; echo __GATE_ACTION_DONE__\r"
+        send -- "touch /run/onyx-kvm/video-enabled 2>/dev/null; test -f /run/onyx-kvm/video-enabled; echo VIDEO_GATE_RC=\$?; echo __GATE_ACTION_DONE__\r"
     }
     video-disable {
-        send -- "rm -f /run/onyx-kvm/video-enabled /run/cleankvm/video-enabled /run/*-frame.*; test ! -e /run/onyx-kvm/video-enabled && test ! -e /run/cleankvm/video-enabled; echo VIDEO_GATE_RC=\$?; test ! -e /run/cleankvm-frame.yuv422p && test ! -e /run/onyx-kvm-frame.yuv422p; echo FRAME_ABSENT_RC=\$?; test ! -e /dev/mem; echo DEVMEM_ABSENT_RC=\$?; printf 'SOPH_MODULES='; awk '\$1 ~ /^soph_/ {printf \"%s,\", \$1}' /proc/modules; echo; printf 'TAINT='; cat /proc/sys/kernel/tainted; echo __GATE_ACTION_DONE__\r"
+        send -- "rm -f /run/onyx-kvm/video-enabled /run/*-frame.*; test ! -e /run/onyx-kvm/video-enabled; echo VIDEO_GATE_RC=\$?; test ! -e /run/onyx-kvm-frame.yuv422p; echo FRAME_ABSENT_RC=\$?; test ! -e /dev/mem; echo DEVMEM_ABSENT_RC=\$?; printf 'SOPH_MODULES='; awk '\$1 ~ /^soph_/ {printf \"%s,\", \$1}' /proc/modules; echo; printf 'TAINT='; cat /proc/sys/kernel/tainted; echo __GATE_ACTION_DONE__\r"
     }
     hid-enable {
-        send -- "touch /run/onyx-kvm/hid-enabled /run/cleankvm/hid-enabled 2>/dev/null; test -f /run/onyx-kvm/hid-enabled || test -f /run/cleankvm/hid-enabled; echo HID_GATE_RC=\$?; echo __GATE_ACTION_DONE__\r"
+        send -- "touch /run/onyx-kvm/hid-enabled 2>/dev/null; test -f /run/onyx-kvm/hid-enabled; echo HID_GATE_RC=\$?; echo __GATE_ACTION_DONE__\r"
     }
     hid-disable {
-        send -- "rm -f /run/onyx-kvm/hid-enabled /run/cleankvm/hid-enabled; test ! -e /run/onyx-kvm/hid-enabled && test ! -e /run/cleankvm/hid-enabled; echo HID_GATE_RC=\$?; echo __GATE_ACTION_DONE__\r"
+        send -- "rm -f /run/onyx-kvm/hid-enabled; test ! -e /run/onyx-kvm/hid-enabled; echo HID_GATE_RC=\$?; echo __GATE_ACTION_DONE__\r"
     }
     audio-capture-enable {
-        send -- "touch /run/onyx-kvm/audio-capture-enabled /run/cleankvm/audio-capture-enabled 2>/dev/null; test -f /run/onyx-kvm/audio-capture-enabled || test -f /run/cleankvm/audio-capture-enabled; echo CAPTURE_GATE_RC=\$?; echo __GATE_ACTION_DONE__\r"
+        send -- "touch /run/onyx-kvm/audio-capture-enabled 2>/dev/null; test -f /run/onyx-kvm/audio-capture-enabled; echo CAPTURE_GATE_RC=\$?; echo __GATE_ACTION_DONE__\r"
     }
     audio-capture-disable {
-        send -- "rm -f /run/onyx-kvm/audio-capture-enabled /run/cleankvm/audio-capture-enabled; test ! -e /run/onyx-kvm/audio-capture-enabled && test ! -e /run/cleankvm/audio-capture-enabled; echo CAPTURE_GATE_RC=\$?; printf 'SOUND_FDS='; for p in /proc/\[0-9\]*/fd/*; do t=\$(readlink \"\$p\" 2>/dev/null || true); case \"\$t\" in /dev/snd/*) printf '%s,' \"\$p\";; esac; done; echo; echo __GATE_ACTION_DONE__\r"
+        send -- "rm -f /run/onyx-kvm/audio-capture-enabled; test ! -e /run/onyx-kvm/audio-capture-enabled; echo CAPTURE_GATE_RC=\$?; printf 'SOUND_FDS='; for p in /proc/\[0-9\]*/fd/*; do t=\$(readlink \"\$p\" 2>/dev/null || true); case \"\$t\" in /dev/snd/*) printf '%s,' \"\$p\";; esac; done; echo; echo __GATE_ACTION_DONE__\r"
     }
     audio-output-enable {
-        send -- "touch /run/onyx-kvm/audio-output-enabled /run/cleankvm/audio-output-enabled 2>/dev/null; test -f /run/onyx-kvm/audio-output-enabled || test -f /run/cleankvm/audio-output-enabled; echo OUTPUT_GATE_RC=\$?; echo __GATE_ACTION_DONE__\r"
+        send -- "touch /run/onyx-kvm/audio-output-enabled 2>/dev/null; test -f /run/onyx-kvm/audio-output-enabled; echo OUTPUT_GATE_RC=\$?; echo __GATE_ACTION_DONE__\r"
     }
     audio-output-disable {
-        send -- "rm -f /run/onyx-kvm/audio-output-enabled /run/cleankvm/audio-output-enabled; test ! -e /run/onyx-kvm/audio-output-enabled && test ! -e /run/cleankvm/audio-output-enabled; echo OUTPUT_GATE_RC=\$?; printf 'SOUND_FDS='; for p in /proc/\[0-9\]*/fd/*; do t=\$(readlink \"\$p\" 2>/dev/null || true); case \"\$t\" in /dev/snd/*) printf '%s,' \"\$p\";; esac; done; echo; echo __GATE_ACTION_DONE__\r"
+        send -- "rm -f /run/onyx-kvm/audio-output-enabled; test ! -e /run/onyx-kvm/audio-output-enabled; echo OUTPUT_GATE_RC=\$?; printf 'SOUND_FDS='; for p in /proc/\[0-9\]*/fd/*; do t=\$(readlink \"\$p\" 2>/dev/null || true); case \"\$t\" in /dev/snd/*) printf '%s,' \"\$p\";; esac; done; echo; echo __GATE_ACTION_DONE__\r"
     }
     enable-all {
         send -- "touch /run/onyx-kvm/video-enabled /run/onyx-kvm/hid-enabled /run/onyx-kvm/audio-capture-enabled /run/onyx-kvm/audio-output-enabled; for g in video hid audio-capture audio-output; do test -f /run/onyx-kvm/\$g-enabled; echo GATE_\${g}_RC=\$?; done; echo __GATE_ACTION_DONE__\r"
     }
     cleanup-all {
-        send -- "rm -f /run/onyx-kvm/video-enabled /run/onyx-kvm/hid-enabled /run/onyx-kvm/audio-capture-enabled /run/onyx-kvm/audio-output-enabled /run/cleankvm/*-enabled /run/*-frame.*; for g in video hid audio-capture audio-output; do test ! -e /run/onyx-kvm/\$g-enabled && test ! -e /run/cleankvm/\$g-enabled; echo GATE_\${g}_ABSENT_RC=\$?; done; test ! -e /dev/mem; echo DEVMEM_ABSENT_RC=\$?; printf 'SOPH_MODULES='; awk '\$1 ~ /^soph_/ {printf \"%s,\", \$1}' /proc/modules; echo; printf 'TAINT='; cat /proc/sys/kernel/tainted; printf 'SOUND_FDS='; for p in /proc/\[0-9\]*/fd/*; do t=\$(readlink \"\$p\" 2>/dev/null || true); case \"\$t\" in /dev/snd/*) printf '%s,' \"\$p\";; esac; done; echo; echo __GATE_ACTION_DONE__\r"
+        send -- "rm -f /run/onyx-kvm/video-enabled /run/onyx-kvm/hid-enabled /run/onyx-kvm/audio-capture-enabled /run/onyx-kvm/audio-output-enabled /run/onyx-kvm/*-enabled /run/*-frame.*; for g in video hid audio-capture audio-output; do test ! -e /run/onyx-kvm/\$g-enabled; echo GATE_\${g}_ABSENT_RC=\$?; done; test ! -e /dev/mem; echo DEVMEM_ABSENT_RC=\$?; printf 'SOPH_MODULES='; awk '\$1 ~ /^soph_/ {printf \"%s,\", \$1}' /proc/modules; echo; printf 'TAINT='; cat /proc/sys/kernel/tainted; printf 'SOUND_FDS='; for p in /proc/\[0-9\]*/fd/*; do t=\$(readlink \"\$p\" 2>/dev/null || true); case \"\$t\" in /dev/snd/*) printf '%s,' \"\$p\";; esac; done; echo; echo __GATE_ACTION_DONE__\r"
     }
     default {
         puts stderr "unknown action: $action"

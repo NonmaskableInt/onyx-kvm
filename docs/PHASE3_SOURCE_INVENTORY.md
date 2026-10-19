@@ -57,7 +57,7 @@ after its complete dependency and license closure is recorded.
   drivers because of privacy concerns.
 - The pinned product kernel configuration enables the CV182XA ADC/DAC machine
   and codec drivers, internal I2S clocking, generic USB sound, USB Audio, and
-  UAC1. CleanKVM currently disables all of them.
+  UAC1. Onyx KVM currently disables all of them.
 - The product DTS enables the DAC and removes the reference mute GPIO. Its
   inherited QFN description retains the internal ADC/DAC cards while deleting
   PDM and two external-I2S paths. This supports a tightly scoped ADC/DAC-only
@@ -111,7 +111,7 @@ LT6911C variant, then address `0x2b` for LT6911UXC. Its unexecuted, dynamically
 linked `nanokvm_update_edid` ELF independently embeds `/dev/i2c-4` and names
 both variants. This is strong board-software evidence for controller 4 and the
 two 7-bit addresses. No vendor binary or script was copied into or executed by
-CleanKVM.
+Onyx KVM.
 
 An explicitly approved, narrowly bounded live receive-byte probe then checked
 only bus 4 addresses `0x2b` and `0x2c`. Address `0x2b` acknowledged and `0x2c`

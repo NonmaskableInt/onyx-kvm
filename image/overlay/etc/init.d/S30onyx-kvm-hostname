@@ -8,8 +8,6 @@ case "${1:-start}" in
         mac_file=""
         if [ -f /boot/onyx-kvm-mac.txt ]; then
             mac_file="/boot/onyx-kvm-mac.txt"
-        elif [ -f /boot/cleankvm-mac.txt ]; then
-            mac_file="/boot/cleankvm-mac.txt"
         fi
 
         saved_mac=""

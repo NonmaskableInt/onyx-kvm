@@ -5,16 +5,16 @@ Status: Draft / Approved for implementation
 
 ## 1. Architectural principles & security boundaries
 
-Phase 4 transitions CleanKVM from discrete diagnostic snapshot and probe verification
+Phase 4 transitions Onyx KVM from discrete diagnostic snapshot and probe verification
 into an interactive, production-grade remote KVM appliance. The strict security
 boundaries established in Phases 1 through 3 remain invariant:
 
 1. **Media worker isolation**: Video and audio brokers run as separate privileged
-   daemons communicating solely over root/cleankvm Unix domain sockets. They possess
+   daemons communicating solely over root/onyx-kvm Unix domain sockets. They possess
    no network sockets, certificates, or bearer tokens.
 2. **Fail-closed capability gates**: Video capture, USB HID, microphone capture,
    and speaker playback each require their respective runtime gate file in
-   `/run/cleankvm/`. If any gate is absent, the corresponding broker rejects requests.
+   `/run/onyx-kvm/`. If any gate is absent, the corresponding broker rejects requests.
 3. **Zero `/dev/mem`**: Broad physical memory mapping remains permanently disabled.
    Kernel taint must be 0 at boot and transitions only through expected module
    load/unload states.
@@ -79,7 +79,7 @@ or `<canvas id="kvm-canvas">`):
 ## 3. Bulk pixel delivery & canvas rendering
 
 ### 3.1 Media protocol payload extension
-In Phase 3, `cleankvm-media-protocol` only transferred metadata (`VideoSnapshot`).
+In Phase 3, `onyx-kvm-media-protocol` only transferred metadata (`VideoSnapshot`).
 Phase 4 adds payload delivery support:
 - `Operation::SnapshotFrame`:
   - Request: `SnapshotRequest` (8 bytes).
@@ -87,12 +87,12 @@ Phase 4 adds payload delivery support:
     `VideoSnapshot` (42 bytes), followed by raw planar YUV bytes (3,110,400 bytes).
 
 ### 3.2 HTTPS bulk frame endpoint (`GET /video/frame`)
-- An authenticated HTTP GET endpoint in `cleankvmd`:
+- An authenticated HTTP GET endpoint in `onyx-kvmd`:
   - Header: `Authorization: Bearer <token>`
   - Path: `/video/frame`
   - Validates origin, token signature, expiry, audience, and `kvm:video` scope.
   - Enforces `video-enabled` gate.
-  - Connects to `/run/cleankvm/video.sock`, captures one live frame, and streams
+  - Connects to `/run/onyx-kvm/video.sock`, captures one live frame, and streams
     raw binary bytes with:
     - `Content-Type: application/octet-stream`
     - `Cache-Control: no-store, no-cache, must-revalidate`
@@ -132,16 +132,16 @@ followed by 960x540 U plane, followed by 960x540 V plane):
 
 ## 4. Implementation roadmap
 
-1. **Milestone 4.1**: Fix `mutatingOperationsEnabled` in `cleankvm-mcp` so HID capability
+1. **Milestone 4.1**: Fix `mutatingOperationsEnabled` in `onyx-kvm-mcp` so HID capability
    state accurately reports in `kvm.status` and the web console. *(Done)*
 2. **Milestone 4.2**: Add interactive HID controls to the web console:
    - USB HID usage keycode mapping table.
    - Pointer delta encoding and mouse button bitmasking.
    - Focus/blur safety guards (auto-zeroize on blur).
    - "Release input" and "Ctrl+Alt+Del" UI buttons.
-3. **Milestone 4.3**: Implement bulk frame transfer in `cleankvm-media-protocol` and
-   `cleankvm-video-broker`.
-4. **Milestone 4.4**: Implement authenticated `/video/frame` endpoint in `cleankvmd`.
+3. **Milestone 4.3**: Implement bulk frame transfer in `onyx-kvm-media-protocol` and
+   `onyx-kvm-video-broker`.
+4. **Milestone 4.4**: Implement authenticated `/video/frame` endpoint in `onyx-kvmd`.
 5. **Milestone 4.5**: Implement WebGL YUV420P canvas renderer in `app.js`.
 6. **Milestone 4.6**: Continuous media session streaming with bounded ring buffer
    and backpressure management.

@@ -218,8 +218,9 @@ mod tests {
         assert_eq!(summary_720.byte_length, 1_843_200);
 
         let two_plane_buffer = vec![0x24_u8; EXPECTED_YUV420P_1080P_BYTES];
-        let two_plane_summary = summarize_frame(&two_plane_buffer, SnapshotFormat::Yuv420p, 1920, 1080)
-            .unwrap_or_else(|error| panic!("valid 2-plane 1080p buffer failed: {error}"));
+        let two_plane_summary =
+            summarize_frame(&two_plane_buffer, SnapshotFormat::Yuv420p, 1920, 1080)
+                .unwrap_or_else(|error| panic!("valid 2-plane 1080p buffer failed: {error}"));
         assert_eq!(two_plane_summary.byte_length, 3_110_400);
         assert_eq!(two_plane_summary.format, SnapshotFormat::Yuv420p);
 

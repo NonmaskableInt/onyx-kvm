@@ -1,5 +1,17 @@
 # Roadmap
 
+Status at product release candidate v80 (2026-10-18). Unfinished work and
+recommendations are in [OPEN_ITEMS.md](OPEN_ITEMS.md).
+
+| Phase | Status |
+| --- | --- |
+| 0 Evidence and baseline | Done; results in `evidence/` |
+| 1 Independent recovery image | Hardware-qualified development checkpoint |
+| 2 Rust control plane | Done for HTTPS, MCP, pairing, HID; production enrollment hardening open (S1, S2, S4) |
+| 3 Video and media | Video admitted: 1080p60 capture, H.264, tile-delta streaming, host-sleep standby and wake. Virtual media not started |
+| 3a Opt-in audio | Metrics-only capture and fixed-tone playback admitted behind separate gates; continuous audio is Phase 4 |
+| 4 Integrity and release | Not started: A/B roots, verified boot, SBOM, reproduction, on-device signed update (B1 to B4) |
+
 ## Phase 0: evidence and baseline
 
 - Record board revision, boot log, partition table, device tree, loaded kernel
@@ -67,11 +79,14 @@ Hardware-qualified development checkpoint. See `PHASE1_ACCEPTANCE.md`.
   profile now permits out-of-tree module loading while retaining no in-tree
   modules and keeping generic media, sound, UVC, and UAC disabled. The six
   candidate drivers and remaining provenance gates are documented in
-  `PHASE3_VIDEO_ADMISSION.md`; none is admitted to an image yet.
-- Bring up LT6911 input and the SG2002 VI/VPSS/VENC pipeline in a sandboxed
-  adapter.
-- Add bounded snapshots and streaming.
-- Add read-only virtual media first; writable media remains optional.
+  `PHASE3_VIDEO_ADMISSION.md`. The foundation profile was subsequently admitted
+  and the MIPI RX pinmux/pad configuration (patch 0027) unblocked frame
+  capture; see `NEXT_STEPS.md`.
+- Done: bring up LT6911 input and the SG2002 VI/VPSS/VENC pipeline in a
+  sandboxed adapter.
+- Done: bounded snapshots and streaming.
+- Open: read-only virtual media first (`kvm.media.attach` is defined in policy
+  but not implemented); writable media remains optional.
 
 ## Phase 3a: opt-in audio
 

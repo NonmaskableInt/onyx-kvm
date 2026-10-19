@@ -129,17 +129,17 @@ def push_file(fd: int, local_path: str, remote_path: str) -> bool:
     return True
 
 
-def run_discriminator(fd: int, credential_path: str, profile: int = 0, probe_path: str = "/usr/libexec/cleankvm-raw-frame-probe", probe_args: str = "", vi_path: Optional[str] = None, mipi_path: Optional[str] = None, mipi_params: str = "") -> bool:
-    print("Logging into CleanKVM target...")
+def run_discriminator(fd: int, credential_path: str, profile: int = 0, probe_path: str = "/usr/libexec/onyx-kvm-raw-frame-probe", probe_args: str = "", vi_path: Optional[str] = None, mipi_path: Optional[str] = None, mipi_params: str = "") -> bool:
+    print("Logging into Onyx KVM target...")
     if not login(fd, credential_path):
         return False
 
-    print(f"\n--- Starting CleanKVM Lane Discriminator Test (Profile {profile}, Probe {probe_path}, Args: '{probe_args}', VI: '{vi_path}', MIPI: '{mipi_path}', MIPI_Params: '{mipi_params}') ---\n")
+    print(f"\n--- Starting Onyx KVM Lane Discriminator Test (Profile {profile}, Probe {probe_path}, Args: '{probe_args}', VI: '{vi_path}', MIPI: '{mipi_path}', MIPI_Params: '{mipi_params}') ---\n")
     modules = ["soph_sys", "soph_base", "soph_mipi_rx", "soph_snsr_i2c", "soph_vi", "soph_vpss"]
     reverse_modules = list(reversed(modules))
-    module_dir = "/usr/lib/cleankvm/video-quarantine"
+    module_dir = "/usr/lib/onyx-kvm/video-quarantine"
 
-    run_cmd(fd, "echo CLEANKVM_LANE_DISCRIMINATOR_V1_BEGIN")
+    run_cmd(fd, "echo ONYX_KVM_LANE_DISCRIMINATOR_V1_BEGIN")
     run_cmd(fd, "test -r /proc/modules && test ! -e /dev/snd/controlC0 && echo BASELINE_GATE=passed || { echo BASELINE_GATE=failed; exit 91; }")
     run_cmd(fd, f"printf 'PROBE_SHA256='; sha256sum {probe_path} | cut -d' ' -f1; printf 'PRE_TAINT='; cat /proc/sys/kernel/tainted")
 
@@ -169,8 +169,8 @@ def run_discriminator(fd: int, credential_path: str, profile: int = 0, probe_pat
     probe_cmd = f"{probe_path} {profile} {probe_args}".strip()
     run_cmd(fd, f"{probe_cmd}; echo PROBE_{profile}_RC=$?", timeout=40.0)
     run_cmd(fd, "dmesg")
-    run_cmd(fd, "ls -l /run/cleankvm-frame.yuv422p 2>/dev/null; sha256sum /run/cleankvm-frame.yuv422p 2>/dev/null; test -e /run/cleankvm-frame.yuv422p; echo FRAME_PRESENT_RC=$?")
-    run_cmd(fd, "rm -f /run/cleankvm-frame.yuv422p; echo FRAME_CLEANUP_RC=$?")
+    run_cmd(fd, "ls -l /run/onyx-kvm-frame.yuv422p 2>/dev/null; sha256sum /run/onyx-kvm-frame.yuv422p 2>/dev/null; test -e /run/onyx-kvm-frame.yuv422p; echo FRAME_PRESENT_RC=$?")
+    run_cmd(fd, "rm -f /run/onyx-kvm-frame.yuv422p; echo FRAME_CLEANUP_RC=$?")
 
     for mod in reverse_modules:
         run_cmd(fd, f"rmmod {mod}; echo UNLOAD_{profile}_{mod}_RC=$?")
@@ -178,8 +178,8 @@ def run_discriminator(fd: int, credential_path: str, profile: int = 0, probe_pat
     run_cmd(fd, f"printf 'PROFILE_{profile}_REMAINDER='; awk '$1 ~ /^soph_/ {{printf \"%s,\", $1}}' /proc/modules; echo")
     run_cmd(fd, f"echo LANE_PROFILE_{profile}_END")
 
-    run_cmd(fd, "printf 'FINAL_LOADED='; awk '$1 ~ /^soph_/ {printf \"%s,\", $1}' /proc/modules; echo; printf 'POST_TAINT='; cat /proc/sys/kernel/tainted; test ! -e /run/cleankvm-frame.yuv422p; echo FINAL_FRAME_ABSENT_RC=$?")
-    run_cmd(fd, "echo CLEANKVM_LANE_DISCRIMINATOR_V1_END")
+    run_cmd(fd, "printf 'FINAL_LOADED='; awk '$1 ~ /^soph_/ {printf \"%s,\", $1}' /proc/modules; echo; printf 'POST_TAINT='; cat /proc/sys/kernel/tainted; test ! -e /run/onyx-kvm-frame.yuv422p; echo FINAL_FRAME_ABSENT_RC=$?")
+    run_cmd(fd, "echo ONYX_KVM_LANE_DISCRIMINATOR_V1_END")
     return True
 
 
@@ -221,7 +221,7 @@ def main() -> int:
         "--lt-status", action="store_true", help="Query LT6911 bridge status registers"
     )
     parser.add_argument(
-        "--push-probe", type=str, help="Upload local probe binary to target /tmp/cleankvm-raw-frame-probe"
+        "--push-probe", type=str, help="Upload local probe binary to target /tmp/onyx-kvm-raw-frame-probe"
     )
     parser.add_argument(
         "--push-file", type=str, help="Upload local file to target"
@@ -230,7 +230,7 @@ def main() -> int:
         "--push-dest", type=str, default="/tmp/soph_mipi_rx.ko", help="Remote destination for --push-file"
     )
     parser.add_argument(
-        "--probe-path", type=str, default="/usr/libexec/cleankvm-raw-frame-probe", help="Path to probe executable on target"
+        "--probe-path", type=str, default="/usr/libexec/onyx-kvm-raw-frame-probe", help="Path to probe executable on target"
     )
     parser.add_argument(
         "--probe-args", type=str, default="", help="Additional arguments to pass to probe"
@@ -265,7 +265,7 @@ def main() -> int:
         if args.push_probe:
             if os.path.exists(args.credentials):
                 login(fd, args.credentials)
-            ok = push_file(fd, args.push_probe, "/tmp/cleankvm-raw-frame-probe")
+            ok = push_file(fd, args.push_probe, "/tmp/onyx-kvm-raw-frame-probe")
             return 0 if ok else 1
 
         if args.push_file:

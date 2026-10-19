@@ -4,7 +4,7 @@ set -eu
 sdk_dir=${1:?usage: apply-product-profile.sh SDK_DIRECTORY}
 repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 kernel_defconfig="$sdk_dir/build/boards/sg200x/sg2002_licheervnano_sd/linux/sg2002_licheervnano_sd_defconfig"
-marker='# CleanKVM product profile generated configuration'
+marker='# Onyx KVM product profile generated configuration'
 temp_dir=$(mktemp -d)
 trap 'rm -rf "$temp_dir"' EXIT HUP INT TERM
 
@@ -19,4 +19,4 @@ KCONFIG_CONFIG="$temp_dir/kernel/.config" \
     "$repo_root/image/configs/phase3a-audio-enumeration-kernel.fragment"
 cp "$temp_dir/kernel/.config" "$kernel_defconfig"
 grep -qF "$marker" "$kernel_defconfig" || printf '\n%s\n' "$marker" >>"$kernel_defconfig"
-printf '%s\n' 'combined CleanKVM product profile applied'
+printf '%s\n' 'combined Onyx KVM product profile applied'

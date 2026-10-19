@@ -40,6 +40,9 @@ pass.
   disabled.
 - Use `cargo test --workspace --locked` for the Rust workspace. Run the
   relevant config, rootfs, image, and read-back verifiers for image changes.
+- Use `onyx-kvm` / `ONYX_KVM_*` / "Onyx KVM" everywhere; do not reintroduce
+  the retired `cleankvm` name or add compatibility aliases for it (see
+  `docs/NAMING.md`). Dated evidence records keep the names they were written with.
 - Preserve unrelated user changes. Use focused commits and push only after
   tests or proportional verification pass.
 

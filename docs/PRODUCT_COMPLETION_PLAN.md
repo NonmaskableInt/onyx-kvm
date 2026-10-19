@@ -137,6 +137,6 @@ to continuous media streaming sessions and release hardening.
    - Eliminated per-frame module load/unload thrashing via session-scoped `ModuleCleanupGuard`.
    - Protocol-level `Operation::StreamFrame` eliminates 310 ms CPU-intensive SHA-256 calculation per frame on 1GHz RISC-V.
    - Multi-threaded connection accept loop in `onyx-kvmd` resolves thread starvation; concurrent MCP requests complete in 35 ms during active video streaming.
-   - Upgraded raw frame probe to v47 (`cleankvm-raw-frame-probe` with streaming IPC), preserving the active VI pipeline across frames and eliminating 2.15s MIPI RX resync penalty, artificial sleeps, and tmpfs disk writes.
+   - Upgraded raw frame probe to v47 (`onyx-kvm-raw-frame-probe` with streaming IPC), preserving the active VI pipeline across frames and eliminating 2.15s MIPI RX resync penalty, artificial sleeps, and tmpfs disk writes.
    - Web console WebGL shader acceleration for planar YUV420P eliminating CPU canvas rendering loop.
    - Validated on target hardware (`192.168.2.110`): streaming throughput increased over 6x to 6.0 MB/s (~2.0 FPS uncompressed 1080p, saturating 60% of Fast Ethernet), single frame latency reduced from 3.15s to 1.02s, and clean zero-module idle state verified (`lsmod` empty, `Tainted: G`).

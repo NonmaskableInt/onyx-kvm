@@ -1,4 +1,4 @@
-# CleanKVM Phase 1 recovery kernel: serial, SD, and wired Ethernet only.
+# Onyx KVM Phase 1 recovery kernel: serial, SD, and wired Ethernet only.
 # Applied after the SG2002 LicheeRV Nano defconfig and checked with olddefconfig.
 
 # Preserve the board's built-in SoC support. These initialize the SG2002

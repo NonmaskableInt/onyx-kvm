@@ -22,7 +22,7 @@ expect {
 }
 unset password
 unset credential_text
-send -- "echo RESET_TRACE_BEGIN; dmesg | grep cleankvm-reset; echo RESET_TRACE_END\r"
+send -- "echo RESET_TRACE_BEGIN; dmesg | grep onyx-kvm-reset; echo RESET_TRACE_END\r"
 expect {
     -re {RESET_TRACE_END} {}
     timeout { send "~."; exit 6 }

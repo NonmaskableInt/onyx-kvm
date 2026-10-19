@@ -82,15 +82,15 @@ for {set offset 0} {$offset < $encoded_length} {incr offset 384} {
 unset encoded
 log_user 1
 
-set module_dir /usr/lib/cleankvm/video-quarantine
-set frame /run/cleankvm-frame.yuv422p
-run_command {echo CLEANKVM_PHASE3_ENFORCED_PAD_PULLS_TEST_START}
+set module_dir /usr/lib/onyx-kvm/video-quarantine
+set frame /run/onyx-kvm-frame.yuv422p
+run_command {echo ONYX_KVM_PHASE3_ENFORCED_PAD_PULLS_TEST_START}
 run_command "actual=\$(sha256sum /tmp/soph_mipi_rx.ko.gz.b64 | awk '{print \$1}'); echo BASE64_FILE_SHA256=\$actual"
 run_command {base64 -d /tmp/soph_mipi_rx.ko.gz.b64 >/tmp/soph_mipi_rx.ko.gz; rm -f /tmp/soph_mipi_rx.ko.gz.b64}
 run_checked "actual=\$(sha256sum /tmp/soph_mipi_rx.ko.gz | awk '{print \$1}'); echo GZIP_SHA256=\$actual; test \"\$actual\" = \"$expected_gzip_sha\"" GZIP_HASH_OK
 run_checked {gzip -dc /tmp/soph_mipi_rx.ko.gz >/tmp/soph_mipi_rx.ko; rm -f /tmp/soph_mipi_rx.ko.gz; chmod 400 /tmp/soph_mipi_rx.ko} GZIP_DECODE_OK
 run_checked "actual=\$(sha256sum /tmp/soph_mipi_rx.ko | awk '{print \$1}'); echo MODULE_SHA256=\$actual; test \"\$actual\" = \"$expected_module_sha\"" MODULE_HASH_OK
-run_command {rm -f /run/cleankvm-frame.yuv422p; test ! -e /dev/mem; echo DEVMEM_ABSENT_RC=$?}
+run_command {rm -f /run/onyx-kvm-frame.yuv422p; test ! -e /dev/mem; echo DEVMEM_ABSENT_RC=$?}
 run_command {printf 'PRE_TAINT='; cat /proc/sys/kernel/tainted; printf 'PRELOADED='; awk '$1 ~ /^soph_/ {printf "%s,", $1}' /proc/modules; echo}
 run_command "insmod $module_dir/soph_sys.ko; echo LOAD_soph_sys_RC=\$?"
 run_command "insmod $module_dir/soph_base.ko; echo LOAD_soph_base_RC=\$?"
@@ -98,19 +98,19 @@ run_command {insmod /tmp/soph_mipi_rx.ko lane_phase=0,8,8,3,3 csi_ck_phase=0 hs_
 foreach module {soph_snsr_i2c soph_vi soph_vpss} {
     run_command "insmod $module_dir/$module.ko; echo LOAD_${module}_RC=\$?"
 }
-run_command "/usr/libexec/cleankvm-raw-frame-probe 0 1080 8 0,0,0,0,0 2,4,3,1,0; echo PROBE_RC=\$?"
+run_command "/usr/libexec/onyx-kvm-raw-frame-probe 0 1080 8 0,0,0,0,0 2,4,3,1,0; echo PROBE_RC=\$?"
 run_command {echo '[PAD_INIT]'; dmesg | grep 'init pad_ctrl' | tail -10}
 run_command {echo '[PAD_SET]'; dmesg | grep 'set pad PD' | tail -10}
 run_command {echo '[PINMUX_READBACK]'; dmesg | grep 'cif pinmux' | tail -10}
 run_command {echo '[MIPI_RX]'; cat /proc/mipi-rx}
 run_command {echo '[DMESG_CSI]'; dmesg | grep -E "(cif|csi|mipi)" | tail -25}
-run_command {if test -f /run/cleankvm-frame.yuv422p; then printf 'FRAME_BYTES=%s\n' "$(wc -c </run/cleankvm-frame.yuv422p)"; sha256sum /run/cleankvm-frame.yuv422p; else echo FRAME_ABSENT; fi}
-run_command {rm -f /run/cleankvm-frame.yuv422p}
+run_command {if test -f /run/onyx-kvm-frame.yuv422p; then printf 'FRAME_BYTES=%s\n' "$(wc -c </run/onyx-kvm-frame.yuv422p)"; sha256sum /run/onyx-kvm-frame.yuv422p; else echo FRAME_ABSENT; fi}
+run_command {rm -f /run/onyx-kvm-frame.yuv422p}
 foreach module {soph_vpss soph_vi soph_snsr_i2c soph_mipi_rx soph_base soph_sys} {
     run_command "rmmod $module; echo UNLOAD_${module}_RC=\$?"
 }
 run_command {rm -f /tmp/soph_mipi_rx.ko; test ! -e /tmp/soph_mipi_rx.ko; echo MODULE_CLEANUP_RC=$?}
 run_command {printf 'FINAL_LOADED='; awk '$1 ~ /^soph_/ {printf "%s,", $1}' /proc/modules; echo; printf 'POST_TAINT='; cat /proc/sys/kernel/tainted}
-run_command {echo CLEANKVM_PHASE3_ENFORCED_PAD_PULLS_TEST_END}
+run_command {echo ONYX_KVM_PHASE3_ENFORCED_PAD_PULLS_TEST_END}
 send "~."
 expect eof

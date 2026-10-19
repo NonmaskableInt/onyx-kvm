@@ -57,7 +57,7 @@ Before bridge flash mutation, obtain all of:
 5. Expected post-flash chip ID, firmware version, HDMI signal-state, HPD, CSI
    dimensions, output format, lane count, and MIPI clock registers.
 
-The CleanKVM loader must be independently compiled, accept only the pinned
+The Onyx KVM loader must be independently compiled, accept only the pinned
 payload, back up readable bridge state before erase, refuse unexpected silicon,
 write only the documented flash range, compare every programmed byte, restore
 MCU/watchdog state on failure, remain root-only and local-only, and never start
@@ -123,7 +123,7 @@ resident-flash evidence baseline, not yet an authenticated vendor release.
 
 Sipeed's pinned current UXC polling source establishes that status reads are
 made only after stopping the embedded MCU (`0x80:0xee=1`) and are followed by a
-resume (`0x80:0xee=0`). The earlier CleanKVM status harness omitted that state
+resume (`0x80:0xee=0`). The earlier Onyx KVM status harness omitted that state
 transition, so its `0x00` signal and zero dimensions were not valid runtime
 evidence. The corrected source-exact sequence returned signal `0x55`, Vactive
 `0x0438`, and Hactive `0x0780`, proving the resident application is running and

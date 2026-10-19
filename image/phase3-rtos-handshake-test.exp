@@ -91,8 +91,8 @@ unset rtos_encoded
 upload_encoded $fast_encoded /tmp/soph_fast_image.ko.gz.b64
 unset fast_encoded
 
-set module_dir /usr/lib/cleankvm/video-quarantine
-run_command {echo CLEANKVM_PHASE3_RTOS_HANDSHAKE_V1}
+set module_dir /usr/lib/onyx-kvm/video-quarantine
+run_command {echo ONYX_KVM_PHASE3_RTOS_HANDSHAKE_V1}
 run_command {rm -f /tmp/soph_rtos_cmdqu.ko /tmp/soph_fast_image.ko}
 run_command {base64 -d /tmp/soph_rtos_cmdqu.ko.gz.b64 >/tmp/soph_rtos_cmdqu.ko.gz; rm -f /tmp/soph_rtos_cmdqu.ko.gz.b64}
 run_checked "actual=\$(sha256sum /tmp/soph_rtos_cmdqu.ko.gz | awk '{print \$1}'); echo RTOS_GZIP_SHA256=\$actual; test \"\$actual\" = \"$expected_rtos_gzip_sha\"" RTOS_GZIP_HASH_OK
@@ -108,7 +108,7 @@ run_command {dmesg -c >/dev/null}
 run_command "insmod $module_dir/soph_sys.ko; echo LOAD_soph_sys_RC=\$?"
 run_command "insmod $module_dir/soph_base.ko; echo LOAD_soph_base_RC=\$?"
 run_command {insmod /tmp/soph_rtos_cmdqu.ko; echo LOAD_soph_rtos_cmdqu_RC=$?}
-run_command {insmod /tmp/soph_fast_image.ko cleankvm_diagnostic_enable=1; echo LOAD_soph_fast_image_RC=$?}
+run_command {insmod /tmp/soph_fast_image.ko onyx_kvm_diagnostic_enable=1; echo LOAD_soph_fast_image_RC=$?}
 run_command {echo '[RTOS_HANDSHAKE_DMESG]'; dmesg | grep -E 'fast_image|rtos|RTOS|mailbox|SYS_CMD' || true}
 run_command {echo '[MAILBOX_IRQ]'; grep -E '(^| )[[:space:]]*101:|mailbox' /proc/interrupts || true}
 run_command {printf 'ACTIVE_LOADED='; awk '$1 ~ /^soph_/ {printf "%s,", $1}' /proc/modules; echo}
@@ -117,6 +117,6 @@ foreach module {soph_fast_image soph_rtos_cmdqu soph_base soph_sys} {
 }
 run_command {rm -f /tmp/soph_rtos_cmdqu.ko /tmp/soph_fast_image.ko /tmp/*.ko.gz /tmp/*.ko.gz.b64}
 run_command {printf 'FINAL_LOADED='; awk '$1 ~ /^soph_/ {printf "%s,", $1}' /proc/modules; echo; printf 'POST_TAINT='; cat /proc/sys/kernel/tainted; find /tmp -maxdepth 1 -name 'soph_*' -print}
-run_command {echo CLEANKVM_PHASE3_RTOS_HANDSHAKE_END}
+run_command {echo ONYX_KVM_PHASE3_RTOS_HANDSHAKE_END}
 send "~."
 expect eof

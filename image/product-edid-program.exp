@@ -44,11 +44,11 @@ proc run_command {command} {
 run_command {echo ONYX_KVM_EDID_PROGRAM_BEGIN}
 run_command {test -c /dev/i2c-4 && echo I2C_GATE=passed || { echo I2C_GATE=failed; exit 91; }}
 if {$custom_name != ""} {
-    run_command "/usr/libexec/cleankvm-lt6911uxc-edid-programmer --program-name '$custom_name'; printf 'PROGRAM_RC=%s\\n' \"\$?\""
+    run_command "/usr/libexec/onyx-kvm-lt6911uxc-edid-programmer --program-name '$custom_name'; printf 'PROGRAM_RC=%s\\n' \"\$?\""
 } else {
     run_command {/usr/sbin/onyx-kvm-update-edid; printf 'PROGRAM_RC=%s\n' "$?"}
 }
-run_command {/usr/libexec/cleankvm-lt6911uxc-edid-programmer --read}
+run_command {/usr/libexec/onyx-kvm-lt6911uxc-edid-programmer --read}
 run_command {echo ONYX_KVM_EDID_PROGRAM_END}
 set timeout 3
 catch {send "\r~.\r"}

@@ -11,11 +11,6 @@ if [ -f /boot/onyx-kvm-mac.txt ]; then
     if [ -n "$addr" ] && [ "$addr" != "000000000000" ]; then
         mac="$addr"
     fi
-elif [ -f /boot/cleankvm-mac.txt ]; then
-    addr=$(tr -d ':\r\n ' < /boot/cleankvm-mac.txt 2>/dev/null | tr '[:upper:]' '[:lower:]' || true)
-    if [ -n "$addr" ] && [ "$addr" != "000000000000" ]; then
-        mac="$addr"
-    fi
 fi
 
 if [ -z "$mac" ]; then
@@ -38,10 +33,6 @@ else
 fi
 
 programmer=/usr/libexec/onyx-kvm-lt6911uxc-edid-programmer
-if [ ! -x "$programmer" ]; then
-    programmer=/usr/libexec/cleankvm-lt6911uxc-edid-programmer
-fi
-
 if [ ! -x "$programmer" ]; then
     printf 'error: EDID programmer not installed\n' >&2
     exit 1

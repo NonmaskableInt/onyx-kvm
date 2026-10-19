@@ -1,4 +1,4 @@
-/* Offline-built, stock-only, read-only GPIOE9 snapshot. Never package in CleanKVM. */
+/* Offline-built, stock-only, read-only GPIOE9 snapshot. Never package in Onyx KVM. */
 #define _POSIX_C_SOURCE 200809L
 #include <errno.h>
 #include <fcntl.h>

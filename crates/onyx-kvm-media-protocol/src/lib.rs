@@ -379,6 +379,7 @@ impl StreamFrameHeader {
     ///
     /// # Errors
     /// Rejects invalid flags, zero/oversized dimensions, or byte lengths exceeding [`MAX_SNAPSHOT_BYTES`].
+    #[allow(clippy::too_many_arguments)]
     pub fn with_flags(
         sequence: u32,
         timestamp_ms: u64,
@@ -541,6 +542,11 @@ impl TileDeltaHeader {
         [dc[0], dc[1], tw[0], tw[1], th[0], th[1], fl[0], fl[1]]
     }
 
+    /// Decodes a tile-delta header.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`ValidationError`] when the tile geometry or flags are invalid.
     pub fn decode(bytes: [u8; TILE_DELTA_HEADER_BYTES]) -> Result<Self, ValidationError> {
         let dirty_count = u16::from_be_bytes([bytes[0], bytes[1]]);
         let tile_width = u16::from_be_bytes([bytes[2], bytes[3]]);
@@ -967,6 +973,7 @@ impl MediaImage {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
 
@@ -1151,7 +1158,8 @@ mod tests {
         )
         .expect("standby header creation failed");
         assert_eq!(standby_header.payload_bytes, 0);
-        let standby_frame = StreamFrame::new(standby_header, Vec::new()).expect("standby frame creation failed");
+        let standby_frame =
+            StreamFrame::new(standby_header, Vec::new()).expect("standby frame creation failed");
         assert_eq!(standby_frame.payload.len(), 0);
     }
 
@@ -1170,7 +1178,10 @@ mod tests {
         let mut bad = encoded;
         bad[0] = 0x03;
         bad[1] = 0x50; // 848 > 810
-        assert_eq!(TileDeltaHeader::decode(bad), Err(ValidationError::InvalidLength));
+        assert_eq!(
+            TileDeltaHeader::decode(bad),
+            Err(ValidationError::InvalidLength)
+        );
     }
 
     #[test]

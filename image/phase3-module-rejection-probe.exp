@@ -21,7 +21,7 @@ log_user 1
 send {printf 'PRE_TAINT='; cat /proc/sys/kernel/tainted}
 send "\r"
 expect -re {# $}
-send {insmod /usr/lib/cleankvm/video-quarantine/soph_sys.ko; echo LOAD_RC=$?}
+send {insmod /usr/lib/onyx-kvm/video-quarantine/soph_sys.ko; echo LOAD_RC=$?}
 send "\r"
 expect -re {# $}
 send {dmesg | grep -E 'soph_sys|vermagic|module' | tail -n 20}

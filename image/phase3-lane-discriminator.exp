@@ -38,26 +38,26 @@ proc run_command {command} {
     expect { -re {\r\n# } {} timeout { send "~."; exit 6 } }
 }
 
-set module_dir /usr/lib/cleankvm/video-quarantine
+set module_dir /usr/lib/onyx-kvm/video-quarantine
 set modules {soph_sys soph_base soph_mipi_rx soph_snsr_i2c soph_vi soph_vpss}
 set reverse_modules {soph_vpss soph_vi soph_snsr_i2c soph_mipi_rx soph_base soph_sys}
-run_command {echo CLEANKVM_LANE_DISCRIMINATOR_V1_BEGIN}
+run_command {echo ONYX_KVM_LANE_DISCRIMINATOR_V1_BEGIN}
 run_command {test -r /proc/modules && test ! -e /dev/snd/controlC0 && echo BASELINE_GATE=passed || { echo BASELINE_GATE=failed; exit 91; }}
-run_command {printf 'PROBE_SHA256='; sha256sum /usr/libexec/cleankvm-raw-frame-probe | cut -d' ' -f1; printf 'PRE_TAINT='; cat /proc/sys/kernel/tainted}
+run_command {printf 'PROBE_SHA256='; sha256sum /usr/libexec/onyx-kvm-raw-frame-probe | cut -d' ' -f1; printf 'PRE_TAINT='; cat /proc/sys/kernel/tainted}
 for {set profile 0} {$profile < 1} {incr profile} {
     run_command "echo LANE_PROFILE_${profile}_BEGIN"
     foreach module $modules {
         run_command "insmod $module_dir/$module.ko; echo LOAD_${profile}_${module}_RC=\$?"
     }
-    run_command "/usr/libexec/cleankvm-raw-frame-probe $profile; echo PROBE_${profile}_RC=\$?"
-    run_command {test ! -e /run/cleankvm-frame.yuv422p; echo FRAME_ABSENT_RC=$?}
+    run_command "/usr/libexec/onyx-kvm-raw-frame-probe $profile; echo PROBE_${profile}_RC=\$?"
+    run_command {test ! -e /run/onyx-kvm-frame.yuv422p; echo FRAME_ABSENT_RC=$?}
     foreach module $reverse_modules {
         run_command "rmmod $module; echo UNLOAD_${profile}_${module}_RC=\$?"
     }
     run_command "printf 'PROFILE_${profile}_REMAINDER='; awk '\$1 ~ /^soph_/ {printf \"%s,\", \$1}' /proc/modules; echo"
     run_command "echo LANE_PROFILE_${profile}_END"
 }
-run_command {printf 'FINAL_LOADED='; awk '$1 ~ /^soph_/ {printf "%s,", $1}' /proc/modules; echo; printf 'POST_TAINT='; cat /proc/sys/kernel/tainted; test ! -e /run/cleankvm-frame.yuv422p; echo FINAL_FRAME_ABSENT_RC=$?}
-run_command {echo CLEANKVM_LANE_DISCRIMINATOR_V1_END}
+run_command {printf 'FINAL_LOADED='; awk '$1 ~ /^soph_/ {printf "%s,", $1}' /proc/modules; echo; printf 'POST_TAINT='; cat /proc/sys/kernel/tainted; test ! -e /run/onyx-kvm-frame.yuv422p; echo FINAL_FRAME_ABSENT_RC=$?}
+run_command {echo ONYX_KVM_LANE_DISCRIMINATOR_V1_END}
 send "~."
 expect eof

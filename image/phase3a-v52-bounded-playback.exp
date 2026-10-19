@@ -32,23 +32,23 @@ after 500
 
 proc run_command {command} {
     send "\025"
-    send -s -- "$command; echo __CLEANKVM_COMMAND_DONE__\r"
-    expect { -re {__CLEANKVM_COMMAND_DONE__} {} timeout { send "~."; exit 6 } }
+    send -s -- "$command; echo __ONYX_KVM_COMMAND_DONE__\r"
+    expect { -re {__ONYX_KVM_COMMAND_DONE__} {} timeout { send "~."; exit 6 } }
     after 100
 }
 
-run_command {echo CLEANKVM_PHASE3A_V52_PLAYBACK_BEGIN}
+run_command {echo ONYX_KVM_PHASE3A_V52_PLAYBACK_BEGIN}
 run_command {printf 'PRE_UPTIME='; cut -d' ' -f1 /proc/uptime; printf 'PRE_TAINT='; cat /proc/sys/kernel/tainted; printf 'MODULE_LOADING='; test -e /proc/modules && echo available || echo kernel-disabled}
-run_command {test ! -e /dev/mem; echo DEVMEM_ABSENT_RC=$?; test ! -e /run/cleankvm/video-enabled; echo VIDEO_DISABLED_RC=$?; test ! -e /run/cleankvm/audio-capture-enabled; echo MICROPHONE_DISABLED_RC=$?; test ! -e /run/cleankvm/audio-output-enabled; echo SPEAKER_DISABLED_RC=$?}
-run_command {printf 'PROBE_SHA256='; sha256sum /usr/libexec/cleankvm-audio-playback-probe | cut -d' ' -f1; printf 'PROBE_LS='; ls -ln /usr/libexec/cleankvm-audio-playback-probe}
+run_command {test ! -e /dev/mem; echo DEVMEM_ABSENT_RC=$?; test ! -e /run/onyx-kvm/video-enabled; echo VIDEO_DISABLED_RC=$?; test ! -e /run/onyx-kvm/audio-capture-enabled; echo MICROPHONE_DISABLED_RC=$?; test ! -e /run/onyx-kvm/audio-output-enabled; echo SPEAKER_DISABLED_RC=$?}
+run_command {printf 'PROBE_SHA256='; sha256sum /usr/libexec/onyx-kvm-audio-playback-probe | cut -d' ' -f1; printf 'PROBE_LS='; ls -ln /usr/libexec/onyx-kvm-audio-playback-probe}
 run_command {echo '[PRE_DAC_STATE]'; for f in /proc/audio/cviteka_dac /proc/cviteka_dac; do test -r "$f" && cat "$f"; done}
-run_command {/usr/libexec/cleankvm-audio-playback-probe --self-test; echo SELF_TEST_RC=$?}
-run_command {printf 'PLAYBACK_START_UPTIME='; cut -d' ' -f1 /proc/uptime; /usr/libexec/cleankvm-audio-playback-probe; playback_rc=$?; printf 'PLAYBACK_RC=%s\n' "$playback_rc"; printf 'PLAYBACK_END_UPTIME='; cut -d' ' -f1 /proc/uptime}
+run_command {/usr/libexec/onyx-kvm-audio-playback-probe --self-test; echo SELF_TEST_RC=$?}
+run_command {printf 'PLAYBACK_START_UPTIME='; cut -d' ' -f1 /proc/uptime; /usr/libexec/onyx-kvm-audio-playback-probe; playback_rc=$?; printf 'PLAYBACK_RC=%s\n' "$playback_rc"; printf 'PLAYBACK_END_UPTIME='; cut -d' ' -f1 /proc/uptime}
 run_command {echo '[POST_DAC_STATE]'; for f in /proc/audio/cviteka_dac /proc/cviteka_dac; do test -r "$f" && cat "$f"; done; printf 'PCM_STATUS='; cat /proc/asound/card1/pcm0p/sub0/status 2>/dev/null || echo unavailable}
 run_command {echo '[POST_PCM_OPEN_AUDIT]'; found=0; for f in /proc/[0-9]*/fd/*; do target=$(readlink "$f" 2>/dev/null || true); case "$target" in /dev/snd/*) echo "$f -> $target"; found=1;; esac; done; test "$found" = 1 || echo none}
-run_command {printf 'PROBE_PROCESSES='; pidof cleankvm-audio-playback-probe 2>/dev/null || echo none; printf 'AUDIO_OUTPUT_FILES='; find /run /tmp -maxdepth 2 -type f \( -iname '*audio*' -o -iname '*.pcm' -o -iname '*.wav' \) 2>/dev/null | tr '\n' ','; echo}
-run_command {printf 'POST_TAINT='; cat /proc/sys/kernel/tainted; test ! -e /run/cleankvm/audio-capture-enabled; echo MICROPHONE_FINAL_DISABLED_RC=$?; test ! -e /run/cleankvm/audio-output-enabled; echo SPEAKER_FINAL_DISABLED_RC=$?}
-run_command {echo CLEANKVM_PHASE3A_V52_PLAYBACK_END}
+run_command {printf 'PROBE_PROCESSES='; pidof onyx-kvm-audio-playback-probe 2>/dev/null || echo none; printf 'AUDIO_OUTPUT_FILES='; find /run /tmp -maxdepth 2 -type f \( -iname '*audio*' -o -iname '*.pcm' -o -iname '*.wav' \) 2>/dev/null | tr '\n' ','; echo}
+run_command {printf 'POST_TAINT='; cat /proc/sys/kernel/tainted; test ! -e /run/onyx-kvm/audio-capture-enabled; echo MICROPHONE_FINAL_DISABLED_RC=$?; test ! -e /run/onyx-kvm/audio-output-enabled; echo SPEAKER_FINAL_DISABLED_RC=$?}
+run_command {echo ONYX_KVM_PHASE3A_V52_PLAYBACK_END}
 send -s "stty echo\r"
 after 300
 send "\r~."

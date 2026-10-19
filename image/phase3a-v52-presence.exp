@@ -32,18 +32,18 @@ after 500
 
 proc run_command {command} {
     send "\025"
-    send -s -- "$command; echo __CLEANKVM_COMMAND_DONE__\r"
-    expect { -re {__CLEANKVM_COMMAND_DONE__} {} timeout { send "~."; exit 6 } }
+    send -s -- "$command; echo __ONYX_KVM_COMMAND_DONE__\r"
+    expect { -re {__ONYX_KVM_COMMAND_DONE__} {} timeout { send "~."; exit 6 } }
     after 100
 }
 
-run_command {echo CLEANKVM_V52_PRESENCE_BEGIN}
+run_command {echo ONYX_KVM_V52_PRESENCE_BEGIN}
 run_command {printf 'UPTIME='; cut -d' ' -f1 /proc/uptime; printf 'TAINT='; cat /proc/sys/kernel/tainted}
 run_command {printf 'IPV4='; ip -4 -o addr show scope global | awk '{print $2 "=" $4 ","}'; echo}
-run_command {if test -f /usr/libexec/cleankvm-audio-playback-probe; then printf 'PLAYBACK_PROBE_SHA256='; sha256sum /usr/libexec/cleankvm-audio-playback-probe | cut -d' ' -f1; else echo PLAYBACK_PROBE=absent; fi}
-run_command {if test -f /usr/libexec/cleankvm-audio-capture-probe; then printf 'CAPTURE_PROBE_SHA256='; sha256sum /usr/libexec/cleankvm-audio-capture-probe | cut -d' ' -f1; else echo CAPTURE_PROBE=absent; fi}
-run_command {test ! -e /run/cleankvm/audio-output-enabled; echo SPEAKER_DISABLED_RC=$?}
-run_command {echo CLEANKVM_V52_PRESENCE_END}
+run_command {if test -f /usr/libexec/onyx-kvm-audio-playback-probe; then printf 'PLAYBACK_PROBE_SHA256='; sha256sum /usr/libexec/onyx-kvm-audio-playback-probe | cut -d' ' -f1; else echo PLAYBACK_PROBE=absent; fi}
+run_command {if test -f /usr/libexec/onyx-kvm-audio-capture-probe; then printf 'CAPTURE_PROBE_SHA256='; sha256sum /usr/libexec/onyx-kvm-audio-capture-probe | cut -d' ' -f1; else echo CAPTURE_PROBE=absent; fi}
+run_command {test ! -e /run/onyx-kvm/audio-output-enabled; echo SPEAKER_DISABLED_RC=$?}
+run_command {echo ONYX_KVM_V52_PRESENCE_END}
 send -s "stty echo\r"
 after 300
 send "\r~."

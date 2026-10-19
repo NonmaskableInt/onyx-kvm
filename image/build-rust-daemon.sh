@@ -2,7 +2,7 @@
 set -eu
 
 repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-artifact_dir=${ONYX_KVM_RUST_ARTIFACT_DIR:-${CLEANKVM_RUST_ARTIFACT_DIR:-"$repo_root/out/phase2-rust"}}
+artifact_dir=${ONYX_KVM_RUST_ARTIFACT_DIR:-"$repo_root/out/phase2-rust"}
 binary="$repo_root/target/riscv64gc-unknown-linux-musl/release/onyx-kvmd"
 
 mkdir -p "$artifact_dir"
@@ -12,11 +12,11 @@ trap 'rm -rf "$temp_bin"' EXIT HUP INT TERM
 if ! command -v riscv64-linux-musl-gcc >/dev/null 2>&1 && \
    test -z "${CC_riscv64gc_unknown_linux_musl:-}"; then
     engine=${CONTAINER_ENGINE:-podman}
-    builder=${CLEANKVM_BUILDER_TAG:-localhost/cleankvm-builder:ubuntu-22.04-amd64}
+    builder=${ONYX_KVM_BUILDER_TAG:-localhost/onyx-kvm-builder:ubuntu-22.04-amd64}
     cat >"$temp_bin/riscv64-linux-musl-gcc" <<EOF
 #!/bin/sh
 exec "$engine" run --rm --arch amd64 --network none \\
-    -v cleankvm-host-tools:/host-tools:ro \\
+    -v onyx-kvm-host-tools:/host-tools:ro \\
     -v "$repo_root:$repo_root:rw" \\
     -v "$HOME/.cargo:$HOME/.cargo:ro" \\
     -w "\$(pwd)" \\
@@ -26,7 +26,7 @@ EOF
     cat >"$temp_bin/riscv64-linux-musl-ar" <<EOF
 #!/bin/sh
 exec "$engine" run --rm --arch amd64 --network none \\
-    -v cleankvm-host-tools:/host-tools:ro \\
+    -v onyx-kvm-host-tools:/host-tools:ro \\
     -v "$repo_root:$repo_root:rw" \\
     -v "$HOME/.cargo:$HOME/.cargo:ro" \\
     -w "\$(pwd)" \\
@@ -55,7 +55,6 @@ case "$description" in
 esac
 
 install -m 0755 "$binary" "$artifact_dir/onyx-kvmd"
-cp -f "$artifact_dir/onyx-kvmd" "$artifact_dir/cleankvmd"
 cd "$artifact_dir"
 shasum -a 256 onyx-kvmd >SHA256SUMS
 shasum -a 256 -c SHA256SUMS

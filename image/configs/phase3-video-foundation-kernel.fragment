@@ -1,4 +1,4 @@
-# CleanKVM Phase 3 video-foundation profile.
+# Onyx KVM Phase 3 video-foundation profile.
 # The CVITEK capture path is provided by separately reviewed out-of-tree
 # modules. Keep generic Linux media and every audio/USB media surface absent.
 CONFIG_MODULES=y

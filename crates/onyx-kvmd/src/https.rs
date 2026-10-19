@@ -20,9 +20,8 @@ use onyx_kvm_media_protocol::{
     AUDIO_REQUEST_BYTES, BoundedFrameRing, CAPTURE_METRICS_BYTES, CaptureMetrics,
     MAX_STREAM_LEASE_MS, Operation, PLAYBACK_RECEIPT_BYTES, PcmShape, PlaybackReceipt,
     SNAPSHOT_RESPONSE_BYTES, STREAM_FLAG_DELTA, STREAM_FLAG_KEYFRAME, STREAM_FLAG_STANDBY,
-    SnapshotFormat,
-    SnapshotRequest, StreamFrame, StreamFrameHeader, StreamSessionLease, VideoSnapshot,
-    WIRE_HEADER_BYTES, WireHeader,
+    SnapshotFormat, SnapshotRequest, StreamFrame, StreamFrameHeader, StreamSessionLease,
+    VideoSnapshot, WIRE_HEADER_BYTES, WireHeader,
 };
 use rustls::{
     ServerConfig, ServerConnection, StreamOwned,
@@ -37,32 +36,26 @@ const TIMEOUT: Duration = Duration::from_secs(10);
 const METADATA_PATH: &str = "/.well-known/oauth-protected-resource";
 const HID_SOCKET: &str = "/run/onyx-kvm/hid.sock";
 const HID_ENABLED_PATH: &str = "/run/onyx-kvm/hid-enabled";
-const HID_ENABLED_FALLBACK: &str = "/run/cleankvm/hid-enabled";
 const VIDEO_SOCKET: &str = "/run/onyx-kvm/video.sock";
 const VIDEO_ENABLED_PATH: &str = "/run/onyx-kvm/video-enabled";
-const VIDEO_ENABLED_FALLBACK: &str = "/run/cleankvm/video-enabled";
 const AUDIO_CAPTURE_SOCKET: &str = "/run/onyx-kvm/audio-capture.sock";
 const AUDIO_CAPTURE_ENABLED_PATH: &str = "/run/onyx-kvm/audio-capture-enabled";
-const AUDIO_CAPTURE_ENABLED_FALLBACK: &str = "/run/cleankvm/audio-capture-enabled";
 const AUDIO_OUTPUT_SOCKET: &str = "/run/onyx-kvm/audio-output.sock";
 const AUDIO_OUTPUT_ENABLED_PATH: &str = "/run/onyx-kvm/audio-output-enabled";
-const AUDIO_OUTPUT_ENABLED_FALLBACK: &str = "/run/cleankvm/audio-output-enabled";
-const FEATURES_PATH: &str = "/etc/onyx-kvm/features.json";
-const FEATURES_FALLBACK: &str = "/etc/cleankvm/features.json";
+const FEATURES_BOOT_PATH: &str = "/boot/onyx-kvm-features.json";
+const FEATURES_RUN_PATH: &str = "/run/onyx-kvm/features.json";
+const FEATURES_ETC_PATH: &str = "/etc/onyx-kvm/features.json";
 const PAIRING_CODE_PATH: &str = "/run/onyx-kvm/pairing-code";
-const PAIRING_CODE_FALLBACK: &str = "/run/cleankvm/pairing-code";
 const PENDING_SESSION_TOKEN_PATH: &str = "/run/onyx-kvm/pending-session-token";
-const PENDING_SESSION_TOKEN_FALLBACK: &str = "/run/cleankvm/pending-session-token";
 const PIN_HASH_BOOT: &str = "/boot/onyx-kvm-pin.hash";
 const PIN_HASH_RUN: &str = "/run/onyx-kvm/pin.hash";
 const PIN_HASH_ETC: &str = "/etc/onyx-kvm/pin.hash";
-const PIN_HASH_ETC_FALLBACK: &str = "/etc/cleankvm/pin.hash";
 const FACTORY_RESET_BOOT: &str = "/boot/RESET";
 const FACTORY_RESET_BOOT2: &str = "/boot/FACTORY_RESET";
 const FACTORY_RESET_RUN: &str = "/run/onyx-kvm/reset";
-const FACTORY_RESET_RUN_FALLBACK: &str = "/run/cleankvm/reset";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct FeatureState {
     pub video: bool,
     pub hid: bool,
@@ -84,66 +77,71 @@ impl Default for FeatureState {
 #[must_use]
 pub fn current_feature_state() -> FeatureState {
     FeatureState {
-        video: Path::new(VIDEO_ENABLED_PATH).exists() || Path::new(VIDEO_ENABLED_FALLBACK).exists(),
-        hid: Path::new(HID_ENABLED_PATH).exists() || Path::new(HID_ENABLED_FALLBACK).exists(),
-        speaker: Path::new(AUDIO_OUTPUT_ENABLED_PATH).exists()
-            || Path::new(AUDIO_OUTPUT_ENABLED_FALLBACK).exists(),
-        microphone: Path::new(AUDIO_CAPTURE_ENABLED_PATH).exists()
-            || Path::new(AUDIO_CAPTURE_ENABLED_FALLBACK).exists(),
+        video: Path::new(VIDEO_ENABLED_PATH).exists(),
+        hid: Path::new(HID_ENABLED_PATH).exists(),
+        speaker: Path::new(AUDIO_OUTPUT_ENABLED_PATH).exists(),
+        microphone: Path::new(AUDIO_CAPTURE_ENABLED_PATH).exists(),
     }
 }
 
-fn set_gate_file(path: &str, fallback: &str, enable: bool) {
+fn set_gate_file(path: &str, enable: bool) -> io::Result<()> {
     if enable {
         if let Some(parent) = Path::new(path).parent() {
-            let _ = fs::create_dir_all(parent);
+            fs::create_dir_all(parent)?;
         }
-        let _ = fs::write(path, b"");
-        if let Some(parent) = Path::new(fallback).parent() {
-            let _ = fs::create_dir_all(parent);
-        }
-        let _ = fs::write(fallback, b"");
-    } else {
-        let _ = fs::remove_file(path);
-        let _ = fs::remove_file(fallback);
+        fs::write(path, b"")?;
+    } else if Path::new(path).exists() {
+        fs::remove_file(path)?;
     }
+    Ok(())
 }
 
-pub fn apply_feature_state(state: &FeatureState) {
-    set_gate_file(VIDEO_ENABLED_PATH, VIDEO_ENABLED_FALLBACK, state.video);
-    set_gate_file(HID_ENABLED_PATH, HID_ENABLED_FALLBACK, state.hid);
-    set_gate_file(AUDIO_OUTPUT_ENABLED_PATH, AUDIO_OUTPUT_ENABLED_FALLBACK, state.speaker);
-    set_gate_file(AUDIO_CAPTURE_ENABLED_PATH, AUDIO_CAPTURE_ENABLED_FALLBACK, state.microphone);
+#[allow(clippy::trivially_copy_pass_by_ref)]
+pub fn apply_feature_state(state: &FeatureState) -> io::Result<()> {
+    set_gate_file(VIDEO_ENABLED_PATH, state.video)?;
+    set_gate_file(HID_ENABLED_PATH, state.hid)?;
+    set_gate_file(AUDIO_OUTPUT_ENABLED_PATH, state.speaker)?;
+    set_gate_file(AUDIO_CAPTURE_ENABLED_PATH, state.microphone)?;
 
-    if let Ok(json_bytes) = serde_json::to_vec_pretty(state) {
-        let target = if Path::new("/etc/onyx-kvm").exists() {
-            FEATURES_PATH
-        } else if Path::new("/etc/cleankvm").exists() {
-            FEATURES_FALLBACK
-        } else {
-            FEATURES_PATH
-        };
-        let _ = fs::write(target, json_bytes);
+    let json_bytes = serde_json::to_vec_pretty(state)
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+
+    // Always persist to /run (current runtime state)
+    if let Some(parent) = Path::new(FEATURES_RUN_PATH).parent() {
+        let _ = fs::create_dir_all(parent);
     }
+    let _ = fs::write(FEATURES_RUN_PATH, &json_bytes);
+
+    // Persist to /boot so settings survive reboot on rw FAT boot partition
+    if let Some(parent) = Path::new(FEATURES_BOOT_PATH).parent() {
+        if parent.exists() {
+            fs::write(FEATURES_BOOT_PATH, &json_bytes)?;
+        }
+    }
+
+    // Try /etc if writable (development mode or rw rootfs)
+    if let Some(parent) = Path::new(FEATURES_ETC_PATH).parent() {
+        if parent.exists() {
+            let _ = fs::write(FEATURES_ETC_PATH, &json_bytes);
+        }
+    }
+    Ok(())
 }
 
 pub fn init_features_from_disk() {
     let loaded = (|| -> Option<FeatureState> {
-        if let Ok(content) = fs::read_to_string(FEATURES_PATH) {
-            if let Ok(s) = serde_json::from_str(&content) {
-                return Some(s);
-            }
-        }
-        if let Ok(content) = fs::read_to_string(FEATURES_FALLBACK) {
-            if let Ok(s) = serde_json::from_str(&content) {
-                return Some(s);
+        for path in [FEATURES_RUN_PATH, FEATURES_BOOT_PATH, FEATURES_ETC_PATH] {
+            if let Ok(content) = fs::read_to_string(path) {
+                if let Ok(s) = serde_json::from_str(&content) {
+                    return Some(s);
+                }
             }
         }
         None
     })();
 
     let state = loaded.unwrap_or_default();
-    apply_feature_state(&state);
+    let _ = apply_feature_state(&state);
 }
 
 static PAIRING_ATTEMPTS: AtomicUsize = AtomicUsize::new(0);
@@ -235,7 +233,10 @@ impl VideoStreamSession {
         Ok(Self { stream })
     }
 
-    fn capture_next(&mut self, request: SnapshotRequest) -> io::Result<Option<(VideoSnapshot, Vec<u8>)>> {
+    fn capture_next(
+        &mut self,
+        request: SnapshotRequest,
+    ) -> io::Result<Option<(VideoSnapshot, Vec<u8>)>> {
         let payload = request.encode();
         let payload_bytes =
             u32::try_from(payload.len()).map_err(|_| invalid("invalid snapshot request length"))?;
@@ -374,60 +375,33 @@ pub fn serve_from_environment() -> io::Result<bool> {
 
 impl Config {
     fn from_environment() -> io::Result<Option<Self>> {
-        let Some(bind) =
-            env::var_os("ONYX_KVM_HTTPS_BIND").or_else(|| env::var_os("CLEANKVM_HTTPS_BIND"))
-        else {
+        let Some(bind) = env::var_os("ONYX_KVM_HTTPS_BIND") else {
             return Ok(None);
         };
         let signing_key = env::var_os("ONYX_KVM_ISSUER_SIGNING_KEY_RAW")
-            .or_else(|| env::var_os("CLEANKVM_ISSUER_SIGNING_KEY_RAW"))
             .map(PathBuf::from)
             .or_else(|| {
                 let default_path = PathBuf::from("/etc/onyx-kvm/oauth-issuer-signing-key.raw");
-                if default_path.exists() {
-                    Some(default_path)
-                } else {
-                    let fallback = PathBuf::from("/etc/cleankvm/oauth-issuer-signing-key.raw");
-                    if fallback.exists() {
-                        Some(fallback)
-                    } else {
-                        None
-                    }
-                }
+                default_path.exists().then_some(default_path)
             });
         Ok(Some(Self {
             bind: bind
                 .into_string()
                 .map_err(|_| invalid("invalid bind address"))?,
-            origin: required("ONYX_KVM_HTTPS_ORIGIN", "CLEANKVM_HTTPS_ORIGIN")?,
-            resource: required("ONYX_KVM_MCP_RESOURCE", "CLEANKVM_MCP_RESOURCE")?,
-            authorization_server: required(
-                "ONYX_KVM_AUTHORIZATION_SERVER",
-                "CLEANKVM_AUTHORIZATION_SERVER",
-            )?,
-            issuer: required("ONYX_KVM_TOKEN_ISSUER", "CLEANKVM_TOKEN_ISSUER")?,
-            certificate: required(
-                "ONYX_KVM_TLS_CERTIFICATE_DER",
-                "CLEANKVM_TLS_CERTIFICATE_DER",
-            )?
-            .into(),
-            private_key: required(
-                "ONYX_KVM_TLS_PRIVATE_KEY_DER",
-                "CLEANKVM_TLS_PRIVATE_KEY_DER",
-            )?
-            .into(),
-            issuer_public_key: required(
-                "ONYX_KVM_ISSUER_PUBLIC_KEY_RAW",
-                "CLEANKVM_ISSUER_PUBLIC_KEY_RAW",
-            )?
-            .into(),
+            origin: required("ONYX_KVM_HTTPS_ORIGIN")?,
+            resource: required("ONYX_KVM_MCP_RESOURCE")?,
+            authorization_server: required("ONYX_KVM_AUTHORIZATION_SERVER")?,
+            issuer: required("ONYX_KVM_TOKEN_ISSUER")?,
+            certificate: required("ONYX_KVM_TLS_CERTIFICATE_DER")?.into(),
+            private_key: required("ONYX_KVM_TLS_PRIVATE_KEY_DER")?.into(),
+            issuer_public_key: required("ONYX_KVM_ISSUER_PUBLIC_KEY_RAW")?.into(),
             issuer_signing_key: signing_key,
         }))
     }
 }
 
-fn required(name: &str, fallback: &str) -> io::Result<String> {
-    env::var(name).or_else(|_| env::var(fallback)).map_err(|_| {
+fn required(name: &str) -> io::Result<String> {
+    env::var(name).map_err(|_| {
         io::Error::new(
             io::ErrorKind::InvalidInput,
             format!("missing required {name}"),
@@ -479,6 +453,8 @@ fn tls_config(config: &Config) -> io::Result<Arc<ServerConfig>> {
     Ok(Arc::new(server))
 }
 
+const MAX_CONCURRENT_CONNECTIONS: usize = 16;
+
 fn serve(config: &Config) -> io::Result<()> {
     init_features_from_disk();
     let tls = tls_config(config)?;
@@ -487,16 +463,33 @@ fn serve(config: &Config) -> io::Result<()> {
     let listener = TcpListener::bind(&config.bind)?;
     let initialized = Arc::new(AtomicBool::new(false));
     let config = Arc::new(config.clone());
+    let active_connections = Arc::new(AtomicUsize::new(0));
     for socket in listener.incoming() {
         let socket = socket?;
         socket.set_read_timeout(Some(TIMEOUT))?;
         socket.set_write_timeout(Some(TIMEOUT))?;
+        if active_connections.load(Ordering::Relaxed) >= MAX_CONCURRENT_CONNECTIONS {
+            eprintln!(
+                "connection rejected: maximum concurrent connections reached ({MAX_CONCURRENT_CONNECTIONS})"
+            );
+            drop(socket);
+            continue;
+        }
+        active_connections.fetch_add(1, Ordering::SeqCst);
+        let active = Arc::clone(&active_connections);
         let tls = Arc::clone(&tls);
         let config = Arc::clone(&config);
         let issuer_key = Arc::clone(&issuer_key);
         let signing_key = Arc::clone(&signing_key);
         let initialized = Arc::clone(&initialized);
         std::thread::spawn(move || {
+            struct ConnGuard(Arc<AtomicUsize>);
+            impl Drop for ConnGuard {
+                fn drop(&mut self) {
+                    self.0.fetch_sub(1, Ordering::SeqCst);
+                }
+            }
+            let _conn_guard = ConnGuard(active);
             let session = match ServerConnection::new(tls) {
                 Ok(s) => s,
                 Err(err) => {
@@ -523,9 +516,7 @@ fn serve(config: &Config) -> io::Result<()> {
 #[derive(Clone, Copy, Debug)]
 pub struct PairingPaths<'a> {
     pub code: &'a str,
-    pub code_fallback: &'a str,
     pub token: &'a str,
-    pub token_fallback: &'a str,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -533,21 +524,17 @@ pub struct PinPaths<'a> {
     pub boot: &'a str,
     pub run: &'a str,
     pub etc: &'a str,
-    pub etc_fallback: &'a str,
 }
 
 pub const DEFAULT_PIN_PATHS: PinPaths<'static> = PinPaths {
     boot: PIN_HASH_BOOT,
     run: PIN_HASH_RUN,
     etc: PIN_HASH_ETC,
-    etc_fallback: PIN_HASH_ETC_FALLBACK,
 };
 
 pub const DEFAULT_PAIRING_PATHS: PairingPaths<'static> = PairingPaths {
     code: PAIRING_CODE_PATH,
-    code_fallback: PAIRING_CODE_FALLBACK,
     token: PENDING_SESSION_TOKEN_PATH,
-    token_fallback: PENDING_SESSION_TOKEN_FALLBACK,
 };
 
 pub fn check_and_process_factory_reset(paths: &PinPaths<'_>) {
@@ -555,7 +542,6 @@ pub fn check_and_process_factory_reset(paths: &PinPaths<'_>) {
         PathBuf::from(FACTORY_RESET_BOOT),
         PathBuf::from(FACTORY_RESET_BOOT2),
         PathBuf::from(FACTORY_RESET_RUN),
-        PathBuf::from(FACTORY_RESET_RUN_FALLBACK),
     ];
     if let Some(parent) = Path::new(paths.boot).parent() {
         triggers.push(parent.join("RESET"));
@@ -576,7 +562,6 @@ pub fn check_and_process_factory_reset(paths: &PinPaths<'_>) {
         let _ = fs::remove_file(paths.boot);
         let _ = fs::remove_file(paths.run);
         let _ = fs::remove_file(paths.etc);
-        let _ = fs::remove_file(paths.etc_fallback);
         eprintln!("Factory reset executed: cleared device PIN hash");
     }
 }
@@ -601,17 +586,7 @@ pub fn is_device_configured_with_paths(
             return true;
         }
     }
-    if let Ok(content) = fs::read_to_string(pin_paths.etc_fallback) {
-        if !content.trim().is_empty() {
-            return true;
-        }
-    }
     if let Ok(content) = fs::read_to_string(pairing_paths.code) {
-        if !content.trim().is_empty() {
-            return true;
-        }
-    }
-    if let Ok(content) = fs::read_to_string(pairing_paths.code_fallback) {
         if !content.trim().is_empty() {
             return true;
         }
@@ -623,7 +598,7 @@ fn to_hex(bytes: &[u8]) -> String {
     let mut s = String::with_capacity(bytes.len() * 2);
     for &b in bytes {
         use std::fmt::Write as _;
-        let _ = write!(s, "{:02x}", b);
+        let _ = write!(s, "{b:02x}");
     }
     s
 }
@@ -698,7 +673,7 @@ fn save_pin_hash_paths(pin: &str, paths: &PinPaths<'_>) -> io::Result<()> {
     if let Some(parent) = Path::new(paths.run).parent() {
         let _ = fs::create_dir_all(parent);
     }
-    let _ = fs::write(paths.run, record.as_bytes());
+    fs::write(paths.run, record.as_bytes())?;
 
     if let Some(parent) = Path::new(paths.boot).parent() {
         if parent.exists() {
@@ -724,10 +699,12 @@ fn load_signing_key(path: Option<&Path>) -> Option<[u8; 32]> {
     }
 }
 
-fn mint_operator_token(
+fn mint_scoped_token(
     signing_key: &[u8; 32],
     issuer: &str,
     resource: &str,
+    scope: &str,
+    mutation: bool,
     ttl_seconds: u64,
 ) -> io::Result<String> {
     let now = SystemTime::now()
@@ -736,8 +713,6 @@ fn mint_operator_token(
         .as_secs();
     let iss = issuer.split(',').next().unwrap_or(issuer).trim();
     let aud = resource.split(',').next().unwrap_or(resource).trim();
-    let scope = "kvm:read kvm:video kvm:audio-capture kvm:audio-output kvm:control kvm:admin";
-    let mutation = true;
     let exp = now.saturating_add(ttl_seconds);
     Ok(onyx_kvm_mcp::mint_token(
         signing_key,
@@ -749,18 +724,46 @@ fn mint_operator_token(
     ))
 }
 
-fn wipe_pairing_state_paths(paths: &PairingPaths<'_>) {
-    let _ = fs::write(paths.code, b"");
-    let _ = fs::write(paths.code_fallback, b"");
-    let _ = fs::write(paths.token, b"");
-    let _ = fs::write(paths.token_fallback, b"");
-    let _ = fs::remove_file(paths.code);
-    let _ = fs::remove_file(paths.code_fallback);
-    let _ = fs::remove_file(paths.token);
-    let _ = fs::remove_file(paths.token_fallback);
+fn mint_operator_token(
+    signing_key: &[u8; 32],
+    issuer: &str,
+    resource: &str,
+    ttl_seconds: u64,
+) -> io::Result<String> {
+    mint_scoped_token(
+        signing_key,
+        issuer,
+        resource,
+        "kvm:read kvm:video kvm:audio-capture kvm:audio-output kvm:control kvm:admin",
+        true,
+        ttl_seconds,
+    )
 }
 
-fn read_file_with_fallback(path: &str, fallback: &str) -> Option<String> {
+fn mint_console_token(
+    signing_key: &[u8; 32],
+    issuer: &str,
+    resource: &str,
+    ttl_seconds: u64,
+) -> io::Result<String> {
+    mint_scoped_token(
+        signing_key,
+        issuer,
+        resource,
+        "kvm:read kvm:video kvm:audio-capture kvm:audio-output kvm:control",
+        true,
+        ttl_seconds,
+    )
+}
+
+fn wipe_pairing_state_paths(paths: &PairingPaths<'_>) {
+    let _ = fs::write(paths.code, b"");
+    let _ = fs::write(paths.token, b"");
+    let _ = fs::remove_file(paths.code);
+    let _ = fs::remove_file(paths.token);
+}
+
+fn read_first_available(path: &str, fallback: &str) -> Option<String> {
     if let Ok(content) = fs::read_to_string(path) {
         return Some(content);
     }
@@ -800,10 +803,13 @@ fn handle_setup_status<W: Write>(
         "configured": configured,
         "name": name,
     });
-    let bytes = serde_json::to_vec(&body)
-        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+    let bytes =
+        serde_json::to_vec(&body).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
     respond(stream, 200, "application/json", &bytes, None)
 }
+
+static SETUP_CLAIM_ATTEMPTS: AtomicUsize = AtomicUsize::new(0);
+const MAX_SETUP_CLAIM_ATTEMPTS: usize = 5;
 
 fn handle_setup_claim<W: Write>(
     stream: &mut W,
@@ -813,12 +819,31 @@ fn handle_setup_claim<W: Write>(
     pin_paths: &PinPaths<'_>,
     pairing_paths: &PairingPaths<'_>,
 ) -> io::Result<()> {
-    if validate_origin(request.origin.as_deref(), &config.origin).is_err() {
+    let Some(ref origin) = request.origin else {
         return respond(
             stream,
             403,
             "application/json",
-            b"{\"error\":\"forbidden\"}",
+            b"{\"error\":\"Origin header required for setup claim\"}",
+            None,
+        );
+    };
+    if origin != &config.origin {
+        return respond(
+            stream,
+            403,
+            "application/json",
+            b"{\"error\":\"forbidden origin for setup claim\"}",
+            None,
+        );
+    }
+
+    if SETUP_CLAIM_ATTEMPTS.load(Ordering::Relaxed) >= MAX_SETUP_CLAIM_ATTEMPTS {
+        return respond(
+            stream,
+            429,
+            "application/json",
+            b"{\"error\":\"maximum setup claim attempts exceeded; reboot device to retry\"}",
             None,
         );
     }
@@ -833,17 +858,15 @@ fn handle_setup_claim<W: Write>(
         );
     }
 
-    let value: serde_json::Value = match serde_json::from_slice(&request.body) {
-        Ok(v) => v,
-        Err(_) => {
-            return respond(
-                stream,
-                400,
-                "application/json",
-                b"{\"error\":\"invalid JSON payload\"}",
-                None,
-            );
-        }
+    let Ok(value) = serde_json::from_slice::<serde_json::Value>(&request.body) else {
+        SETUP_CLAIM_ATTEMPTS.fetch_add(1, Ordering::SeqCst);
+        return respond(
+            stream,
+            400,
+            "application/json",
+            b"{\"error\":\"invalid JSON payload\"}",
+            None,
+        );
     };
     let pin_str = value
         .get("pin")
@@ -852,6 +875,7 @@ fn handle_setup_claim<W: Write>(
         .map(str::trim);
 
     let Some(pin) = pin_str else {
+        SETUP_CLAIM_ATTEMPTS.fetch_add(1, Ordering::SeqCst);
         return respond(
             stream,
             400,
@@ -861,17 +885,19 @@ fn handle_setup_claim<W: Write>(
         );
     };
 
-    if pin.len() < 4 || pin.len() > 8 || !pin.chars().all(|c| c.is_ascii_digit()) {
+    if pin.len() < 6 || pin.len() > 8 || !pin.chars().all(|c| c.is_ascii_digit()) {
+        SETUP_CLAIM_ATTEMPTS.fetch_add(1, Ordering::SeqCst);
         return respond(
             stream,
             400,
             "application/json",
-            b"{\"error\":\"PIN must be between 4 and 8 digits\"}",
+            b"{\"error\":\"PIN must be between 6 and 8 digits\"}",
             None,
         );
     }
 
     save_pin_hash_paths(pin, pin_paths)?;
+    SETUP_CLAIM_ATTEMPTS.store(0, Ordering::SeqCst);
 
     let Some(signing_key) = signing_key else {
         return respond(
@@ -883,7 +909,7 @@ fn handle_setup_claim<W: Write>(
         );
     };
 
-    let token = mint_operator_token(signing_key, &config.issuer, &config.resource, 14400)?;
+    let token = mint_console_token(signing_key, &config.issuer, &config.resource, 14400)?;
     let response_body = serde_json::json!({
         "status": "configured",
         "token": token,
@@ -940,7 +966,11 @@ fn handle_update_pin<W: Write>(
             );
         }
     };
-    let Some(pin) = value.get("pin").and_then(serde_json::Value::as_str).map(str::trim) else {
+    let Some(pin) = value
+        .get("pin")
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+    else {
         return respond(
             stream,
             400,
@@ -960,7 +990,13 @@ fn handle_update_pin<W: Write>(
     }
 
     save_pin_hash_paths(pin, pin_paths)?;
-    respond(stream, 200, "application/json", b"{\"status\":\"updated\"}", None)
+    respond(
+        stream,
+        200,
+        "application/json",
+        b"{\"status\":\"updated\"}",
+        None,
+    )
 }
 
 fn handle_pair_full<W: Write>(
@@ -1013,7 +1049,7 @@ fn handle_pair_full<W: Write>(
     };
 
     // 1. Check UART-staged pairing ceremony first
-    if let Some(expected_code) = read_file_with_fallback(pairing_paths.code, pairing_paths.code_fallback) {
+    if let Ok(expected_code) = fs::read_to_string(pairing_paths.code) {
         let expected_trimmed = expected_code.trim();
         let mut diff = expected_trimmed.len() ^ code_val.len();
         for (a, b) in expected_trimmed.bytes().zip(code_val.bytes()) {
@@ -1043,7 +1079,7 @@ fn handle_pair_full<W: Write>(
         }
 
         attempts_counter.store(0, Ordering::SeqCst);
-        let token = if let Some(tok) = read_file_with_fallback(pairing_paths.token, pairing_paths.token_fallback) {
+        let token = if let Ok(tok) = fs::read_to_string(pairing_paths.token) {
             tok
         } else if let (Some(sk), Some(iss), Some(res)) = (signing_key, issuer, resource) {
             mint_operator_token(sk, iss, res, 14400)?
@@ -1072,8 +1108,8 @@ fn handle_pair_full<W: Write>(
     }
 
     // 2. Check persistent PIN hash
-    let stored_hash = read_file_with_fallback(pin_paths.boot, pin_paths.run)
-        .or_else(|| read_file_with_fallback(pin_paths.etc, pin_paths.etc_fallback));
+    let stored_hash = read_first_available(pin_paths.boot, pin_paths.run)
+        .or_else(|| fs::read_to_string(pin_paths.etc).ok());
 
     let Some(stored_hash) = stored_hash else {
         return respond(
@@ -1270,8 +1306,7 @@ fn handle(
     let audio_capture = BrokerAudioCapture;
     let audio_output = BrokerAudioOutput;
     let is_init = initialized.load(Ordering::Relaxed);
-    let hid_enabled =
-        Path::new(HID_ENABLED_PATH).exists() || Path::new(HID_ENABLED_FALLBACK).exists();
+    let hid_enabled = Path::new(HID_ENABLED_PATH).exists();
     let mut server = if method == Some("initialize") || !is_init {
         Server::remote(&claims.audience, now, grant)
     } else if hid_enabled {
@@ -1279,17 +1314,13 @@ fn handle(
     } else {
         Server::remote_ready(&claims.audience, now, grant)
     };
-    if Path::new(VIDEO_ENABLED_PATH).exists() || Path::new(VIDEO_ENABLED_FALLBACK).exists() {
+    if Path::new(VIDEO_ENABLED_PATH).exists() {
         server = server.with_video(&video);
     }
-    if Path::new(AUDIO_CAPTURE_ENABLED_PATH).exists()
-        || Path::new(AUDIO_CAPTURE_ENABLED_FALLBACK).exists()
-    {
+    if Path::new(AUDIO_CAPTURE_ENABLED_PATH).exists() {
         server = server.with_audio_capture(&audio_capture);
     }
-    if Path::new(AUDIO_OUTPUT_ENABLED_PATH).exists()
-        || Path::new(AUDIO_OUTPUT_ENABLED_FALLBACK).exists()
-    {
+    if Path::new(AUDIO_OUTPUT_ENABLED_PATH).exists() {
         server = server.with_audio_output(&audio_output);
     }
     let Some(body) = server.handle_line(&request.body) else {
@@ -1304,9 +1335,7 @@ fn handle_video_frame(
     issuer_key: &[u8],
     request: &Request,
 ) -> io::Result<()> {
-    if !Path::new(VIDEO_ENABLED_PATH).exists()
-        && !Path::new(VIDEO_ENABLED_FALLBACK).exists()
-    {
+    if !Path::new(VIDEO_ENABLED_PATH).exists() {
         return respond(stream, 403, "text/plain", b"video disabled", None);
     }
     let validator = Ed25519JwtValidator::new(&config.issuer, issuer_key);
@@ -1344,8 +1373,8 @@ fn handle_video_frame(
         };
     let format = if request.path.contains("format=h264") {
         SnapshotFormat::H264
-    } else if request.path.contains("format=yuv420p") || request.path.contains("format=yuv422p") {
-        SnapshotFormat::Yuv422p
+    } else if request.path.contains("format=yuv420p") {
+        SnapshotFormat::Yuv420p
     } else {
         SnapshotFormat::Yuv422p
     };
@@ -1370,9 +1399,7 @@ fn handle_video_stream(
     issuer_key: &[u8],
     request: &Request,
 ) -> io::Result<()> {
-    if !Path::new(VIDEO_ENABLED_PATH).exists()
-        && !Path::new(VIDEO_ENABLED_FALLBACK).exists()
-    {
+    if !Path::new(VIDEO_ENABLED_PATH).exists() {
         return respond(stream, 403, "text/plain", b"video disabled", None);
     }
     let validator = Ed25519JwtValidator::new(&config.issuer, issuer_key);
@@ -1410,12 +1437,10 @@ fn handle_video_stream(
         };
     let format = if request.path.contains("format=h264") {
         SnapshotFormat::H264
-    } else if request.path.contains("format=tile_delta")
-        || request.path.contains("mode=delta")
-    {
+    } else if request.path.contains("format=tile_delta") || request.path.contains("mode=delta") {
         SnapshotFormat::TileDeltaYuv422
-    } else if request.path.contains("format=yuv420p") || request.path.contains("format=yuv422p") {
-        SnapshotFormat::Yuv422p
+    } else if request.path.contains("format=yuv420p") {
+        SnapshotFormat::Yuv420p
     } else {
         SnapshotFormat::Yuv422p
     };
@@ -1442,6 +1467,16 @@ fn handle_video_stream(
     stream_frames_loop(stream, snapshot_request, claims.expires_at_unix_seconds)
 }
 
+struct StreamFrameGuard;
+
+impl Drop for StreamFrameGuard {
+    fn drop(&mut self) {
+        if let Ok(mut lock) = LATEST_STREAM_FRAME.write() {
+            *lock = None;
+        }
+    }
+}
+
 fn stream_frames_loop(
     stream: &mut StreamOwned<ServerConnection, TcpStream>,
     snapshot_request: SnapshotRequest,
@@ -1458,22 +1493,14 @@ fn stream_frames_loop(
         .map_err(|_| invalid("invalid stream lease"))?;
     let mut ring = BoundedFrameRing::new(2);
     let mut sequence = 0_u32;
-    let timeout = TIMEOUT.max(Duration::from_millis(u64::from(snapshot_request.deadline_ms)));
+    let timeout = TIMEOUT.max(Duration::from_millis(u64::from(
+        snapshot_request.deadline_ms,
+    )));
     let mut broker_session = VideoStreamSession::connect(timeout).ok();
-    struct StreamFrameGuard;
-    impl Drop for StreamFrameGuard {
-        fn drop(&mut self) {
-            if let Ok(mut lock) = LATEST_STREAM_FRAME.write() {
-                *lock = None;
-            }
-        }
-    }
     let _frame_guard = StreamFrameGuard;
 
     loop {
-        if !Path::new(VIDEO_ENABLED_PATH).exists()
-            && !Path::new(VIDEO_ENABLED_FALLBACK).exists()
-        {
+        if !Path::new(VIDEO_ENABLED_PATH).exists() {
             break;
         }
         let current_now = SystemTime::now()
@@ -1507,83 +1534,87 @@ fn stream_frames_loop(
                 *lock = Some((snapshot, frame_bytes.clone(), Instant::now()));
             }
 
-        let flags = match snapshot.format {
-            SnapshotFormat::H264 => {
-                let mut is_key = false;
-                let payload = &frame_bytes;
-                if payload.len() >= 4 {
-                    for i in 0..payload.len() - 3 {
-                        if payload[i] == 0 && payload[i + 1] == 0 {
-                            if payload[i + 2] == 1 {
-                                let nal_type = payload[i + 3] & 0x1f;
-                                if nal_type == 5 || nal_type == 7 {
-                                    is_key = true;
-                                    break;
-                                }
-                            } else if i + 4 < payload.len() && payload[i + 2] == 0 && payload[i + 3] == 1 {
-                                let nal_type = payload[i + 4] & 0x1f;
-                                if nal_type == 5 || nal_type == 7 {
-                                    is_key = true;
-                                    break;
+            let flags = match snapshot.format {
+                SnapshotFormat::H264 => {
+                    let mut is_key = false;
+                    let payload = &frame_bytes;
+                    if payload.len() >= 4 {
+                        for i in 0..payload.len() - 3 {
+                            if payload[i] == 0 && payload[i + 1] == 0 {
+                                if payload[i + 2] == 1 {
+                                    let nal_type = payload[i + 3] & 0x1f;
+                                    if nal_type == 5 || nal_type == 7 {
+                                        is_key = true;
+                                        break;
+                                    }
+                                } else if i + 4 < payload.len()
+                                    && payload[i + 2] == 0
+                                    && payload[i + 3] == 1
+                                {
+                                    let nal_type = payload[i + 4] & 0x1f;
+                                    if nal_type == 5 || nal_type == 7 {
+                                        is_key = true;
+                                        break;
+                                    }
                                 }
                             }
                         }
                     }
+                    if is_key {
+                        STREAM_FLAG_KEYFRAME
+                    } else {
+                        STREAM_FLAG_DELTA
+                    }
                 }
-                if is_key {
-                    STREAM_FLAG_KEYFRAME
-                } else {
-                    STREAM_FLAG_DELTA
+                SnapshotFormat::TileDeltaYuv422 => {
+                    let full_frame_bytes = u32::from(snapshot.width)
+                        .saturating_mul(u32::from(snapshot.height))
+                        .saturating_mul(2);
+                    if snapshot.byte_length >= full_frame_bytes {
+                        STREAM_FLAG_KEYFRAME
+                    } else {
+                        STREAM_FLAG_DELTA
+                    }
                 }
-            }
-            SnapshotFormat::TileDeltaYuv422 => {
-                let full_frame_bytes =
-                    (snapshot.width as u32).saturating_mul(snapshot.height as u32).saturating_mul(2);
-                if snapshot.byte_length >= full_frame_bytes {
-                    STREAM_FLAG_KEYFRAME
-                } else {
-                    STREAM_FLAG_DELTA
+                _ => 0,
+            };
+
+            let Ok(header) = StreamFrameHeader::with_flags(
+                sequence,
+                current_ms,
+                snapshot.width,
+                snapshot.height,
+                snapshot.format,
+                flags,
+                snapshot.byte_length,
+                snapshot.sha256,
+            ) else {
+                break;
+            };
+
+            let Ok(frame) = StreamFrame::new(header, frame_bytes) else {
+                break;
+            };
+
+            ring.push(frame);
+
+            if let Some(mut to_send) = ring.pop() {
+                let encoded_hdr = to_send.header.encode();
+                if stream.write_all(&encoded_hdr).is_err() {
+                    to_send.zeroize();
+                    break;
                 }
-            }
-            _ => 0,
-        };
-
-        let Ok(header) = StreamFrameHeader::with_flags(
-            sequence,
-            current_ms,
-            snapshot.width,
-            snapshot.height,
-            snapshot.format,
-            flags,
-            snapshot.byte_length,
-            snapshot.sha256,
-        ) else {
-            break;
-        };
-
-        let Ok(frame) = StreamFrame::new(header, frame_bytes) else {
-            break;
-        };
-
-        ring.push(frame);
-
-        if let Some(mut to_send) = ring.pop() {
-            let encoded_hdr = to_send.header.encode();
-            if stream.write_all(&encoded_hdr).is_err() {
+                if stream.write_all(&to_send.payload).is_err() {
+                    to_send.zeroize();
+                    break;
+                }
+                if stream.flush().is_err() {
+                    to_send.zeroize();
+                    break;
+                }
                 to_send.zeroize();
-                break;
             }
-            if stream.write_all(&to_send.payload).is_err() {
-                to_send.zeroize();
-                break;
-            }
-            if stream.flush().is_err() {
-                to_send.zeroize();
-                break;
-            }
-            to_send.zeroize();
-        }
-    } else {
+        } else {
             // Standby / no HDMI signal / target asleep
             let Ok(header) = StreamFrameHeader::with_flags(
                 sequence,
@@ -1642,9 +1673,7 @@ fn handle_audio_stream(
     issuer_key: &[u8],
     request: &Request,
 ) -> io::Result<()> {
-    if !Path::new(AUDIO_CAPTURE_ENABLED_PATH).exists()
-        && !Path::new(AUDIO_CAPTURE_ENABLED_FALLBACK).exists()
-    {
+    if !Path::new(AUDIO_CAPTURE_ENABLED_PATH).exists() {
         return respond(stream, 403, "text/plain", b"microphone disabled", None);
     }
     let validator = Ed25519JwtValidator::new(&config.issuer, issuer_key);
@@ -1725,9 +1754,7 @@ fn handle_audio_stream(
 
     let mut chunk = vec![0_u8; 3200];
     loop {
-        if !Path::new(AUDIO_CAPTURE_ENABLED_PATH).exists()
-            && !Path::new(AUDIO_CAPTURE_ENABLED_FALLBACK).exists()
-        {
+        if !Path::new(AUDIO_CAPTURE_ENABLED_PATH).exists() {
             break;
         }
         let current_now = SystemTime::now()
@@ -1783,7 +1810,8 @@ fn handle_get_features(
     }
 
     let state = current_feature_state();
-    let body = serde_json::to_vec(&state).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+    let body =
+        serde_json::to_vec(&state).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
     respond(stream, 200, "application/json", &body, None)
 }
 
@@ -1837,9 +1865,18 @@ fn handle_post_features(
         );
     };
 
-    apply_feature_state(&state);
+    if let Err(err) = apply_feature_state(&state) {
+        return respond(
+            stream,
+            500,
+            "application/json",
+            format!("{{\"error\":\"failed to apply feature state: {err}\"}}").as_bytes(),
+            None,
+        );
+    }
     let updated = current_feature_state();
-    let body = serde_json::to_vec(&updated).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+    let body =
+        serde_json::to_vec(&updated).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
     respond(stream, 200, "application/json", &body, None)
 }
 
@@ -1883,9 +1920,17 @@ fn handle_reboot<W: Write>(
         );
     }
 
-    let _ = fs::write("/run/onyx-kvm/reboot-trigger", b"reboot\n");
-    let _ = fs::write("/run/cleankvm/reboot-trigger", b"reboot\n");
-    let _ = std::process::Command::new("/sbin/reboot").spawn();
+    let trigger_res = fs::write("/run/onyx-kvm/reboot-trigger", b"reboot\n");
+    let spawn_res = std::process::Command::new("/sbin/reboot").spawn();
+    if trigger_res.is_err() && spawn_res.is_err() {
+        return respond(
+            stream,
+            500,
+            "application/json",
+            b"{\"error\":\"failed to trigger system reboot\"}",
+            None,
+        );
+    }
 
     respond(
         stream,
@@ -2064,6 +2109,12 @@ fn respond<W: Write>(
 }
 
 #[cfg(test)]
+#[allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::needless_borrow,
+    clippy::similar_names
+)]
 mod tests {
     use super::{FAVICON_SVG, MAX_HEADER_BYTES, read_request, respond};
     use std::io::Cursor;
@@ -2133,17 +2184,10 @@ mod tests {
         let mut output = Vec::new();
         let paths = super::PairingPaths {
             code: pin_file.to_str().unwrap(),
-            code_fallback: "/nonexistent/code",
             token: token_file.to_str().unwrap(),
-            token_fallback: "/nonexistent/token",
         };
-        let res = super::handle_pair_with_paths(
-            &mut output,
-            "https://kvm",
-            &req,
-            &paths,
-            &attempts,
-        );
+        let res =
+            super::handle_pair_with_paths(&mut output, "https://kvm", &req, &paths, &attempts);
         assert!(res.is_ok());
         let text = String::from_utf8(output).unwrap();
         assert!(text.starts_with("HTTP/1.1 200 OK\r\n"));
@@ -2176,46 +2220,23 @@ mod tests {
         let attempts = std::sync::atomic::AtomicUsize::new(0);
         let paths = super::PairingPaths {
             code: pin_file.to_str().unwrap(),
-            code_fallback: "/nonexistent/code",
             token: token_file.to_str().unwrap(),
-            token_fallback: "/nonexistent/token",
         };
 
         let mut out1 = Vec::new();
-        super::handle_pair_with_paths(
-            &mut out1,
-            "https://kvm",
-            &req,
-            &paths,
-            &attempts,
-        )
-        .unwrap();
+        super::handle_pair_with_paths(&mut out1, "https://kvm", &req, &paths, &attempts).unwrap();
         let t1 = String::from_utf8(out1).unwrap();
         assert!(t1.starts_with("HTTP/1.1 401 Unauthorized\r\n"));
         assert!(pin_file.exists());
 
         let mut out2 = Vec::new();
-        super::handle_pair_with_paths(
-            &mut out2,
-            "https://kvm",
-            &req,
-            &paths,
-            &attempts,
-        )
-        .unwrap();
+        super::handle_pair_with_paths(&mut out2, "https://kvm", &req, &paths, &attempts).unwrap();
         let t2 = String::from_utf8(out2).unwrap();
         assert!(t2.starts_with("HTTP/1.1 401 Unauthorized\r\n"));
         assert!(pin_file.exists());
 
         let mut out3 = Vec::new();
-        super::handle_pair_with_paths(
-            &mut out3,
-            "https://kvm",
-            &req,
-            &paths,
-            &attempts,
-        )
-        .unwrap();
+        super::handle_pair_with_paths(&mut out3, "https://kvm", &req, &paths, &attempts).unwrap();
         let t3 = String::from_utf8(out3).unwrap();
         assert!(t3.starts_with("HTTP/1.1 403 Forbidden\r\n"));
         assert!(t3.contains("maximum pairing attempts exceeded"));
@@ -2238,19 +2259,10 @@ mod tests {
         let attempts = std::sync::atomic::AtomicUsize::new(0);
         let paths = super::PairingPaths {
             code: "/nonexistent/code",
-            code_fallback: "/nonexistent/code",
             token: "/nonexistent/token",
-            token_fallback: "/nonexistent/token",
         };
         let mut output = Vec::new();
-        super::handle_pair_with_paths(
-            &mut output,
-            "https://kvm",
-            &req,
-            &paths,
-            &attempts,
-        )
-        .unwrap();
+        super::handle_pair_with_paths(&mut output, "https://kvm", &req, &paths, &attempts).unwrap();
         let text = String::from_utf8(output).unwrap();
         assert!(text.starts_with("HTTP/1.1 403 Forbidden\r\n"));
     }
@@ -2268,19 +2280,10 @@ mod tests {
         let attempts = std::sync::atomic::AtomicUsize::new(0);
         let paths = super::PairingPaths {
             code: "/nonexistent/code",
-            code_fallback: "/nonexistent/code",
             token: "/nonexistent/token",
-            token_fallback: "/nonexistent/token",
         };
         let mut output = Vec::new();
-        super::handle_pair_with_paths(
-            &mut output,
-            "https://kvm",
-            &req,
-            &paths,
-            &attempts,
-        )
-        .unwrap();
+        super::handle_pair_with_paths(&mut output, "https://kvm", &req, &paths, &attempts).unwrap();
         let text = String::from_utf8(output).unwrap();
         assert!(text.starts_with("HTTP/1.1 404 Not Found\r\n"));
         assert!(text.contains("no pairing ceremony currently active"));
@@ -2298,16 +2301,24 @@ mod tests {
             )
         });
         assert_eq!(provider.cipher_suites.len(), 3);
-        let suites: Vec<_> = provider.cipher_suites.iter().map(|cs| cs.suite()).collect();
+        let suites: Vec<_> = provider
+            .cipher_suites
+            .iter()
+            .map(rustls::SupportedCipherSuite::suite)
+            .collect();
         assert!(suites.contains(&rustls::CipherSuite::TLS13_CHACHA20_POLY1305_SHA256));
-        assert!(suites.contains(&rustls::CipherSuite::TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256));
+        assert!(
+            suites.contains(&rustls::CipherSuite::TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256)
+        );
         assert!(suites.contains(&rustls::CipherSuite::TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256));
     }
 
     #[test]
     fn stream_flags_detect_keyframe_for_720p_and_1080p() {
         fn check_flags(width: u16, height: u16, byte_len: u32) -> u8 {
-            let full = (width as u32).saturating_mul(height as u32).saturating_mul(2);
+            let full = u32::from(width)
+                .saturating_mul(u32::from(height))
+                .saturating_mul(2);
             if byte_len >= full {
                 onyx_kvm_media_protocol::STREAM_FLAG_KEYFRAME
             } else {
@@ -2335,7 +2346,7 @@ mod tests {
     #[test]
     fn stream_standby_frame_header_encoding_and_flags() {
         use onyx_kvm_media_protocol::{
-            SnapshotFormat, StreamFrame, StreamFrameHeader, STREAM_FLAG_STANDBY,
+            STREAM_FLAG_STANDBY, SnapshotFormat, StreamFrame, StreamFrameHeader,
         };
         let header = StreamFrameHeader::with_flags(
             42,
@@ -2383,15 +2394,15 @@ mod tests {
         let vid_path = temp_dir.join("video-enabled");
         let hid_path = temp_dir.join("hid-enabled");
 
-        super::set_gate_file(vid_path.to_str().unwrap(), "/nonexistent/fallback", true);
+        let _ = super::set_gate_file(vid_path.to_str().unwrap(), true);
         assert!(vid_path.exists());
 
-        super::set_gate_file(vid_path.to_str().unwrap(), "/nonexistent/fallback", false);
+        let _ = super::set_gate_file(vid_path.to_str().unwrap(), false);
         assert!(!vid_path.exists());
 
-        super::set_gate_file(hid_path.to_str().unwrap(), "/nonexistent/fallback", true);
+        let _ = super::set_gate_file(hid_path.to_str().unwrap(), true);
         assert!(hid_path.exists());
-        super::set_gate_file(hid_path.to_str().unwrap(), "/nonexistent/fallback", false);
+        let _ = super::set_gate_file(hid_path.to_str().unwrap(), false);
         assert!(!hid_path.exists());
 
         let _ = std::fs::remove_dir_all(&temp_dir);
@@ -2410,8 +2421,7 @@ mod tests {
 
     #[test]
     fn tofu_setup_lifecycle_and_pin_authentication() {
-        let temp_dir =
-            std::env::temp_dir().join(format!("onyx-tofu-test-{}", std::process::id()));
+        let temp_dir = std::env::temp_dir().join(format!("onyx-tofu-test-{}", std::process::id()));
         let _ = std::fs::create_dir_all(&temp_dir);
         let boot_pin = temp_dir.join("boot-pin.hash");
         let run_pin = temp_dir.join("run-pin.hash");
@@ -2420,13 +2430,10 @@ mod tests {
             boot: boot_pin.to_str().unwrap(),
             run: run_pin.to_str().unwrap(),
             etc: etc_pin.to_str().unwrap(),
-            etc_fallback: "/nonexistent/etc",
         };
         let pairing_paths = super::PairingPaths {
             code: "/nonexistent/code",
-            code_fallback: "/nonexistent/code2",
             token: "/nonexistent/token",
-            token_fallback: "/nonexistent/token2",
         };
 
         // 1. Initial state is unconfigured
@@ -2467,7 +2474,35 @@ mod tests {
             &pairing_paths,
         )
         .unwrap();
-        assert!(String::from_utf8(bad_origin_out).unwrap().contains("403 Forbidden"));
+        assert!(
+            String::from_utf8(bad_origin_out)
+                .unwrap()
+                .contains("403 Forbidden")
+        );
+
+        // 2b. Claim with missing origin rejected
+        let missing_origin_req = super::Request {
+            method: "POST".to_string(),
+            path: "/setup/claim".to_string(),
+            origin: None,
+            authorization: None,
+            body: b"{\"pin\":\"123456\"}".to_vec(),
+        };
+        let mut missing_origin_out = Vec::new();
+        super::handle_setup_claim(
+            &mut missing_origin_out,
+            &config,
+            &missing_origin_req,
+            Some(&signing_key),
+            &pin_paths,
+            &pairing_paths,
+        )
+        .unwrap();
+        assert!(
+            String::from_utf8(missing_origin_out)
+                .unwrap()
+                .contains("403 Forbidden")
+        );
 
         // 3. Claim with invalid PIN (letters) rejected
         let invalid_pin_req = super::Request {
@@ -2487,7 +2522,11 @@ mod tests {
             &pairing_paths,
         )
         .unwrap();
-        assert!(String::from_utf8(invalid_pin_out).unwrap().contains("400 Bad Request"));
+        assert!(
+            String::from_utf8(invalid_pin_out)
+                .unwrap()
+                .contains("400 Bad Request")
+        );
 
         // 4. Valid claim succeeds and mints token
         let claim_req = super::Request {
@@ -2529,7 +2568,11 @@ mod tests {
             &pairing_paths,
         )
         .unwrap();
-        assert!(String::from_utf8(second_claim_out).unwrap().contains("409 Conflict"));
+        assert!(
+            String::from_utf8(second_claim_out)
+                .unwrap()
+                .contains("409 Conflict")
+        );
 
         // 7. Pair with wrong PIN rejected
         let attempts = std::sync::atomic::AtomicUsize::new(0);
@@ -2553,7 +2596,11 @@ mod tests {
             &attempts,
         )
         .unwrap();
-        assert!(String::from_utf8(wrong_pair_out).unwrap().contains("401 Unauthorized"));
+        assert!(
+            String::from_utf8(wrong_pair_out)
+                .unwrap()
+                .contains("401 Unauthorized")
+        );
 
         // 8. Pair with correct PIN succeeds and mints fresh token
         let correct_pair_req = super::Request {
@@ -2586,8 +2633,7 @@ mod tests {
 
     #[test]
     fn factory_reset_wipes_pin_hash() {
-        let temp_dir =
-            std::env::temp_dir().join(format!("onyx-reset-test-{}", std::process::id()));
+        let temp_dir = std::env::temp_dir().join(format!("onyx-reset-test-{}", std::process::id()));
         let _ = std::fs::create_dir_all(&temp_dir);
         let boot_pin = temp_dir.join("boot-pin.hash");
         let run_pin = temp_dir.join("run-pin.hash");
@@ -2596,18 +2642,18 @@ mod tests {
             boot: boot_pin.to_str().unwrap(),
             run: run_pin.to_str().unwrap(),
             etc: etc_pin.to_str().unwrap(),
-            etc_fallback: "/nonexistent/etc",
         };
         let pairing_paths = super::PairingPaths {
             code: "/nonexistent/code",
-            code_fallback: "/nonexistent/code2",
             token: "/nonexistent/token",
-            token_fallback: "/nonexistent/token2",
         };
 
         // Save a PIN
         super::save_pin_hash_paths("123456", &pin_paths).unwrap();
-        assert!(super::is_device_configured_with_paths(&pin_paths, &pairing_paths));
+        assert!(super::is_device_configured_with_paths(
+            &pin_paths,
+            &pairing_paths
+        ));
 
         // Create reset trigger
         let trigger = temp_dir.join("RESET");
@@ -2616,7 +2662,10 @@ mod tests {
         // Factory reset clears state
         super::check_and_process_factory_reset(&pin_paths);
         assert!(!trigger.exists());
-        assert!(!super::is_device_configured_with_paths(&pin_paths, &pairing_paths));
+        assert!(!super::is_device_configured_with_paths(
+            &pin_paths,
+            &pairing_paths
+        ));
 
         let _ = std::fs::remove_dir_all(&temp_dir);
     }
@@ -2625,8 +2674,7 @@ mod tests {
     fn reboot_endpoint_requires_auth_and_triggers_reboot() {
         use ring::signature::KeyPair;
         let signing_key = [7_u8; 32];
-        let key_pair =
-            ring::signature::Ed25519KeyPair::from_seed_unchecked(&signing_key).unwrap();
+        let key_pair = ring::signature::Ed25519KeyPair::from_seed_unchecked(&signing_key).unwrap();
         let verifying_key = key_pair.public_key().as_ref();
         let config = super::Config {
             bind: "127.0.0.1:0".to_string(),

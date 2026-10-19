@@ -14,15 +14,16 @@
 - A malicious MCP client, browser, uploaded disk image, or update bundle.
 - A compromised network-facing service.
 - A compromised build dependency or vendor binary.
-- An attacker with temporary access to the microSD card.
+- An attacker with read-only physical access to the microSD card (physical write access to the removable boot medium on un-fused hardware permits arbitrary bootloader/firmware modification and is an out-of-scope physical hardware compromise).
 
 Physical access to the PCB, invasive chip attacks, and a malicious silicon or
-mask ROM are initially out of scope. They remain documented residual risks.
+mask ROM are out of scope. They remain documented residual risks.
 
 ## Required controls
 
 1. No listening service before first-boot enrollment except a narrowly scoped
-   local enrollment channel.
+   local enrollment channel (`/setup/claim` with strict Origin enforcement,
+   rate-limiting, and 6-to-8 digit PIN minimum, or the UART pairing ceremony).
 2. No shared default secret and no password authentication for SSH.
 3. Memory-safe parsing in exposed services; unsafe Rust is forbidden in the
    workspace and confined to separately reviewed FFI adapters if unavoidable.
@@ -59,3 +60,16 @@ An independently built image does not by itself establish trust. Before a
 release is described as hardened, we must verify the boot chain, enumerate
 every firmware blob, reproduce the image from a clean builder, inspect exposed
 ports, and test the final artifact on real NanoKVM Lite hardware.
+
+## Security posture and verified controls
+
+Controls 1, 2, and 3 are enforced in product release builds:
+- First-boot network setup requires exact matching Origin, minimum 6 digits PIN,
+  and hard rate-limiting (S1).
+- The microSD physical write boundary is acknowledged as physical hardware
+  takeover; stored secrets in `/run` remain ephemeral and unextractable without
+  runtime root (S2).
+- Development tooling (Dropbear SSH and dev mode scripts) is compiled out / excluded
+  from product rootfs and audited on every build (S3).
+- Feature state is persisted to `/boot/onyx-kvm-features.json` with write error
+  surfacing (H3).

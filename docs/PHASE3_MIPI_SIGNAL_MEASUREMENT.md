@@ -4,7 +4,7 @@ Status: prepared; no physical waveform capture has been made.
 
 ## Purpose
 
-Compare the LT6911-to-SG2002 MIPI D-PHY signals under stock and CleanKVM boots
+Compare the LT6911-to-SG2002 MIPI D-PHY signals under stock and Onyx KVM boots
 without changing bridge or receiver state. Static receiver controls, pad
 electrical words, clocks, reset routing, and pin mux are already equal or
 causally closed. The remaining repeatable difference is live PHY behavior,
@@ -37,13 +37,13 @@ plus the HDMI-to-CSI board:
 
 ## Pin-mux equivalence
 
-Offline RISC-V disassembly of the extracted stock and CleanKVM second-stage
+Offline RISC-V disassembly of the extracted stock and Onyx KVM second-stage
 loaders shows the same operation for all ten mux words at `0x0300116c` through
 `0x03001190`: read the word, clear bits 0..2, set value 3, and write it back.
 The sequences cover RX4N/P, RX3N/P, RX2N/P, RX1N/P, and RX0N/P. Their locations
-are stock `0x80201c3e..0x80201caa` and CleanKVM
+are stock `0x80201c3e..0x80201caa` and Onyx KVM
 `0x80200d9e..0x80200e0a` in the retained disassemblies. This closes MIPI pin
-mux as a stock/CleanKVM discriminator without another target mutation.
+mux as a stock/Onyx KVM discriminator without another target mutation.
 
 ## Equipment and connection boundary
 
@@ -68,8 +68,8 @@ infer test-pad identity from position alone.
 
 ## Capture order
 
-1. Measure clock RX2 N/P at FPC2 pins 12/13 under stock, then CleanKVM.
-2. Measure D3/RX0 N/P at pins 18/19 under stock, then CleanKVM.
+1. Measure clock RX2 N/P at FPC2 pins 12/13 under stock, then Onyx KVM.
+2. Measure D3/RX0 N/P at pins 18/19 under stock, then Onyx KVM.
 3. If D3 differs, repeat once after a full power cycle before moving the probe.
 4. Measure D0/RX4 at pins 6/7 as a control pair.
 5. Measure D1/RX3 and D2/RX1 only if clock, D3, and D0 do not isolate the fault.
@@ -81,7 +81,7 @@ if the probe supports it, transition activity, and whether the pair enters HS.
 
 ## Interpretation gate
 
-- If stock and CleanKVM waveforms match at the connector while receiver status
+- If stock and Onyx KVM waveforms match at the connector while receiver status
   differs, resume SoC-side live-state analysis; do not alter the bridge.
 - If D3 differs while clock and D0 match, localize the difference toward the
   LT6911 output state or the RX0 interconnect before changing receiver code.

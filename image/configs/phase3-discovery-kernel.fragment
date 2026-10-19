@@ -1,4 +1,4 @@
-# CleanKVM Phase 3 read-only bus discovery profile.
+# Onyx KVM Phase 3 read-only bus discovery profile.
 # Media and sound remain disabled; this adds only the SoC I2C controller and
 # root-only character-device surface needed to map the actual Lite PCB.
 CONFIG_I2C=y

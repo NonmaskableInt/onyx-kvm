@@ -3,9 +3,6 @@ set -eu
 
 pidfile=/run/onyx-kvm-video-broker.pid
 daemon=/usr/bin/onyx-kvm-video-broker
-if [ ! -x "$daemon" ] && [ -x /usr/bin/cleankvm-video-broker ]; then
-    daemon=/usr/bin/cleankvm-video-broker
-fi
 
 case "${1:-}" in
     start)
@@ -14,21 +11,17 @@ case "${1:-}" in
         mkdir -p /run/onyx-kvm
         chown root:900 /run/onyx-kvm
         chmod 2770 /run/onyx-kvm
-        if [ ! -e /run/cleankvm ]; then
-            ln -s /run/onyx-kvm /run/cleankvm
-        fi
         export PATH="/sbin:/usr/sbin:$PATH"
         touch /run/onyx-kvm/video-enabled
         chmod 664 /run/onyx-kvm/video-enabled
         chown root:900 /run/onyx-kvm/video-enabled
-        export ONYX_KVM_VIDEO_FRAME_PATH=/run/cleankvm-frame.yuv422p
-        export ONYX_KVM_VIDEO_PROBE_BIN=/usr/libexec/cleankvm-raw-frame-probe
+        export ONYX_KVM_VIDEO_FRAME_PATH=/run/onyx-kvm-frame.yuv422p
+        export ONYX_KVM_VIDEO_PROBE_BIN=/usr/libexec/onyx-kvm-raw-frame-probe
         start-stop-daemon -S -b -m -p "$pidfile" -x "$daemon"
         ;;
     stop)
         start-stop-daemon -K -p "$pidfile" -x "$daemon" || true
-        rm -f "$pidfile" /run/onyx-kvm/video.sock /run/onyx-kvm/video-enabled \
-            /run/cleankvm-video-broker.pid
+        rm -f "$pidfile" /run/onyx-kvm/video.sock /run/onyx-kvm/video-enabled
         ;;
     restart) "$0" stop; "$0" start ;;
     *) printf 'usage: %s {start|stop|restart}\n' "$0" >&2; exit 1 ;;

@@ -12,12 +12,12 @@
 +static int vcodec_h265_irq = -1;
 +static int jpu_irq = -1;
 +static int isp_irq = -1;
-+static bool cleankvm_diagnostic_enable;
-+static bool cleankvm_handoff_ready;
++static bool onyx_kvm_diagnostic_enable;
++static bool onyx_kvm_handoff_ready;
  
-+module_param(cleankvm_diagnostic_enable, bool, 0400);
-+MODULE_PARM_DESC(cleankvm_diagnostic_enable,
-+		 "CleanKVM bounded RTOS handoff diagnostic (default off)");
++module_param(onyx_kvm_diagnostic_enable, bool, 0400);
++MODULE_PARM_DESC(onyx_kvm_diagnostic_enable,
++		 "Onyx KVM bounded RTOS handoff diagnostic (default off)");
 +
  static int cvi_fast_image_open(struct inode *inode, struct file *file)
  {
@@ -26,7 +26,7 @@
  	cmdqu_t cmdq;
  	int ret;
  
-+	if (!cleankvm_handoff_ready)
++	if (!onyx_kvm_handoff_ready)
 +		return -ENODEV;
 +
  	cmdq.ip_id = IP_SYSTEM;
@@ -52,7 +52,7 @@
 +		enable_irq(jpu_irq);
 +	if (isp_irq >= 0)
 +		enable_irq(isp_irq);
-+	cleankvm_handoff_ready = false;
++	onyx_kvm_handoff_ready = false;
  	pr_debug("%s done\n", __func__);
  	return 0;
  }
@@ -63,8 +63,8 @@
 -	if (ret == 0)
 +	if (ret == 0) {
  		cvi_fast_image_ion_alloc();
-+		cleankvm_handoff_ready = true;
-+		pr_info("fast_image: CleanKVM RTOS handoff ready, image_type=%u\n",
++		onyx_kvm_handoff_ready = true;
++		pr_info("fast_image: Onyx KVM RTOS handoff ready, image_type=%u\n",
 +			transfer_config->image_type);
 +	}
  	platform_set_drvdata(pdev, ndev);
@@ -75,7 +75,7 @@
  {
  	pr_debug("%s start\n", __func__);
 -	cvi_stop_fast_image();
-+	if (cleankvm_handoff_ready)
++	if (onyx_kvm_handoff_ready)
 +		cvi_stop_fast_image();
 +	cvi_fast_image_isp_ion_free();
 +	cvi_fast_image_img_ion_free();
@@ -91,11 +91,11 @@
  {
  	int rc;
  
-+	if (!cleankvm_diagnostic_enable) {
-+		pr_err("fast_image: CleanKVM diagnostic is disabled\n");
++	if (!onyx_kvm_diagnostic_enable) {
++		pr_err("fast_image: Onyx KVM diagnostic is disabled\n");
 +		return -EPERM;
 +	}
-+	cleankvm_handoff_ready = false;
++	onyx_kvm_handoff_ready = false;
  	pr_debug("cvi_fast_image_init");
  	pbase_class = class_create(THIS_MODULE, FAST_IMAGE_DEV_NAME);
  	if (IS_ERR(pbase_class)) {

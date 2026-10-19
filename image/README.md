@@ -1,28 +1,30 @@
 # Image build
 
-This directory will contain the pinned SG2002 board-support source, Buildroot
-external tree, kernel configuration, root filesystem overlay, image layout,
-and release scripts.
+This directory holds everything needed to turn pinned inputs into a flashable
+Onyx KVM SD image: source verification, kernel/U-Boot/Buildroot configuration
+fragments and patches, the root filesystem overlays, offline build and packaging
+scripts, image assembly and verification, signed-update tooling, and the UART
+(`*.exp`, `*.py`) and C hardware diagnostics. Names follow
+[../docs/NAMING.md](../docs/NAMING.md).
 
-We will initially treat Sipeed's NanoKVM-capable SDK as board-support source,
-not as a trusted runtime image. All configurations and patches used by the
-resulting image belong in this repository. Network access is allowed only in a
-separate fetch step; the build step consumes verified local inputs.
+Sipeed's NanoKVM-capable SDK is treated as board-support source, not as a
+trusted runtime image. All configurations and patches used by the resulting
+image belong in this repository (`patches/` is applied in numeric order).
+Network access is allowed only in the explicit fetch step; the build consumes
+verified local inputs with networking disabled.
 
-`sources.lock` deliberately contains placeholders until revisions and license
-files have been reviewed. A build script must never resolve these placeholders
-or silently select a branch head.
-
-The SDK `main` revision recorded in the lock file is only a discovery result.
-It remains unapproved until its submodules, patches, NanoKVM/LT6911 board
-configuration, licenses, toolchain binaries, and boot result are reviewed.
+`sources.lock` and `builder.lock` record every pinned input. Entries marked
+`PENDING-REVIEW` (FSBL, the multimedia stack, the builder's apt snapshot) are
+not approved for release. A build script must never resolve a placeholder or
+silently select a branch head.
 
 ## Safety gates
 
 `verify-sources.sh` validates the exact SDK revision, rejects tracked changes,
-and refuses every `PENDING-REVIEW` entry. `build.sh` invokes that gate before
-doing anything and currently stops intentionally: the independent Linux
-builder and Phase-1 integration have not yet been approved.
+and refuses every `PENDING-REVIEW` entry. `build.sh` (the original host-side
+entry point) invokes it first and stops while any entry is unreviewed. The
+container-based product build below does not call it yet, which is tracked as
+OPEN_ITEMS B1.
 
 The kernel fragment in `configs/phase1-kernel.fragment` documents the recovery
 image boundary. The U-Boot fragment in `configs/phase1-uboot.fragment` reduces
@@ -40,7 +42,7 @@ pinned vendor Kconfig trees before a build may proceed. See `docs/SDK_AUDIT.md`
 for the board-support review.
 
 The canonical discovery checkout lives in the case-sensitive Podman volume
-`cleankvm-sdk` at `/work/sdk`. A checkout on the default macOS filesystem is
+`onyx-kvm-sdk` at `/work/sdk`. A checkout on the default macOS filesystem is
 not trustworthy for this SDK because case-colliding tracked paths appear
 modified immediately after checkout.
 
@@ -90,13 +92,14 @@ image containing only `fip.bin`, `boot.sd`, and the audited ext4 root
 filesystem. The repository-owned assembler writes a minimal FAT16/MBR layout;
 its verifier checks the MBR, partition types, embedded rootfs hash, and exact
 FIT and FIP payloads. It does not use the SDK's opaque `genimage` utility.
-The initial `cleankvm-buildroot-dl-v1` cache is quarantined: it was populated
-far enough to expose the rejected vendor profile's Wi-Fi/Aircrack selections
-and is never an input to the minimal build. The clean profile uses the distinct
-`cleankvm-buildroot-dl-v2` cache.
+The initial download cache (`cleankvm-buildroot-dl-v1`, created before the
+rename) is quarantined: it was populated far enough to expose the rejected
+vendor profile's Wi-Fi/Aircrack selections and is never an input to the minimal
+build. The clean profile used the distinct `cleankvm-buildroot-dl-v2` cache, and
+the product builds use `onyx-kvm-buildroot-dl-v50`.
 
 `prepare-build-volume.sh` clones the verified SDK from the read-only
-`cleankvm-sdk` volume into a new disposable `cleankvm-work-v4` volume, verifies
+`onyx-kvm-sdk` volume into a new disposable work volume (default `onyx-kvm-work`, configured in `default-env.sh`), verifies
 it, replaces the semantically unused opaque DDR input with a deterministic
 512-byte zero block, and applies the Phase-1 kernel, Buildroot, board, and
 rootfs-overlay changes. It refuses to overwrite an existing work volume. This
@@ -126,3 +129,73 @@ The Buildroot profile is generated from an empty baseline rather than merged
 onto the vendor defconfig: that generic profile normalized to 574 enabled
 package symbols, including Wi-Fi firmware, Aircrack-ng, BlueZ ALSA, GDB server,
 games, Qt, and Python web frameworks.
+
+## Product build workflow
+
+The sequence below is what the review of this tree exercised. Run it from the
+repository root on a machine with Podman and the Rust toolchain
+(`rust-toolchain.toml`). Every container step runs with `--network none`.
+Only step 0 touches the network.
+
+| Step | Command | Output |
+| --- | --- | --- |
+| 0 | `build-builder.sh`, `fetch-buildroot-sources.sh` | builder image, download volume (fetch stage only) |
+| 1 | `build-rust-daemon.sh`, `build-rust-memtest.sh`, `build-rust-hid-broker.sh`, `build-rust-video-broker.sh`, `build-rust-audio-brokers.sh` | static RISC-V binaries in `out/phase2-rust`, `out/phase3-rust`, `out/phase3a-rust` |
+| 2 | `build-phase3-raw-frame-probe.sh`, `build-phase3a-capture-probe.sh`, `build-phase3a-playback-probe.sh`, `build-lt6911uxc-edid-programmer.sh` | probes and EDID programmer in versioned `out/` directories |
+| 3 | `ONYX_KVM_WORK_VOLUME=<new> prepare-build-volume.sh` | disposable work volume with the Phase-1 profile and all patches |
+| 4 | inside the work volume: `apply-phase2-hid.sh`, `apply-phase3-video-foundation.sh`, `apply-phase3a-audio-enumeration.sh`, `apply-product-profile.sh`, each followed by its `validate-*-config.sh`; finish with `validate-product-config.sh` | product kernel/Buildroot profile |
+| 5 | `ONYX_KVM_CONFIG_PROFILE=product build-phase1-rootfs.sh` | audited ext4 rootfs (runs `audit-rootfs.sh` and the debugfs ownership audits) |
+| 6 | `package-phase1.sh`, `assemble-phase1-image.sh` | `boot.sd`, `rootfs.ext4`, `fip.bin`, `onyx-kvm-phase1.img` and `SHA256SUMS` |
+| 7 | `detect-target-disk.py`, flash, read back, `verify-sd-image.py` | embedded FIP, FIT and rootfs verified from the card |
+
+Known gaps in this sequence, all tracked in [../docs/OPEN_ITEMS.md](../docs/OPEN_ITEMS.md)
+B2 and B3: patch 0028 does not apply to a pristine SDK, the vendor middleware
+libraries and the video kernel modules are not built by any script here, the
+TinyALSA source archive (`/private/tmp/tinyalsa-v2.0.0.tar.gz`, SHA-256 in
+`sources.lock`) must be staged by hand, and the default work-volume name differs
+between scripts, so set `ONYX_KVM_WORK_VOLUME` explicitly.
+
+Set `ONYX_KVM_CONFIG_PROFILE` to `phase1`, `phase2-hid`, `phase3-discovery`,
+`phase3-video-foundation`, `phase3a-audio-enumeration` or `product`. The
+`product` profile refuses to start without the raw-frame probe, both audio
+probes and the EDID programmer. `ONYX_KVM_INCREMENTAL_ROOTFS=1` reuses a
+previous Buildroot target; do not use it across the naming change, because it
+retains the old overlay directory (the script now also deletes any leftover
+`cleankvm*` paths).
+
+## Local container resources
+
+| Resource | Default name |
+| --- | --- |
+| Builder image | `localhost/onyx-kvm-builder:ubuntu-22.04-amd64` |
+| Pinned SDK source (read-only input) | volume `onyx-kvm-sdk` |
+| Vendor host tools (read-only input) | volume `onyx-kvm-host-tools` |
+| Buildroot download cache | volume `onyx-kvm-buildroot-dl-v50` |
+| Disposable work volume | `ONYX_KVM_WORK_VOLUME` |
+
+Hosts that still have the pre-rename resources run `migrate-legacy-names.sh`
+once (dry run by default; `--apply` retags the builder and copies the three
+reusable volumes, deleting nothing).
+
+## Environment variables
+
+All build and runtime variables use the `ONYX_KVM_` prefix. The main ones are
+`ONYX_KVM_CONFIG_PROFILE`, `ONYX_KVM_WORK_VOLUME`, `ONYX_KVM_BUILDER_TAG`,
+`ONYX_KVM_INCREMENTAL_ROOTFS`, `ONYX_KVM_IDENTITY_DIR`,
+`ONYX_KVM_RECOVERY_PASSWORD_HASH_FILE`, `ONYX_KVM_VIDEO_MODULE_DIR`,
+`ONYX_KVM_RAW_FRAME_PROBE`, `ONYX_KVM_AUDIO_CAPTURE_PROBE`,
+`ONYX_KVM_AUDIO_PLAYBACK_PROBE`, `ONYX_KVM_EDID_PROGRAMMER`,
+`ONYX_KVM_RUST_ARTIFACT_DIR` and `ONYX_KVM_ARTIFACT_DIR`. The daemon reads
+`ONYX_KVM_HTTPS_*`, `ONYX_KVM_MCP_RESOURCE`, `ONYX_KVM_TOKEN_ISSUER`,
+`ONYX_KVM_TLS_*` and `ONYX_KVM_ISSUER_*` (set by `S50onyx-kvmd`), and each broker
+reads optional `ONYX_KVM_<HID|VIDEO|AUDIO>_*` path overrides whose defaults are the production paths.
+
+## Hardware harnesses
+
+`phase*.exp`, `product-*.exp` and `serial-monitor.py` drive a board over UART
+with bounded, non-autoloading, cleanup-verifying sequences. They take the console credential from a file path argument, send it only in
+response to a `Password:` prompt, and embed none in the repository. Scripts named for a
+release (`phase3-v50-*`, `phase3a-v53-*`) reproduce that release's acceptance
+test and are kept as evidence. Before running any of them, read the newest
+entry in `docs/NEXT_STEPS.md`, and record initial and final taint, loaded
+modules, nodes and output-file disposition as `AGENTS.md` requires.

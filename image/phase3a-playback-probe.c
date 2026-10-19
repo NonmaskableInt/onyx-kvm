@@ -118,7 +118,7 @@ int main(int argc, char **argv)
     if (argc == 2 && strcmp(argv[1], "--self-test") == 0)
         return self_test();
     if (argc != 1) {
-        fputs("usage: cleankvm-audio-playback-probe [--self-test]\n", stderr);
+        fputs("usage: onyx-kvm-audio-playback-probe [--self-test]\n", stderr);
         return EXIT_FAILURE;
     }
 

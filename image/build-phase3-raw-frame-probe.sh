@@ -2,14 +2,16 @@
 set -eu
 
 repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-engine=${CONTAINER_ENGINE:-podman}
-builder=${CLEANKVM_BUILDER_TAG:-localhost/cleankvm-builder:ubuntu-22.04-amd64}
-work_volume=${CLEANKVM_WORK_VOLUME:-cleankvm-work-v50}
-host_tools_volume=${CLEANKVM_HOST_TOOLS_VOLUME:-cleankvm-host-tools}
-output_dir=${CLEANKVM_RAW_FRAME_OUTPUT_DIR:-$repo_root/out/phase3-raw-frame-probe-v1}
+. "$repo_root/image/default-env.sh"
+
+engine=$CONTAINER_ENGINE
+builder=$ONYX_KVM_BUILDER_TAG
+work_volume=$ONYX_KVM_WORK_VOLUME
+host_tools_volume=$ONYX_KVM_HOST_TOOLS_VOLUME
+output_dir=${ONYX_KVM_RAW_FRAME_OUTPUT_DIR:-$repo_root/out/phase3-raw-frame-probe-v1}
 
 mkdir -p "$output_dir"
-test ! -e "$output_dir/cleankvm-raw-frame-probe"
+test ! -e "$output_dir/onyx-kvm-raw-frame-probe"
 
 "$engine" run --rm --arch amd64 --network none \
     -v "$work_volume:/work:rw" \
@@ -40,12 +42,12 @@ test ! -e "$output_dir/cleankvm-raw-frame-probe"
             -Wl,--gc-sections \
             -Wl,--start-group middleware/v2/lib/libsys.a -Wl,--end-group \
             -lpthread -latomic -Wl,-Map,/output/LINK-MAP.txt \
-            -o /output/cleankvm-raw-frame-probe
-        riscv64-unknown-linux-musl-strip /output/cleankvm-raw-frame-probe
-        riscv64-unknown-linux-musl-readelf -d /output/cleankvm-raw-frame-probe \
+            -o /output/onyx-kvm-raw-frame-probe
+        riscv64-unknown-linux-musl-strip /output/onyx-kvm-raw-frame-probe
+        riscv64-unknown-linux-musl-readelf -d /output/onyx-kvm-raw-frame-probe \
             > /output/DYNAMIC.txt
-        file /output/cleankvm-raw-frame-probe
+        file /output/onyx-kvm-raw-frame-probe
     '
 
-sha256sum "$output_dir/cleankvm-raw-frame-probe" >"$output_dir/SHA256SUMS"
-printf 'built offline raw-frame probe: %s\n' "$output_dir/cleankvm-raw-frame-probe"
+sha256sum "$output_dir/onyx-kvm-raw-frame-probe" >"$output_dir/SHA256SUMS"
+printf 'built offline raw-frame probe: %s\n' "$output_dir/onyx-kvm-raw-frame-probe"

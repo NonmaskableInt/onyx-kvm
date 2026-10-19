@@ -197,7 +197,7 @@ int main(int argc, char **argv)
     if (argc == 2 && (strcmp(argv[1], "stream") == 0 || strcmp(argv[1], "--stream") == 0))
         return stream_audio();
     if (argc != 1) {
-        fputs("usage: cleankvm-audio-capture-probe [--self-test|stream]\n", stderr);
+        fputs("usage: onyx-kvm-audio-capture-probe [--self-test|stream]\n", stderr);
         return EXIT_FAILURE;
     }
 

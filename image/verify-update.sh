@@ -21,7 +21,7 @@ test -f "$public_key" || { printf 'error: public key not found: %s\n' "$public_k
 
 # Parse and validate product
 product=$(grep '"product":' "$manifest" | sed 's/.*"product":[ ]*"\([^"]*\)".*/\1/')
-test "$product" = "onyx-kvm" || test "$product" = "cleankvm" || {
+test "$product" = "onyx-kvm" || {
     printf 'error: invalid product in manifest: %s\n' "$product" >&2
     exit 3
 }

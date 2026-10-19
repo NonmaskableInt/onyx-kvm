@@ -1,5 +1,5 @@
 /*
- * Bounded read-only LT6911UXC SPI survey for CleanKVM.
+ * Bounded read-only LT6911UXC SPI survey for Onyx KVM.
  *
  * The read transaction is derived from Sipeed NanoKVM's GPL-3.0-or-later
  * nanokvm_update_edid.c at bd070b2f5ce27d22618e8a1c8d2bdca543429882.
@@ -21,7 +21,7 @@
 #include <unistd.h>
 
 #define I2C_PATH "/dev/i2c-4"
-#define OUTPUT_PATH "/run/cleankvm-lt6911-flash-800000.bin"
+#define OUTPUT_PATH "/run/onyx-kvm-lt6911-flash-800000.bin"
 #define I2C_ADDRESS 0x2b
 #define SYS 0x80
 #define PAGE 32u

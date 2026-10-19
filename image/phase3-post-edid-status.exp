@@ -31,21 +31,21 @@ proc run_command {command} {
     expect { -re {# $} {} timeout { send "~."; exit 6 } }
 }
 
-set module_dir /usr/lib/cleankvm/video-quarantine
-run_command {echo CLEANKVM_POST_EDID_STATUS_V2_BEGIN}
+set module_dir /usr/lib/onyx-kvm/video-quarantine
+run_command {echo ONYX_KVM_POST_EDID_STATUS_V2_BEGIN}
 run_command {test -c /dev/i2c-4 && test -r /proc/modules && test ! -e /dev/snd/controlC0 && echo VIDEO_PROFILE_GATE=passed || { echo VIDEO_PROFILE_GATE=failed; exit 91; }}
-run_command {printf 'PROBE_SHA256='; sha256sum /usr/libexec/cleankvm-raw-frame-probe | cut -d' ' -f1; printf 'PRE_TAINT='; cat /proc/sys/kernel/tainted}
+run_command {printf 'PROBE_SHA256='; sha256sum /usr/libexec/onyx-kvm-raw-frame-probe | cut -d' ' -f1; printf 'PRE_TAINT='; cat /proc/sys/kernel/tainted}
 run_command {printf 'PRELOADED='; awk '$1 ~ /^soph_/ {printf "%s,", $1}' /proc/modules; echo}
 foreach module {soph_sys soph_base soph_mipi_rx soph_snsr_i2c soph_vi soph_vpss} {
     run_command "insmod $module_dir/$module.ko; echo LOAD_${module}_RC=\$?"
 }
-run_command {/usr/libexec/cleankvm-raw-frame-probe /run/cleankvm-frame.yuv422p; echo PROBE_RC=$?}
+run_command {/usr/libexec/onyx-kvm-raw-frame-probe /run/onyx-kvm-frame.yuv422p; echo PROBE_RC=$?}
 run_command {echo '[MIPI_RX_POST_EDID_T0]'; cat /proc/mipi-rx; sleep 2; echo '[MIPI_RX_POST_EDID_T2]'; cat /proc/mipi-rx}
-run_command {test ! -e /run/cleankvm-frame.yuv422p; echo FRAME_ABSENT_RC=$?}
+run_command {test ! -e /run/onyx-kvm-frame.yuv422p; echo FRAME_ABSENT_RC=$?}
 foreach module {soph_vpss soph_vi soph_snsr_i2c soph_mipi_rx soph_base soph_sys} {
     run_command "rmmod $module; echo UNLOAD_${module}_RC=\$?"
 }
 run_command {printf 'FINAL_LOADED='; awk '$1 ~ /^soph_/ {printf "%s,", $1}' /proc/modules; echo; printf 'POST_TAINT='; cat /proc/sys/kernel/tainted}
-run_command {echo CLEANKVM_POST_EDID_STATUS_V2_END}
+run_command {echo ONYX_KVM_POST_EDID_STATUS_V2_END}
 send "~."
 expect eof
