@@ -22,8 +22,9 @@ mask ROM are out of scope. They remain documented residual risks.
 ## Required controls
 
 1. No listening service before first-boot enrollment except a narrowly scoped
-   local enrollment channel (`/setup/claim` with strict Origin enforcement,
-   rate-limiting, and 6-to-8 digit PIN minimum, or the UART pairing ceremony).
+   local enrollment channel (`/setup/claim` with Origin matching, malformed-attempt
+   limiting and a 6-to-8 digit PIN minimum, or the UART pairing ceremony). The
+   claim is trust on first use: whoever sets up an unconfigured device owns it.
 2. No shared default secret and no password authentication for SSH.
 3. Memory-safe parsing in exposed services; unsafe Rust is forbidden in the
    workspace and confined to separately reviewed FFI adapters if unavoidable.
@@ -64,8 +65,8 @@ ports, and test the final artifact on real NanoKVM Lite hardware.
 ## Security posture and verified controls
 
 Controls 1, 2, and 3 are enforced in product release builds:
-- First-boot network setup requires exact matching Origin, minimum 6 digits PIN,
-  and hard rate-limiting (S1).
+- First-boot network setup requires a matching Origin and a 6 to 8 digit PIN,
+  and stops after 5 malformed attempts. It is trust on first use (OPEN_ITEMS S1).
 - The microSD physical write boundary is acknowledged as physical hardware
   takeover; stored secrets in `/run` remain ephemeral and unextractable without
   runtime root (S2).

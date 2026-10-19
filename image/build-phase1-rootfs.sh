@@ -396,7 +396,8 @@ fi
             "$video_broker" \
             "$ONYX_KVM_AUDIO_PLAYBACK_PROBE" \
             "$audio_capture_broker" \
-            "$audio_playback_broker"
+            "$audio_playback_broker" \
+            "$ONYX_KVM_CONFIG_PROFILE"
         if [ -n "$ONYX_KVM_IDENTITY_SOURCE" ]; then
             debugfs=/work/sdk/buildroot/output/host/sbin/debugfs
             root_image=/work/sdk/buildroot/output/images/rootfs.ext4

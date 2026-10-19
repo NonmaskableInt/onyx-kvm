@@ -58,10 +58,11 @@ second-builder reproduction are not done; see
 
 The vendor SDK is a pinned, quarantined board-support input. Its commit,
 component digests and licenses are recorded in `image/sources.lock`;
-`image/verify-sources.sh` refuses to pass while any entry is `PENDING-REVIEW`
-(FSBL and the multimedia stack still are). The image build does not yet run that
-gate itself; see [docs/SDK_AUDIT.md](docs/SDK_AUDIT.md) and
-[docs/OPEN_ITEMS.md](docs/OPEN_ITEMS.md) B1.
+`image/verify-sources.sh` refuses to pass while any entry is `PENDING-REVIEW` or
+`NO-LICENSE-GRANT` (the vendor FSBL files, the multimedia stack and osdrv are the
+latter). The image build runs that gate; development builds waive it with
+`ONYX_KVM_ALLOW_UNRESOLVED_SOURCES=1`. See [docs/SDK_AUDIT.md](docs/SDK_AUDIT.md)
+and [docs/OPEN_ITEMS.md](docs/OPEN_ITEMS.md) B1.
 
 ## Developer checks
 

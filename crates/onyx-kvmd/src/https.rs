@@ -828,7 +828,7 @@ fn handle_setup_claim<W: Write>(
             None,
         );
     };
-    if origin != &config.origin {
+    if validate_origin(Some(origin), &config.origin).is_err() {
         return respond(
             stream,
             403,
@@ -1146,7 +1146,7 @@ fn handle_pair_full<W: Write>(
         );
     };
 
-    let token = mint_operator_token(sk, iss, res, 14400)?;
+    let token = mint_console_token(sk, iss, res, 14400)?;
     let response_body = serde_json::json!({
         "token": token,
         "tokenType": "Bearer",
@@ -2446,7 +2446,7 @@ mod tests {
         let signing_key = [42u8; 32];
         let config = super::Config {
             bind: "127.0.0.1:8443".to_string(),
-            origin: "https://kvm.example".to_string(),
+            origin: "https://other.example, https://kvm.example".to_string(),
             resource: "https://kvm.example/mcp".to_string(),
             authorization_server: "https://kvm.example".to_string(),
             issuer: "https://kvm.example".to_string(),

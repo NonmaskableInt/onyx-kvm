@@ -17,6 +17,7 @@ expected_video_broker=${12:-}
 expected_audio_playback_probe=${13:-}
 expected_audio_capture_broker=${14:-}
 expected_audio_playback_broker=${15:-}
+profile=${16:-}
 test -d "$rootfs" || {
     printf 'not a root filesystem directory: %s\n' "$rootfs" >&2
     exit 1
@@ -49,6 +50,11 @@ if [ "$profile" = "product" ] && [ "${ONYX_KVM_DEV_TOOLS:-0}" != "1" ]; then
     fi
     if test -e "$rootfs/etc/init.d/S35onyx-kvm-devmode"; then
         printf 'prohibited dev mode init script in product rootfs: /etc/init.d/S35onyx-kvm-devmode\n' >&2
+        exit 1
+    fi
+    if test -f "$rootfs/usr/bin/onyx-kvmd" && \
+       grep -aq 'DEV_MODE is disabled' "$rootfs/usr/bin/onyx-kvmd"; then
+        printf 'product onyx-kvmd was built with the dev-tools feature\n' >&2
         exit 1
     fi
 fi

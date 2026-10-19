@@ -32,7 +32,13 @@ On a freshly flashed microSD card or after a factory reset:
 4. Click **Claim Device**.
    - The daemon writes the salted SHA-256 PIN hash to `/boot/onyx-kvm-pin.hash` and `/run/onyx-kvm/pin.hash`.
    - The daemon mints a least-privilege console session token (`kvm:read kvm:video kvm:control kvm:audio-*`).
-   - Setup claim is rate-limited to 5 attempts to prevent brute-force attacks across the local subnet.
+   - The claim is first-come trust-on-first-use: whoever boots and sets up the
+     device owns it, and the `Origin` header is client-supplied, so it is not a
+     defence against a hostile LAN client. Claim a new device on an isolated
+     network or use the UART ceremony (section 2). Malformed claims are counted;
+     after 5 the endpoint refuses claims until the daemon restarts.
+   - Physical access owns the device: anyone who can write the SD card can
+     reset it, enable dev mode on a development image, or change feature gates.
 
 ---
 
@@ -42,16 +48,17 @@ For out-of-band enrollment or issuing automation / agent tokens:
 
 ### Local UART Pairing
 1. Attach a 3.3V USB-UART adapter to the NanoKVM Lite serial pins (115200 baud, 8N1).
-2. Log in to the serial console (or run `onyx-kvm-pair`).
-3. The script displays a short-lived 6-digit numeric pairing code on the console.
-4. On the client machine or web browser:
-   - Navigate to `https://<device-ip>:8443/`.
-   - Enter the displayed pairing code and the device PIN.
-5. Alternatively, run the pairing script on your management workstation:
-   ```sh
-   image/pair-device.sh https://<device-ip>:8443 <PAIRING_CODE> <PIN>
-   ```
-6. The client receives an Ed25519-signed JWT token granting access according to the requested role.
+2. Log in to the serial console.
+3. Run `pair-device.sh SESSION_TOKEN [6_DIGIT_PIN]` on the device (it only stages
+   state in `/run/onyx-kvm`; it is not a network client). Without a PIN it
+   generates a random 6-digit one and prints it. The staged code is single use,
+   and three wrong attempts wipe it.
+4. On the client, open `https://<device-ip>:8443/` and enter the code, or
+   `POST /pair` with `{"code": "<code>"}`.
+5. The client receives the staged session token. A PIN-only pairing (no staged
+   ceremony) returns a least-privilege console token without `kvm:admin`.
+
+Operator (`kvm:admin`) tokens are issued only through the physical UART ceremony.
 
 ---
 
@@ -94,21 +101,17 @@ To wipe credentials and return the appliance to an unconfigured state:
 3. Eject the card and boot the Onyx KVM.
 4. The early init scripts detect the flag, wipe `/boot/onyx-kvm-pin.hash` and active pairings, remove the flag file, and reboot into the unconfigured state.
 
-### Factory Reset via Authenticated API
-An operator holding `kvm:admin` scope can issue a reset request:
-```sh
-curl -k -X POST https://<device-ip>:8443/factory-reset \
-  -H "Authorization: Bearer <OPERATOR_TOKEN>"
-```
+There is no network factory-reset endpoint. Reset requires physical access to
+the card or the serial console.
 
 ---
 
 ## 5. Development Mode Policy
 
 Development tooling (interactive Dropbear SSH server and arbitrary process execution)
-is **excluded by default** from release/product images (`apply-product-profile.sh`).
+is **excluded by default** from release/product images (`apply-product-profile.sh`): the payload, the init script and the `kvm.dev.exec` / `kvm.system.dev_mode` code (cargo feature `dev-tools`) are all absent.
 
-For development builds (`ONYX_KVM_DEV_TOOLS=1`):
+For development builds (`ONYX_KVM_DEV_TOOLS=1` for both the rootfs and `build-rust-daemon.sh`, plus `ONYX_KVM_ALLOW_UNRESOLVED_SOURCES=1` while B1 is open):
 1. Place your authorized public key in `/boot/ssh_authorized_keys`.
 2. Create `/boot/DEV_MODE`.
 3. Boot the device.

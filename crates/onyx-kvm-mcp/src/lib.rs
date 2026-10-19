@@ -621,9 +621,11 @@ impl<'a> Server<'a> {
         if name == "kvm.diag.system" {
             return self.call_diag_system(id);
         }
+        #[cfg(feature = "dev-tools")]
         if name == "kvm.dev.exec" {
             return self.call_dev_exec(id, params.get("arguments"));
         }
+        #[cfg(feature = "dev-tools")]
         if name == "kvm.system.dev_mode" {
             return self.call_dev_mode(id, params.get("arguments"));
         }
@@ -947,6 +949,7 @@ impl<'a> Server<'a> {
         )
     }
 
+    #[cfg(feature = "dev-tools")]
     fn call_dev_exec(&self, id: &Value, arguments: Option<&Value>) -> String {
         if self.authorize("kvm.dev.exec").is_err() {
             return error(id, -32603, "Policy denied dev execution");
@@ -1020,6 +1023,7 @@ impl<'a> Server<'a> {
         )
     }
 
+    #[cfg(feature = "dev-tools")]
     #[allow(clippy::too_many_lines)]
     fn call_dev_mode(&self, id: &Value, arguments: Option<&Value>) -> String {
         if self.authorize("kvm.system.dev_mode").is_err() {
@@ -1273,9 +1277,11 @@ impl<'a> Server<'a> {
         if self.authorize("kvm.diag.system").is_ok() {
             tools.push(diag_system_tool());
         }
+        #[cfg(feature = "dev-tools")]
         if self.authorize("kvm.dev.exec").is_ok() {
             tools.push(dev_exec_tool());
         }
+        #[cfg(feature = "dev-tools")]
         if self.authorize("kvm.system.dev_mode").is_ok() {
             tools.push(dev_mode_tool());
         }
@@ -1393,6 +1399,7 @@ fn diag_system_tool() -> Value {
     })
 }
 
+#[cfg(feature = "dev-tools")]
 fn dev_exec_tool() -> Value {
     json!({
         "name": "kvm.dev.exec",
@@ -1431,6 +1438,7 @@ fn dev_exec_tool() -> Value {
     })
 }
 
+#[cfg(feature = "dev-tools")]
 fn dev_mode_tool() -> Value {
     json!({
         "name": "kvm.system.dev_mode",
@@ -1467,6 +1475,7 @@ fn dev_mode_tool() -> Value {
     })
 }
 
+#[cfg(feature = "dev-tools")]
 fn run_command_fallback(cmd: &str) -> (i32, String) {
     match std::process::Command::new("/bin/sh")
         .arg("-c")
@@ -2949,6 +2958,7 @@ mod tests {
         assert!(diag_sys["result"]["structuredContent"]["usbUdcState"].is_string());
     }
 
+    #[cfg(feature = "dev-tools")]
     #[test]
     fn dev_exec_and_dev_mode_require_admin_scope_and_mutation() {
         let admin_scopes = [Scope::Read, Scope::Admin];

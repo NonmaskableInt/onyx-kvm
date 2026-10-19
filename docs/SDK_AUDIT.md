@@ -213,3 +213,30 @@ properties, not unfinished-error bypasses.
   depends on development-only toolchains, and source/license inventory,
   clean-builder reproduction, broader physical testing, and release-key
   verified boot remain open.
+
+## Shipped-source license review (2026-10-19)
+
+Reviewed in the case-sensitive volume `onyx-kvm-sdk` (pinned commit `d4003f15`) and the pinned sophgo-osdrv checkout. Methods: license-file inventory, SPDX and header scan of every `.c`/`.h`/`.S` file, and the actual link lines (`fsbl/plat/cv181x/platform.mk`, `image/build-phase3-raw-frame-probe.sh`).
+
+**FSBL** (builds BL2 inside `FIP.BIN`; corresponding source is the pinned tree):
+
+| Component | Files | License evidence |
+| --- | --- | --- |
+| Arm Trusted Firmware derived `include/`, `lib/cpu`, `lib/stdlib`, `lib/tf_printf`, part of `plat/` | about 100 | BSD-3-Clause (SPDX or header) |
+| `lib/lz4` | 10 | BSD-2-Clause (`LICENSE`) |
+| `lib/BigDigits` | 27 | MPL-2.0 (`LICENSE.txt`, `bigdigits.c` header); linked by `plat/cv181x`; headerless siblings fall under the same directory license |
+| `lib/libtommath` | 143 | Unlicense (SPDX) |
+| `lib/libtomcrypt` (SHA only is linked) | 425 | public domain or WTFPL (`LICENSE`) |
+| `lib/lzma` | 3 | public domain |
+| `lib/crc/crc16.c` | 1 | eCos-2.0 (SPDX) |
+| Cvitek/Bitmain-authored `plat/cv180x`, `plat/cv181x`, `lib/utils` | about 115 | **no license header or file** |
+
+The earlier aggregate label omitted MPL-2.0 (BigDigits) and the unlicensed vendor-authored platform files. The MPL-2.0 and eCos-2.0 files must keep their notices if the FIP is distributed.
+
+**Middleware** (`middleware/v2`): the product's raw-frame probe links `libsys.a` and four `modules/vpu/src` objects. They are built from source in the pinned tree (so corresponding source exists), but the linked sources carry no license header; `modules/sys/src/peri.c` is marked "Proprietary and confidential" and `hashmap.c` is Apache-2.0. No license file exists for the tree. Outcome: **no license grant**.
+
+**sophgo-osdrv** (`1b3a4964`, source of the `cvi_vc_driver` hardware H.264 module, patch 0028): no top-level license and no header in the patched sources. Outcome: **no license grant**.
+
+**Builder**: the builder is fixed by the local image digest and the package manifest in `image/builder.lock`; there is no apt snapshot because the builder is not rebuilt from apt during a build.
+
+**Conclusion**: nothing here is a technical blocker for development builds, which waive the markers explicitly (`ONYX_KVM_ALLOW_UNRESOLVED_SOURCES=1`). A release needs a written license grant from Sophgo/Cvitek for the vendor-authored FSBL, middleware and osdrv files, or replacement of them.

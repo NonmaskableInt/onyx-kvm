@@ -14,17 +14,19 @@ Network access is allowed only in the explicit fetch step; the build consumes
 verified local inputs with networking disabled.
 
 `sources.lock` and `builder.lock` record every pinned input. Entries marked
-`PENDING-REVIEW` (FSBL, the multimedia stack, the builder's apt snapshot) are
-not approved for release. A build script must never resolve a placeholder or
+`PENDING-REVIEW` or `NO-LICENSE-GRANT` (the vendor FSBL files, the multimedia
+stack, sophgo-osdrv) are not approved for release. A build script must never resolve a placeholder or
 silently select a branch head.
 
 ## Safety gates
 
 `verify-sources.sh` validates the exact SDK revision, rejects tracked changes,
-and refuses every `PENDING-REVIEW` entry. `build.sh` (the original host-side
-entry point) invokes it first and stops while any entry is unreviewed. The
-container-based product build below does not call it yet, which is tracked as
-OPEN_ITEMS B1.
+and refuses every `PENDING-REVIEW` and `NO-LICENSE-GRANT` entry. `build.sh`,
+`build-phase1-rootfs.sh` and `package-phase1.sh` invoke it first. Development
+builds set `ONYX_KVM_ALLOW_UNRESOLVED_SOURCES=1` (OPEN_ITEMS B1); the result is
+not releasable. Development images that need `kvm.dev.exec` also set
+`ONYX_KVM_DEV_TOOLS=1` for `build-rust-daemon.sh` and the rootfs build.
+`apply-osdrv-patch.sh` applies patch 0028 to the pinned sophgo-osdrv checkout.
 
 The kernel fragment in `configs/phase1-kernel.fragment` documents the recovery
 image boundary. The U-Boot fragment in `configs/phase1-uboot.fragment` reduces

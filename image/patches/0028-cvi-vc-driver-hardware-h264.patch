@@ -314,10 +314,10 @@ index 3468973..ba6776f 100644
  	}
  
  	kfree(mlv_info);
-diff --git a/osdrv/interdrv/v2/jpeg/Makefile b/osdrv/interdrv/v2/jpeg/Makefile
+diff --git a/osdrv/interdrv/jpeg/Makefile b/osdrv/interdrv/jpeg/Makefile
 index 7e53e09..c26abd9 100644
---- a/osdrv/interdrv/v2/jpeg/Makefile
-+++ b/osdrv/interdrv/v2/jpeg/Makefile
+--- a/osdrv/interdrv/jpeg/Makefile
++++ b/osdrv/interdrv/jpeg/Makefile
 @@ -17,8 +17,8 @@ ccflags-y += $(DEBFLAGS) -I$(PWD) -I$(LDDINCDIR) -D$(CHIP_TYPE) -D$(SUB_TYPE) -D
  KBUILD_EXTRA_SYMBOLS += $(PWD)/../vcodec/Module.symvers
  

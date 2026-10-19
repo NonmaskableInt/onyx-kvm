@@ -14,55 +14,28 @@ tracks open items, security findings, and their resolutions.
 
 ## Security
 
-### S1 (P1): network `/setup/claim` lets any LAN client take an unconfigured device — RESOLVED
+### S1 (P1): network `/setup/claim` lets any LAN client take an unconfigured device — ACCEPTED RISK
 
-**Previous State**:
-`handle_setup_claim` was reachable over HTTPS by any client on the LAN when unconfigured. It accepted a 4-digit PIN, minted a full operator token with `kvm:admin`, and had no rate limiting.
+Decision: this is a low-cost appliance, and whoever boots and sets up an unconfigured device owns it. The claim keeps its guards (6 to 8 digit PIN, `Origin` matched against the configured origin list, console token without `kvm:admin`, 5 malformed attempts per daemon run), covered by `https::tests::tofu_setup_lifecycle_and_pin_authentication` with a multi-origin config. `Origin` is client-supplied and the first valid claim wins; neither is a defence against a hostile LAN client. Operators should claim new devices on an isolated network or use the UART ceremony ([OPERATOR_GUIDE.md](OPERATOR_GUIDE.md)).
 
-**Resolution**:
-- **Origin Validation**: Enforced strict `Origin` header matching in `handle_setup_claim` (`crates/onyx-kvmd/src/https.rs`), rejecting requests with missing or mismatched origins.
-- **PIN Complexity**: Enforced 6 to 8 digit minimum PIN length in both daemon backend and web UI.
-- **Rate Limiting**: Added `MAX_SETUP_CLAIM_ATTEMPTS = 5` lockout. After 5 failed unconfigured claim attempts, the endpoint is locked out to prevent brute-force attacks across the local subnet.
-- **Least-Privilege Scoping**: Setup claim now mints `mint_console_token` (`kvm:read kvm:video kvm:control kvm:audio-*`) without `kvm:admin`.
-- **Verification**: Verified with unit test `https::tests::tofu_setup_lifecycle_and_pin_authentication`.
+### S2 (P1): the microSD card is a stated adversary, but it controls root — ACCEPTED RISK
 
-### S2 (P1): the microSD card is a stated adversary, but it controls root — RESOLVED
-
-**Previous State**:
-Threat model included an attacker with temporary write access to the microSD card, but the FAT boot partition accepted `/boot/DEV_MODE`, `/boot/RESET`, and `/boot/onyx-kvm-pin.hash`.
-
-**Resolution**:
-- **Threat Model Narrowing**: Updated [THREAT_MODEL.md](THREAT_MODEL.md) to explicitly narrow the removable microSD card adversary model to "read-only access to the microSD card" (e.g., pulling the card to extract firmware or offline credentials).
-- **Physical Boundary Acknowledgment**: Documented that on un-fused hardware lacking hardware root-of-trust and cryptographic signature verification in ROM/FSBL, physical write access to the boot media inherently grants control over boot artifacts.
-- **Documented in Operator Guide**: Documented physical reset and dev-mode boundaries in [OPERATOR_GUIDE.md](OPERATOR_GUIDE.md).
+Decision: physical access to the device owns the device, especially with an external SD card. The [threat model](THREAT_MODEL.md) is narrowed to read-only card access. Consequently `/boot/RESET`, `/boot/DEV_MODE` and `/boot/onyx-kvm-features.json` are honoured without further authentication: anyone who can write the card can reset the device or enable the microphone and speaker at boot. Revisit when verified boot (Phase 4) exists.
 
 ### S3 (P1, verified): development tooling ships in any profile when present — RESOLVED
 
-**Previous State**:
-`image/build-phase1-rootfs.sh` installed `out/dev-dropbear-v1/dropbear` into `/usr/lib/onyx-kvm/dev/` whenever present, regardless of profile.
-
-**Resolution**:
-- **Build-Time Gating**: Gated dev Dropbear installation in `image/build-phase1-rootfs.sh` behind explicit `ONYX_KVM_DEV_TOOLS=1`.
-- **Profile Cleansing**: In `image/build-phase1-rootfs.sh`, explicitly removed `/usr/lib/onyx-kvm/dev` and `S35onyx-kvm-devmode` for the `product` profile.
-- **Audit Verification**: Updated `image/audit-rootfs.sh` to fail the `product` profile audit if `/usr/lib/onyx-kvm/dev` or `S35onyx-kvm-devmode` is present.
+- Rootfs: the dev Dropbear payload and `S35onyx-kvm-devmode` are gated behind `ONYX_KVM_DEV_TOOLS=1` and removed for the `product` profile.
+- Code: `kvm.dev.exec` and `kvm.system.dev_mode` are behind the `dev-tools` cargo feature of `onyx-kvm-mcp` (forwarded by `onyx-kvmd`). `image/build-rust-daemon.sh` enables it only when `ONYX_KVM_DEV_TOOLS=1`; the default build omits the code.
+- Audit: `image/audit-rootfs.sh` (profile is its 16th argument) fails a product rootfs that contains the dev directory, the init script, or an `onyx-kvmd` built with the feature.
+- Physical access to the device owns the device (S2), so `/boot/DEV_MODE` is not treated as an authentication boundary on development images.
 
 ### S4 (P2): operator-grade tokens are the only token the setup and pairing flows mint — RESOLVED
 
-**Previous State**:
-Both `mint_operator_token` and the pairing ceremony issued full scopes including `kvm:admin`.
+`mint_console_token` (in `crates/onyx-kvmd/src/https.rs`, beside `mint_operator_token`) issues `kvm:read kvm:video kvm:audio-capture kvm:audio-output kvm:control` without `kvm:admin`. Both `/setup/claim` and the PIN branch of `/pair` use it. Admin tokens come only from the UART pairing ceremony (a token staged by `pair-device.sh`), and the daemon's fallback mint when that ceremony staged no token.
 
-**Resolution**:
-- **Console Token Minting**: Added `mint_console_token` in `crates/onyx-kvm-mcp/src/lib.rs` minting least-privilege tokens (`kvm:read kvm:video kvm:control kvm:audio-*`) without `kvm:admin`.
-- **Ceremony Least Privilege**: Web setup claim and pairing flows now mint console tokens. Operator tokens with `kvm:admin` are reserved for explicit administrative operations.
+### S5 (P2): unbounded connection handling — RESOLVED (with known limits)
 
-### S5 (P2): unbounded connection handling — RESOLVED
-
-**Previous State**:
-`serve` spawned a new thread per connection with no concurrency limit.
-
-**Resolution**:
-- **Connection Cap**: Added `MAX_CONCURRENT_CONNECTIONS = 16` cap in `crates/onyx-kvmd/src/https.rs` using an atomic `Arc<AtomicUsize>` guard (`ConnGuard`).
-- **Fail-Closed Rejection**: When capacity is exceeded, connections receive an immediate HTTP 503 Service Unavailable response with `Retry-After: 5` and are closed, preventing thread or memory exhaustion on the embedded SoC.
+`serve` caps concurrent connections at 16 (`MAX_CONCURRENT_CONNECTIONS`, `ConnGuard`). Connections over the cap are closed without a response: the TLS handshake has not happened, so an HTTP 503 cannot be sent. Known limit: a handful of idle sockets can occupy slots until the read timeout expires, so the cap bounds resources but does not prevent a LAN client from degrading availability.
 
 ### S6 (P3): intentional lenience to revisit — RESOLVED
 
@@ -78,23 +51,13 @@ Both `mint_operator_token` and the pairing ceremony issued full scopes including
 
 ## Build, provenance and release
 
-### B1 (P1): `sources.lock` / `builder.lock` still contain `PENDING-REVIEW` — RESOLVED
+### B1 (P1): `sources.lock` / `builder.lock` still contain `PENDING-REVIEW` — REVIEWED; release blocked by missing license grants
 
-**Previous State**:
-FSBL and sg2002-multimedia had pending review placeholders, and `verify-sources.sh` was not invoked during rootfs packaging.
-
-**Resolution**:
-- **Lock Closure**: Resolved `PENDING-REVIEW` entries in `image/sources.lock` and `image/builder.lock` with audited license statements from `docs/SDK_AUDIT.md`.
-- **Comment Filtering**: Updated `image/verify-sources.sh` to check only active entries (ignoring `#` comments).
-- **Build Gating**: Wired `verify-sources.sh` directly into `image/build-phase1-rootfs.sh` and `image/package-phase1.sh`.
+The review is recorded in [SDK_AUDIT.md](SDK_AUDIT.md) ("Shipped-source license review"). Outcome: the FSBL third-party libraries have identified licenses, but the Cvitek/Bitmain-authored FSBL files, the linked middleware, and the sophgo-osdrv tree carry no license grant. Those entries are marked `NO-LICENSE-GRANT`; the apt snapshot field now states that the builder is fixed by image digest and package manifest. `image/verify-sources.sh` (wired into `build.sh`, `build-phase1-rootfs.sh` and `package-phase1.sh`) fails on either marker. Development builds set `ONYX_KVM_ALLOW_UNRESOLVED_SOURCES=1`, which prints a warning; such images are not releasable. Closing this needs a vendor license grant or replacement of those components (Phase 4).
 
 ### B2 (P1, verified): a fresh work volume cannot be created from the repository — RESOLVED
 
-**Previous State**:
-`image/patches/0028-cvi-vc-driver-hardware-h264.patch` targeted `osdrv/interdrv/jpeg/Makefile` instead of `osdrv/interdrv/v2/jpeg/Makefile`, failing patch application on the pinned SDK.
-
-**Resolution**:
-- **Patch Path Fix**: Corrected patch 0028 target path to `osdrv/interdrv/v2/jpeg/Makefile`. Patch now applies cleanly against the pinned SDK commit (`d4003f15b35d43ad4842f427050ab2bba0114fa5`).
+Patch 0028 targets the separate sophgo-osdrv tree, not the pinned SDK. `apply-phase1-config.sh` skips it, as it does 0001, and `image/apply-osdrv-patch.sh` applies it to a checkout of `sophgo/osdrv` at the revision pinned in `sources.lock` (verified, idempotent, offline; round trip tested). An earlier edit changed its `jpeg/Makefile` path to `v2/jpeg`, which is the SDK layout, and was reverted. Patches 0002 to 0027 apply to the SDK.
 
 ### B3 (P2): undocumented, silent prerequisites — RESOLVED
 
@@ -123,7 +86,7 @@ Phase 4 release hardening items (secondary builder reproduction, A/B root partit
 - **Formatting**: `cargo fmt --check` passes cleanly across the workspace.
 - **Clippy Clean**: Fixed all clippy lints, allowed `unwrap_used`/`expect_used` strictly inside `#[cfg(test)]` modules, and fixed casting and boolean simplification lints.
 - **Logic Bug Fixed**: Fixed `SnapshotFormat::Yuv420p` in `https.rs` which previously incorrectly returned `Yuv422p`.
-- **Pass Verification**: `cargo clippy --workspace --locked --all-targets -- -D warnings` exits 0 with 0 warnings; all 73 workspace unit tests pass (`cargo test --workspace --locked`).
+- **Pass Verification**: `cargo clippy --workspace --locked --all-targets -- -D warnings` exits 0 with 0 warnings; all workspace unit tests pass (`cargo test --workspace --locked`).
 
 ### Q2 (P3): oversized sources — RESOLVED
 
@@ -142,9 +105,9 @@ Phase 4 release hardening items (secondary builder reproduction, A/B root partit
 
 ## Hardware
 
-### H1: v81 must be built, flashed and read back — RESOLVED
+### H1: v81 must be built, flashed and read back — OPEN (final verification)
 
-Rebuilt with standardized `onyx-kvm` naming, verified rootfs audits, flashed to hardware, read back, and validated live stream and host wake behavior.
+No v81 build, disk identity, hashes or card read-back are recorded in [NEXT_STEPS.md](NEXT_STEPS.md), which `AGENTS.md` requires. Planned: once all changes land, build and install a new version for final verification, then record disk identity, embedded FIP/FIT/rootfs read-back and live behaviour.
 
 ### H2: items still open in the admission documents — DOCUMENTED
 
@@ -161,6 +124,10 @@ Audio capture remains admitted as metrics-only and 1 kHz tone playback per Phase
 - **Daemon Initialization**: Updated daemon startup (`init_features_from_disk()`) to read feature configuration from `/boot/onyx-kvm-features.json`.
 
 ---
+
+## Environment
+
+- Stale container resources: the pre-rename `cleankvm-*` Podman volumes and the `cleankvm-builder` tag were removed on 2026-10-19 after the reusable inputs (`onyx-kvm-sdk`, `onyx-kvm-host-tools`, `onyx-kvm-buildroot-dl-v50`) were verified to match file counts and sizes. `image/migrate-legacy-names.sh` remains for other machines.
 
 ## Documentation debt — RESOLVED
 

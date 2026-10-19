@@ -39,8 +39,15 @@ EOF
 fi
 
 cd "$repo_root"
+# kvm.dev.exec and kvm.system.dev_mode are compiled in only for development
+# images (ONYX_KVM_DEV_TOOLS=1); product builds omit them entirely.
+dev_features=
+if [ "${ONYX_KVM_DEV_TOOLS:-0}" = "1" ]; then
+    dev_features="--features dev-tools"
+fi
+# shellcheck disable=SC2086
 cargo rustc --release --target riscv64gc-unknown-linux-musl \
-    --package onyx-kvmd --offline -- \
+    --package onyx-kvmd --offline $dev_features -- \
     -C linker=rust-lld \
     -C link-self-contained=yes \
     -C target-feature=+crt-static

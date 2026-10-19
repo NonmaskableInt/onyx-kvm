@@ -117,7 +117,7 @@ It is never bridged to TCP.
 
 An unconfigured device accepts the web setup wizard (`/setup/claim`), which
 stores a salted, iterated SHA-256 PIN hash (`sha256-5000:salt:hash`) on the boot
-partition and returns an operator token. A console ceremony (`onyx-kvm-pair`)
+partition and returns a console token (no `kvm:admin`). A console ceremony (`onyx-kvm-pair`)
 can instead stage a one-time pairing code and session token in
 `/run/onyx-kvm`; three wrong attempts wipe the staged code. Dropping a `RESET`
 file on `/boot` returns the device to the unconfigured state. The trust

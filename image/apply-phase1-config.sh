@@ -106,6 +106,9 @@ install -D -m 0755 "$memtest_binary" "$overlay_dir/usr/bin/onyx-kvm-memtest"
 for patch_file in "$repo_root"/image/patches/*.patch; do
     case "${patch_file##*/}" in
         0001-dwc2-cvitek-honor-dr-mode.patch) continue ;;
+        # Targets the separate sophgo-osdrv source tree (interdrv/cvi_vc_drv),
+        # not the pinned SDK checkout; apply it with image/apply-osdrv-patch.sh.
+        0028-cvi-vc-driver-hardware-h264.patch) continue ;;
     esac
     patch -d "$sdk_dir" -p1 <"$patch_file"
 done
