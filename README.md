@@ -67,15 +67,18 @@ and [docs/OPEN_ITEMS.md](docs/OPEN_ITEMS.md) B1.
 ## Licensing status
 
 Images built today are **development builds and are not releasable or
-redistributable**. Three vendor components have no license grant:
+redistributable**. Four vendor components have no license grant:
 
 1. FSBL: the Cvitek/Bitmain-authored files in `fsbl/plat/cv180x`,
    `fsbl/plat/cv181x` and `fsbl/lib/utils` (about 115 files).
 2. Middleware: the sources linked into the raw-frame probe (`libsys.a` and four
    `middleware/v2/modules/vpu` objects); `sys/src/peri.c` is marked proprietary.
-3. `sophgo-osdrv`: the `cvi_vc_driver` hardware H.264 module (patch 0028).
+3. `sophgo-osdrv`: the source of the `soph_jpeg`, `mars_vcodec` and
+   `cvi_vc_driver` modules (patch 0028), whose notices contradict their GPL
+   declaration.
+4. `coda980.bin`: the opaque VPU firmware blob.
 
-The other vendor kernel modules the product loads have not been reviewed yet.
+The other six vendor kernel modules declare GPL but carry no file headers.
 Release needs a written grant from Sophgo/Cvitek or replacement of these parts.
 Evidence is in [docs/SDK_AUDIT.md](docs/SDK_AUDIT.md); tracking is
 [docs/OPEN_ITEMS.md](docs/OPEN_ITEMS.md) B1.

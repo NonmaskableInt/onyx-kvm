@@ -53,7 +53,7 @@ Decision: physical access to the device owns the device, especially with an exte
 
 ### B1 (P1): `sources.lock` / `builder.lock` still contain `PENDING-REVIEW` — REVIEWED; release blocked by missing license grants
 
-The review is recorded in [SDK_AUDIT.md](SDK_AUDIT.md) ("Shipped-source license review"). Outcome: the FSBL third-party libraries have identified licenses, but the Cvitek/Bitmain-authored FSBL files, the linked middleware, and the sophgo-osdrv tree carry no license grant. Those entries are marked `NO-LICENSE-GRANT`; the apt snapshot field now states that the builder is fixed by image digest and package manifest. `image/verify-sources.sh` (wired into `build.sh`, `build-phase1-rootfs.sh` and `package-phase1.sh`) fails on either marker. Development builds set `ONYX_KVM_ALLOW_UNRESOLVED_SOURCES=1`, which prints a warning; such images are not releasable. Closing this needs a vendor license grant or replacement of those components (Phase 4). The other vendor kernel modules the product loads (`soph_sys`, `soph_vi`, `soph_vpss`, `mars_vcodec` and the rest, under the SDK `osdrv/interdrv/v2`) have not been license-reviewed and have no lock entry; review them and add entries.
+The review is recorded in [SDK_AUDIT.md](SDK_AUDIT.md) ("Shipped-source license review"). Outcome: the FSBL third-party libraries have identified licenses, but the Cvitek/Bitmain-authored FSBL files, the linked middleware, and the sophgo-osdrv tree carry no license grant. Those entries are marked `NO-LICENSE-GRANT`; the apt snapshot field now states that the builder is fixed by image digest and package manifest. `image/verify-sources.sh` (wired into `build.sh`, `build-phase1-rootfs.sh` and `package-phase1.sh`) fails on either marker. Development builds set `ONYX_KVM_ALLOW_UNRESOLVED_SOURCES=1`, which prints a warning; such images are not releasable. Closing this needs a vendor license grant or replacement of those components (Phase 4). The kernel-module review adds the VPU firmware `coda980.bin` to the list; six SDK modules are GPL by declaration only (see SDK_AUDIT.md). Four components in total lack a grant: vendor FSBL files, linked middleware, `sophgo-osdrv` and `coda980.bin`.
 
 ### B2 (P1, verified): a fresh work volume cannot be created from the repository — RESOLVED
 
@@ -68,6 +68,10 @@ Patch 0028 targets the separate sophgo-osdrv tree, not the pinned SDK. `apply-ph
 **Resolution**:
 - **Shared Environment**: Created `image/default-env.sh` unifying work volume defaults to `onyx-kvm-work` and sourcing it across all `image/` build scripts.
 - **Explicit Prerequisite Errors**: Added clear error messages and checksum validation for `tinyalsa-v2.0.0.tar.gz` in probe build scripts.
+
+### B5 (P2): the shipped video modules are not reproducible from the repository — OPEN
+
+`soph_jpeg`, `mars_vcodec` and `cvi_vc_driver` are consumed from `out/phase3-video-modules-v*` (listed in a `SHA256SUMS`), but no script here builds them, and the shipped `soph_jpeg.ko` differs from the SDK's prebuilt one. Add a container build that compiles all nine modules from the pinned SDK and the pinned `sophgo-osdrv` tree (with patch 0028) and verifies the hashes, before the final verification build.
 
 ### B4 (P2): release hardening not started — DOCUMENTED / IN PROGRESS
 

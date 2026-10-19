@@ -237,7 +237,11 @@ The earlier aggregate label omitted MPL-2.0 (BigDigits) and the unlicensed vendo
 
 **sophgo-osdrv** (`1b3a4964`, source of the `cvi_vc_driver` hardware H.264 module, patch 0028): no top-level license and no header in the patched sources. Outcome: **no license grant**.
 
-**Not yet reviewed**: the other vendor kernel modules the product loads (`soph_sys`, `soph_base`, `soph_mipi_rx`, `soph_snsr_i2c`, `soph_vi`, `soph_vpss`, `soph_jpeg`, `mars_vcodec`), which come from the SDK `osdrv/interdrv/v2` tree. They have no lock entries.
+**Kernel modules** (the nine quarantined video modules loaded per session):
+
+- `soph_sys`, `soph_base`, `soph_mipi_rx`, `soph_snsr_i2c`, `soph_vi`, `soph_vpss`: source is in the pinned SDK (`osdrv/interdrv/v2/{sys,base,cif,snsr_i2c,vi,vpss}`). Every module declares `MODULE_LICENSE("GPL")`; the roughly 100 source files have no header and the tree has no license file. Outcome: GPL-2.0 by module declaration only, with corresponding source available. Recorded as `sdk-kernel-modules`; vendor confirmation is recommended but it does not block.
+- `soph_jpeg`, `mars_vcodec`, `cvi_vc_driver`: matching source exists in `sophgo-osdrv` (`interdrv/jpeg`, `vcodec`, `cvi_vc_drv`). All three declare GPL, but their headers say "Copyright Cvitek Co., Ltd. All rights reserved", and 47 files in `cvi_vc_drv` are marked proprietary. The module descriptions name the Chips&Media CODA980 VPU. Outcome: **no license grant**, and contradictory notices. The SDK also ships a prebuilt `soph_jpeg.ko` (`cb496d01...`, no source in the SDK) that differs from the shipped module (`6f213f35...`), and no script in this repository records how the three shipped modules were built (OPEN_ITEMS B5).
+- `coda980.bin` (VPU firmware, `sha256:24070680...`), copied from the SDK ramdisk: an opaque binary with no source or license text. Outcome: **no license grant**; recorded as `vendor-vpu-firmware-coda980`.
 
 **Builder**: the builder is fixed by the local image digest and the package manifest in `image/builder.lock`; there is no apt snapshot because the builder is not rebuilt from apt during a build.
 

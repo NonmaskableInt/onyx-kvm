@@ -1,8 +1,9 @@
 # Source and binary provenance policy
 
-> **Status:** three vendor components have no license grant (FSBL
-> Cvitek/Bitmain-authored files, the linked middleware, and `sophgo-osdrv`), and
-> the remaining vendor kernel modules are unreviewed. Images are development
+> **Status:** four vendor components have no license grant (FSBL
+> Cvitek/Bitmain-authored files, the linked middleware, `sophgo-osdrv`, and the
+> `coda980.bin` VPU firmware), and six more kernel modules are GPL by
+> declaration only. Images are development
 > builds only until they are granted or replaced. See `SDK_AUDIT.md` and
 > `OPEN_ITEMS.md` B1.
 
