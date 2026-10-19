@@ -237,6 +237,8 @@ The earlier aggregate label omitted MPL-2.0 (BigDigits) and the unlicensed vendo
 
 **sophgo-osdrv** (`1b3a4964`, source of the `cvi_vc_driver` hardware H.264 module, patch 0028): no top-level license and no header in the patched sources. Outcome: **no license grant**.
 
+**Not yet reviewed**: the other vendor kernel modules the product loads (`soph_sys`, `soph_base`, `soph_mipi_rx`, `soph_snsr_i2c`, `soph_vi`, `soph_vpss`, `soph_jpeg`, `mars_vcodec`), which come from the SDK `osdrv/interdrv/v2` tree. They have no lock entries.
+
 **Builder**: the builder is fixed by the local image digest and the package manifest in `image/builder.lock`; there is no apt snapshot because the builder is not rebuilt from apt during a build.
 
 **Conclusion**: nothing here is a technical blocker for development builds, which waive the markers explicitly (`ONYX_KVM_ALLOW_UNRESOLVED_SOURCES=1`). A release needs a written license grant from Sophgo/Cvitek for the vendor-authored FSBL, middleware and osdrv files, or replacement of them.

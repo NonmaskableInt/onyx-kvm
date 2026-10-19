@@ -109,3 +109,7 @@ Hardware-qualified development checkpoint. See `PHASE1_ACCEPTANCE.md`.
 - Determine whether SG2002 supports a usable verified-boot root of trust and
   document limitations precisely.
 - Reproduce builds on two clean builders and complete the release checklist.
+- Obtain a written license grant from Sophgo/Cvitek, or replace, the three
+  components marked `NO-LICENSE-GRANT` (FSBL vendor files, linked middleware,
+  `sophgo-osdrv`) and review the remaining vendor kernel modules (OPEN_ITEMS B1).
+  No image is releasable before this.
