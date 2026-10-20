@@ -109,8 +109,12 @@ Hardware-qualified development checkpoint. See `PHASE1_ACCEPTANCE.md`.
 - Determine whether SG2002 supports a usable verified-boot root of trust and
   document limitations precisely.
 - Reproduce builds on two clean builders and complete the release checklist.
+- Not attempted so far: GPIO control of the host RESET and power/reboot pins
+  (OPEN_ITEMS H4) and support for the HUD board of the more advanced NanoKVM
+  models (H5). Each needs its own investigation, threat-model update and
+  admission gate before any code.
 - Obtain a written license grant from Sophgo/Cvitek, or replace, the four
   components marked `NO-LICENSE-GRANT` (FSBL vendor files, linked middleware,
-  `sophgo-osdrv`, `coda980.bin`) (OPEN_ITEMS B1), and make the video modules
-  reproducible (B5).
+  `sophgo-osdrv`, `coda980.bin`) (OPEN_ITEMS B1). The video modules are now
+  reproducible from the repository (B5).
   No image is releasable before this.

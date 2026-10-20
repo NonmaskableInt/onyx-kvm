@@ -44,6 +44,11 @@ GPL-3.0-or-later.
 - **Audio.** Microphone capture is admitted as metrics-only and tone playback
   only; continuous audio stays disabled until Phase 4.
 
+## Not included in this release
+
+- GPIO control of the host RESET or power/reboot pins (OPEN_ITEMS H4).
+- Support for the HUD board of the more advanced NanoKVM models (H5).
+
 ## Behaviour to expect
 
 - Reflashing the card gives the device a new MAC address, hostname

@@ -15,6 +15,15 @@ SG2002 RISC-V SoC. It provides:
 
 ---
 
+## Known limits
+
+- **No host power or reset control.** The device cannot press the host's RESET
+  or power/reboot buttons (no GPIO support). It can wake a sleeping host with a
+  USB key press. Rebooting the KVM does not reboot the host. Use the host's own
+  controls or a separate power switch to recover a hung machine.
+- **NanoKVM Lite only.** There is no support for the HUD board of the more
+  advanced NanoKVM models.
+
 ## 1. First Boot & Setup Claim
 
 ### Factory / Unconfigured State
