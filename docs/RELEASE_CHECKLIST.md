@@ -25,9 +25,10 @@ to bottom; a release is cut only when every box can be ticked and recorded in
   responder on UDP 5353 ([NETWORK_POLICY.md](NETWORK_POLICY.md)).
 - The device takes a new MAC, hostname and address, and loses its pairings, each
   time the card is reflashed (the MAC is kept in `/boot`).
-- Decide whether `S51onyx-kvm-mdns` keeps writing `/boot/onyx-kvm-mdns.log`.
-  It exists for serial-less diagnosis and is not needed in a release; removing it
-  changes the rootfs and so needs a new hardware pass.
+- The boot-partition status log of `S51onyx-kvm-mdns` is a development feature:
+  it exists only in images built with `ONYX_KVM_DEV_TOOLS=1`, and the product
+  audit rejects the marker otherwise.
+- Final text for all of the above is in [RELEASE_NOTES.md](RELEASE_NOTES.md).
 
 ## Build and verify (all recorded in NEXT_STEPS.md)
 

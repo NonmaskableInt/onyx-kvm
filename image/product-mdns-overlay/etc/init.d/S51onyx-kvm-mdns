@@ -24,9 +24,11 @@ case "${1:-}" in
         start-stop-daemon -S -b -m -p "$pidfile" -c onyx-kvm-mdns:onyx-kvm-mdns -x /bin/sh -- \
             -c 'exec "$@" 2>>/run/onyx-kvm-mdns.err' sh \
             "$responder" "$hostname_now" "$address" "$prefix"
-        # Bounded status record on the FAT boot partition, so a failed start
-        # can be read from the card when no serial console is available.
-        (
+        # Development images only: a bounded status record on the FAT boot
+        # partition, so a failed start can be read from the card when no
+        # serial console is available. The marker exists only in rootfs
+        # images built with ONYX_KVM_DEV_TOOLS=1.
+        if [ -e /usr/lib/onyx-kvm/dev/mdns-debug ]; then (
             sleep 3
             {
                 echo "args: $hostname_now $address $prefix"
@@ -38,7 +40,7 @@ case "${1:-}" in
                 echo "stderr:"
                 head -c 512 "$errfile"
             } > /boot/onyx-kvm-mdns.log 2>/dev/null
-        ) &
+        ) & fi
         ;;
     stop)
         start-stop-daemon -K -p "$pidfile" || true

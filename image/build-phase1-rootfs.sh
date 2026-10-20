@@ -271,6 +271,17 @@ fi
             cp -a /repo/image/product-mdns-overlay/. onyx-kvm/phase1-overlay/
             install -m 0755 /repo/out/phase2-rust/onyx-kvm-mdns \
                 onyx-kvm/phase1-overlay/usr/bin/onyx-kvm-mdns
+            # The boot-partition status log of the responder is a development
+            # feature; the marker exists only in development images.
+            if [ "${ONYX_KVM_DEV_TOOLS:-0}" = "1" ]; then
+                mkdir -p onyx-kvm/phase1-overlay/usr/lib/onyx-kvm/dev \
+                    buildroot/output/target/usr/lib/onyx-kvm/dev
+                : > onyx-kvm/phase1-overlay/usr/lib/onyx-kvm/dev/mdns-debug
+                : > buildroot/output/target/usr/lib/onyx-kvm/dev/mdns-debug
+            else
+                rm -f onyx-kvm/phase1-overlay/usr/lib/onyx-kvm/dev/mdns-debug \
+                    buildroot/output/target/usr/lib/onyx-kvm/dev/mdns-debug
+            fi
         else
             rm -f onyx-kvm/phase1-overlay/usr/bin/onyx-kvm-mdns \
                 onyx-kvm/phase1-overlay/etc/init.d/S51onyx-kvm-mdns \
