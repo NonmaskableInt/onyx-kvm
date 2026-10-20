@@ -28,6 +28,21 @@ second-builder reproduction are not done; see
 [docs/ROADMAP.md](docs/ROADMAP.md) for the phase plan. Start from the
 [documentation index](docs/README.md).
 
+## Target hardware
+
+The only supported target is the **Sipeed NanoKVM Lite** (SG2002, RISC-V), the
+variant without the ATX power-control port, the OLED display or the HUD board.
+Listings on Amazon (sellers differ and stock changes, so check that the title
+says NanoKVM **Lite** and who ships it):
+
+- [Sipeed NanoKVM IP-KVM, NanoKVM Lite SBC](https://www.amazon.com/Sipeed-NanoKVM-IP-KVM-Maintenance-Server/dp/B0DHW1SJR3)
+- [Sipeed NanoKVM Lite, ultra-compact mini KVM over IP](https://www.amazon.com/dp/B0FP9C25D6)
+
+You also need a microSD card (this project is developed against a 32 GB card);
+some listings do not include one. The links were taken from search results and
+are not an endorsement of any seller. Not attempted: the Full model's ATX
+power-control and HUD hardware (OPEN_ITEMS H4 and H5).
+
 ## Goals
 
 - Build the bootloader, Linux kernel, root filesystem, and Rust services from
