@@ -1,10 +1,12 @@
 #!/bin/sh
 # Answers mDNS queries for this device's own <hostname>.local address only.
-# It advertises nothing and runs as an unprivileged numeric user with no
-# passwd entry and no file access.
+# It advertises nothing and runs as the unprivileged onyx-kvm-mdns user
+# (UID/GID 901, no shell, no file access). start-stop-daemon needs a passwd
+# entry for the user, so the numeric id alone is not enough.
 
 responder=/usr/bin/onyx-kvm-mdns
 pidfile=/run/onyx-kvm-mdns.pid
+errfile=/run/onyx-kvm-mdns.err
 
 case "${1:-}" in
     start)
@@ -17,10 +19,29 @@ case "${1:-}" in
             echo "onyx-kvm-mdns: no hostname or eth0 address; not started" >&2
             exit 0
         fi
-        start-stop-daemon -S -b -m -p "$pidfile" -c 901:901 -x "$responder" -- "$hostname_now" "$address" "$prefix"
+        : > "$errfile"
+        chown 901:901 "$errfile"
+        start-stop-daemon -S -b -m -p "$pidfile" -c onyx-kvm-mdns:onyx-kvm-mdns -x /bin/sh -- \
+            -c 'exec "$@" 2>>/run/onyx-kvm-mdns.err' sh \
+            "$responder" "$hostname_now" "$address" "$prefix"
+        # Bounded status record on the FAT boot partition, so a failed start
+        # can be read from the card when no serial console is available.
+        (
+            sleep 3
+            {
+                echo "args: $hostname_now $address $prefix"
+                if kill -0 "$(cat "$pidfile" 2>/dev/null)" 2>/dev/null; then
+                    echo "state: running"
+                else
+                    echo "state: exited"
+                fi
+                echo "stderr:"
+                head -c 512 "$errfile"
+            } > /boot/onyx-kvm-mdns.log 2>/dev/null
+        ) &
         ;;
     stop)
-        start-stop-daemon -K -p "$pidfile" -x "$responder" || true
+        start-stop-daemon -K -p "$pidfile" || true
         rm -f "$pidfile"
         ;;
     restart|reload)

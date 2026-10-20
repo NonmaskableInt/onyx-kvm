@@ -1,1 +1,2 @@
 onyx-kvm 900 onyx-kvm 900 * /nonexistent /sbin/nologin - Onyx_KVM_daemon
+onyx-kvm-mdns 901 onyx-kvm-mdns 901 * /nonexistent /sbin/nologin - Onyx_KVM_mDNS

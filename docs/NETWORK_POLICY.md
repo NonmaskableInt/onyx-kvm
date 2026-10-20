@@ -25,7 +25,8 @@ DNS or `/etc/hosts` entries. Its admitted behaviour is deliberately narrow:
   embeds the MAC suffix), and rate-limits itself to 5 replies per second.
 - It parses untrusted multicast packets with bounded, panic-free code (no name
   compression, at most 8 questions, std only, unsafe code forbidden) and runs as
-  numeric UID/GID 901 with no passwd entry, no credentials and no file access.
+  the `onyx-kvm-mdns` user (UID/GID 901, `nologin`) with no credentials and no
+  file access.
 - It binds to the multicast group address (the kernel drops unicast-addressed
   packets) and answers only sources inside the `eth0` subnet, so a spoofed
   off-link source cannot use it to reflect replies at a third party.

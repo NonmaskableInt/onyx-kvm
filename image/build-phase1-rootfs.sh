@@ -419,6 +419,9 @@ fi
             printf "%s\n" "$passwd_image" | \
                 grep -Eq "^onyx-kvm:x:900:900:.*:/nonexistent:/sbin/nologin$"
             printf "%s\n" "$group_image" | grep -Eq "^onyx-kvm:x:900:"
+            printf "%s\n" "$passwd_image" | \
+                grep -Eq "^onyx-kvm-mdns:x:901:901:.*:/nonexistent:/sbin/nologin$"
+            printf "%s\n" "$group_image" | grep -Eq "^onyx-kvm-mdns:x:901:"
             printf "%s\n" "$key_stat" | grep -q "Mode: *0640"
             printf "%s\n" "$key_stat" | grep -q "User: *0 *Group: *900"
             printf "%s\n" "finished ext4 identity ownership audit passed"
