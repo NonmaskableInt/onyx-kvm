@@ -105,6 +105,16 @@ Evidence is in [docs/SDK_AUDIT.md](docs/SDK_AUDIT.md); tracking is
 Release steps and remaining blockers are in
 [docs/RELEASE_CHECKLIST.md](docs/RELEASE_CHECKLIST.md).
 
+## License of this repository
+
+The code and documentation written for this project are licensed under
+GPL-3.0-or-later; see [LICENSE](LICENSE). That grant does not extend to vendor
+material. The patches in `image/patches/` modify the vendor SDK and the
+`sophgo-osdrv` tree, so their context and removed lines are short excerpts of
+vendor source, and four vendor components carry no license grant (see
+[Licensing status](#licensing-status)). The repository does not contain the SDK,
+vendor binaries, firmware blobs or built images.
+
 ## Developer checks
 
 ```sh
