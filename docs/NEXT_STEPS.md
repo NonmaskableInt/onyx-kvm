@@ -7,7 +7,7 @@ continuing bring-up, and update it when evidence closes a hypothesis.
 
 ## Current state (read this first)
 
-- **Newest hardware-verified image:** development candidate v85 (entry below).
+- **Newest hardware-verified image:** development candidate v86 (entry below).
 - **Last hardware-accepted image before the rename:** product release candidate v80 (entry below).
   Hardware findings through v80 use the earlier `cleankvm` names where they
   quote paths, hashes and log output; those records are intentionally unchanged.
@@ -23,6 +23,24 @@ continuing bring-up, and update it when evidence closes a hypothesis.
   `PENDING-REVIEW` source gate (B1) and the non-reproducible work volume (B2).
 - **Next bounded experiment:** none pending on hardware. The v81 rebuild above is
   the next step and needs no new hypothesis.
+
+## Development Candidate v86: Boot-Partition Log Made Dev-Only [BOOTED — mDNS AND IP ORIGIN CONFIRMED]
+
+v86 is v85 with the `S51onyx-kvm-mdns` boot-partition status log gated on
+`usr/lib/onyx-kvm/dev/mdns-debug`, which only `ONYX_KVM_DEV_TOOLS=1` builds
+create. `boot.sd`, `fip.bin` and `phase1.its` are unchanged. Still a development
+build (unresolved licenses, OPEN_ITEMS B1).
+
+- **Flash (2026-10-20):** `/dev/disk4` re-resolved (only external disk, removable
+  USB, 30,992,760,832 bytes); 79,692,288 bytes written and read back;
+  `embedded_artifacts=verified`. `rootfs.ext4` `832fe4d6...f4b545`; image
+  `287ae05a...b752e651`.
+- **Booted as** `onyx-kvm-6055de` at 192.168.1.246. A direct mDNS query returned
+  `A` 192.168.1.246 and an NSEC answer for AAAA; `onyx-kvm-6055de.local` and the
+  IP both serve `/setup/status`; the IP origin is accepted (409, not 403).
+- **Not checked:** that `onyx-kvm-mdns.log` is absent from the boot partition
+  (the card was not pulled), socket enumeration, UART evidence, and a repeat of
+  the video/HID/microphone pass (unchanged code paths, last verified on v82).
 
 ## Development Candidate v85: Name Responder and Origin Fix, Verified on Hardware [BOOTED — mDNS AND IP ORIGIN CONFIRMED]
 
