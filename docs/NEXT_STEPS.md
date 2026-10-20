@@ -47,8 +47,9 @@ Built from a fresh work volume with `ONYX_KVM_ALLOW_UNRESOLVED_SOURCES=1`
   whose defaults have not been checked.
 - **FIP:** differs from v80 (BL2 hash; `LOADER_2ND` 101,888 vs 101,376 bytes).
   Cause unconfirmed (suspected longer `onyx-kvm` strings).
-- **Not done:** the bootchain (U-Boot, FSBL/FIP, dtb) is built by hand in the
-  volume and is not yet a repo script.
+- **Boot chain:** `image/build-phase1-bootchain.sh` now builds U-Boot, the FIP
+  and the dtb. Rerun on the v82 volume it reproduced the shipped `fip.bin`
+  (`37248202...187ae74`) exactly, so the FIP is reproducible.
 
 **Hardware boot (2026-10-20, no UART available):**
 - The card booted: the new FIP, kernel and rootfs came up, DHCP gave
