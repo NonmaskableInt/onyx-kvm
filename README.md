@@ -18,6 +18,10 @@ assembled SD image and provides, on a NanoKVM Lite:
 - opt-in, metrics-only microphone capture and a fixed-tone speaker test
   (audio brokers), each behind its own gate and off by default.
 
+Not attempted: GPIO control of the host's RESET or power/reboot pins, and
+support for the HUD board of the more advanced NanoKVM models (see
+[docs/OPEN_ITEMS.md](docs/OPEN_ITEMS.md) H4 and H5).
+
 Virtual media, continuous audio, A/B updates, verified boot, an SBOM and a
 second-builder reproduction are not done; see
 [docs/OPEN_ITEMS.md](docs/OPEN_ITEMS.md) for what is open and

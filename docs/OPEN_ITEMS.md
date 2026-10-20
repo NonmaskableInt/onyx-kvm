@@ -123,6 +123,24 @@ v82 and v85 were built, flashed to `/dev/disk4`, read back with embedded-artifac
 
 Audio capture remains admitted as metrics-only and 1 kHz tone playback per Phase 3a. Continuous audio and privacy indicators remain Phase 4 work ([PHASE4_CONTINUOUS_MEDIA_ARCHITECTURE.md](PHASE4_CONTINUOUS_MEDIA_ARCHITECTURE.md)). Virtual media remains fail-closed.
 
+### H4: no GPIO control of the host RESET or power/reboot pins — NOT ATTEMPTED
+
+The image drives no GPIO line, so it cannot press the host's reset or power
+button, force a power cycle, or recover a hung host. The only host-side action
+is waking a sleeping host over USB HID. The device reboot paths (web console,
+factory reset) restart the NanoKVM only. `onyx-kvmd` is deliberately unable to
+open GPIO devices ([ARCHITECTURE.md](ARCHITECTURE.md)); host power control is
+expected to arrive as its own root broker behind a separate admission gate, as
+HID, video and audio did, with a threat-model update first. Nothing about the
+pin wiring, polarity or electrical limits has been investigated.
+
+### H5: no support for the HUD board of the more advanced NanoKVM — NOT ATTEMPTED
+
+The image targets the NanoKVM Lite (SG2002) only and has no driver, overlay or
+UI for the additional HUD board offered with the more advanced NanoKVM models.
+Its hardware, interfaces and any vendor firmware for it have not been examined.
+Running this image on those models is untested.
+
 ### H3 (P2): feature-gate persistence targets a read-only filesystem — RESOLVED
 
 **Previous State**:
