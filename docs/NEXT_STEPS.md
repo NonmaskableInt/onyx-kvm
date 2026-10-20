@@ -7,7 +7,8 @@ continuing bring-up, and update it when evidence closes a hypothesis.
 
 ## Current state (read this first)
 
-- **Last hardware-accepted image:** product release candidate v80 (entry below).
+- **Newest hardware-verified image:** development candidate v85 (entry below).
+- **Last hardware-accepted image before the rename:** product release candidate v80 (entry below).
   Hardware findings through v80 use the earlier `cleankvm` names where they
   quote paths, hashes and log output; those records are intentionally unchanged.
 - **Naming standardized to `onyx-kvm` after v80** (see [NAMING.md](NAMING.md)).
@@ -22,6 +23,42 @@ continuing bring-up, and update it when evidence closes a hypothesis.
   `PENDING-REVIEW` source gate (B1) and the non-reproducible work volume (B2).
 - **Next bounded experiment:** none pending on hardware. The v81 rebuild above is
   the next step and needs no new hypothesis.
+
+## Development Candidate v85: Name Responder and Origin Fix, Verified on Hardware [BOOTED — mDNS AND IP ORIGIN CONFIRMED]
+
+v85 is v82 plus the `S50onyx-kvmd` wait for `eth0` and the product-only
+`onyx-kvm-mdns` responder (see [NETWORK_POLICY.md](NETWORK_POLICY.md)). Only the
+rootfs differs: `boot.sd`, `fip.bin` and `phase1.its` are byte-identical to v82.
+Still a development build (unresolved licenses, OPEN_ITEMS B1).
+
+- **Identity and flash (2026-10-20):** `/dev/disk4`, removable USB, 30,992,760,832
+  bytes, the only external disk; written to `/dev/rdisk4` (79,692,288 bytes) and
+  read back with `bs=512 count=155649`. `verify-sd-image.py`:
+  `embedded_artifacts=verified`. `rootfs.ext4` `010c9006...742c255b`; image
+  `8fcb1f3c...ca0dbd1be`.
+- **IP origin:** the daemon accepted `https://192.168.1.245:8443` as a setup
+  origin (HTTP 409 "already configured", not 403), so `eth0` had its address when
+  `S50` built the origin list. Confirmed on v83, v84 and v85.
+- **mDNS:** `onyx-kvm-cacf0f.local` resolves on the client. A direct legacy
+  query returned an `A` answer with 192.168.1.245 and an NSEC (no AAAA) answer.
+- **Defect found and fixed along the way:** v83 and v84 did not answer. The
+  `/boot/onyx-kvm-mdns.log` status record read `state: exited` with empty stderr.
+  Cause: BusyBox `start-stop-daemon -c` requires a passwd entry and UID 901 had
+  none. Fix: the `onyx-kvm-mdns` user/group (UID/GID 901, `nologin`) in
+  `phase1-users.txt`, audited in the rootfs build.
+- **Hostname and address change on every reflash.** The MAC is stored in
+  `/boot/onyx-kvm-mac.txt`; reflashing wipes it, so the device takes a new MAC,
+  hostname (`onyx-kvm-<last six hex digits>`) and DHCP lease (f406c8, b6baae,
+  cf20e7, cacf0f across v82-v85). Pairings do not survive a reflash.
+- **Diagnostic:** `S51onyx-kvm-mdns` writes a bounded status record
+  (arguments, running/exited, 512 bytes of stderr) to `/boot/onyx-kvm-mdns.log`.
+  Consider removing it before release.
+- **Not done:** socket enumeration on the booted device (expected: TCP 8443 and
+  UDP 5353 only); no UART, so no taint/module/node capture.
+
+**Next bounded experiment:** none pending on hardware. Remaining release work is
+the four license grants (B1) and the optional removal of the boot-partition
+status record.
 
 ## Development Candidate v82: Rebuilt From Pinned Sources, Flashed, Read Back [BOOTED — VIDEO STREAMING CONFIRMED]
 

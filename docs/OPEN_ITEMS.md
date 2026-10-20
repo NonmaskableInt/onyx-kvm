@@ -115,9 +115,9 @@ Phase 4 release hardening items (secondary builder reproduction, A/B root partit
 
 ## Hardware
 
-### H1: final image built, flashed and read back — PARTIAL (v82 flashed; boot and live behaviour pending)
+### H1: final image built, flashed and read back — LARGELY DONE (v85)
 
-v82 was built, flashed to `/dev/disk4` and read back with embedded-artifact verification (recorded in [NEXT_STEPS.md](NEXT_STEPS.md)). Still open: boot, re-pairing and live video capture on hardware. Original plan: once all changes land, build and install a new version for final verification, then record disk identity, embedded FIP/FIT/rootfs read-back and live behaviour.
+v82 and v85 were built, flashed to `/dev/disk4`, read back with embedded-artifact verification, and exercised on hardware (video, HID, microphone, PIN pairing, MCP, mDNS, IP origin; recorded in [NEXT_STEPS.md](NEXT_STEPS.md)). Still open: socket enumeration on the booted device and any UART-only evidence (taint, modules, nodes). Original plan: once all changes land, build and install a new version for final verification, then record disk identity, embedded FIP/FIT/rootfs read-back and live behaviour.
 
 ### H2: items still open in the admission documents — DOCUMENTED
 
