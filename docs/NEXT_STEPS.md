@@ -68,7 +68,12 @@ Built from a fresh work volume with `ONYX_KVM_ALLOW_UNRESOLVED_SOURCES=1`
 - Operator reports HID and microphone working on this build (2026-10-20). The
   microphone result is an operator observation: how it was enabled and what
   "working" covered (Phase 3a admits metrics-only capture) was not recorded.
-- Not yet exercised on this build: the PIN `/pair` flow and MCP clients.
+- PIN pairing and MCP verified from the client (2026-10-20): `POST /pair` with
+  the operator-supplied PIN returned a 4 h Bearer console token; MCP
+  `initialize` negotiated `2025-11-25`; `tools/list` returned only
+  `kvm.status`, `kvm.video.snapshot`, `kvm.keyboard.send`, `kvm.pointer.send`.
+  `kvm.dev.exec` and `kvm.system.dev_mode` are absent, confirming the dev-tools
+  compile-out in the product build. The token was not recorded or persisted.
 
 **Next bounded experiment:** rebuild the rootfs with the `S50` fix, reflash, and
 confirm the IP origin works on first boot; then exercise HID and MCP pairing.
