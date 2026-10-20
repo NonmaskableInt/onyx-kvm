@@ -115,9 +115,9 @@ Phase 4 release hardening items (secondary builder reproduction, A/B root partit
 
 ## Hardware
 
-### H1: v81 must be built, flashed and read back — OPEN (final verification)
+### H1: final image built, flashed and read back — PARTIAL (v82 flashed; boot and live behaviour pending)
 
-No v81 build, disk identity, hashes or card read-back are recorded in [NEXT_STEPS.md](NEXT_STEPS.md), which `AGENTS.md` requires. Planned: once all changes land, build and install a new version for final verification, then record disk identity, embedded FIP/FIT/rootfs read-back and live behaviour.
+v82 was built, flashed to `/dev/disk4` and read back with embedded-artifact verification (recorded in [NEXT_STEPS.md](NEXT_STEPS.md)). Still open: boot, re-pairing and live video capture on hardware. Original plan: once all changes land, build and install a new version for final verification, then record disk identity, embedded FIP/FIT/rootfs read-back and live behaviour.
 
 ### H2: items still open in the admission documents — DOCUMENTED
 

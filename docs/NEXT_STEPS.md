@@ -1,6 +1,6 @@
 # Next steps
 
-Updated: 2026-10-18
+Updated: 2026-10-19
 
 This is the newest-first hardware and release log. Read the top entry before
 continuing bring-up, and update it when evidence closes a hypothesis.
@@ -22,6 +22,37 @@ continuing bring-up, and update it when evidence closes a hypothesis.
   `PENDING-REVIEW` source gate (B1) and the non-reproducible work volume (B2).
 - **Next bounded experiment:** none pending on hardware. The v81 rebuild above is
   the next step and needs no new hypothesis.
+
+## Development Candidate v82: Rebuilt From Pinned Sources, Flashed, Read Back [FLASHED — NOT YET BOOTED]
+
+Built from a fresh work volume with `ONYX_KVM_ALLOW_UNRESOLVED_SOURCES=1`
+(four components lack a license grant, so this image is **not releasable**; see
+[OPEN_ITEMS.md](OPEN_ITEMS.md) B1). Product profile, no dev tools.
+
+- **Removable-media identity (2026-10-19):** `detect-target-disk.py` found one
+  external candidate, `/dev/disk4`, 31.0 GB (30,992,760,832 bytes), USB mass
+  storage, previously labelled `ONYXKVM`. Unmounted, written to `/dev/rdisk4`
+  (`dd bs=1m`, 79,692,288 bytes), read back with `bs=512 count=155649`.
+- **Hashes:** image `a050562c...2308ae9`; `boot.sd` `f5216efc...11555b3`;
+  `rootfs.ext4` `5c74ac92...a2a88c`; `fip.bin` (258,560 bytes) `37248202...187ae74`.
+- **Read-back:** `verify-sd-image.py` on the card read-back reports
+  `embedded_artifacts=verified` (FIT, FIP, rootfs). The whole-image hash
+  differs (`6eeb675c...d1d111e`), as expected from FAT bookkeeping after the
+  card was mounted; it does not replace the embedded check.
+- **Rootfs audit:** passed after fixing `build-phase1-rootfs.sh`, which had left
+  `S35onyx-kvm-devmode` in the product rootfs.
+- **Modules:** eight of nine rebuilt modules match the shipped v51 set
+  (five byte-identical, three identical except the kernel build stamp).
+  `soph_mipi_rx` differs; the rebuilt one carries extra diagnostic parameters
+  whose defaults have not been checked.
+- **FIP:** differs from v80 (BL2 hash; `LOADER_2ND` 101,888 vs 101,376 bytes).
+  Cause unconfirmed (suspected longer `onyx-kvm` strings).
+- **Not done:** the bootchain (U-Boot, FSBL/FIP, dtb) is built by hand in the
+  volume and is not yet a repo script.
+
+**Next bounded experiment:** boot v82 with bounded UART capture; confirm the new
+FIP boots, re-pair clients, and confirm video capture with the rebuilt
+`soph_mipi_rx`. A failed boot is recovered by reflashing v80 sources.
 
 ## Product Release Candidate v80: Offline Base Image Packaging, Verified Rootfs Audits & MCP Navigation Acceptance [COMPLETED]
 
