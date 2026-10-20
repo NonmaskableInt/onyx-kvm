@@ -38,9 +38,10 @@ build (unresolved licenses, OPEN_ITEMS B1).
 - **Booted as** `onyx-kvm-6055de` at 192.168.1.246. A direct mDNS query returned
   `A` 192.168.1.246 and an NSEC answer for AAAA; `onyx-kvm-6055de.local` and the
   IP both serve `/setup/status`; the IP origin is accepted (409, not 403).
+- **Operator pass (2026-10-20):** all console paths (video, HID, microphone,
+  pairing) reported operational through the browser on v86.
 - **Not checked:** that `onyx-kvm-mdns.log` is absent from the boot partition
-  (the card was not pulled), socket enumeration, UART evidence, and a repeat of
-  the video/HID/microphone pass (unchanged code paths, last verified on v82).
+  (the card was not pulled), socket enumeration, and UART evidence.
 
 ## Development Candidate v85: Name Responder and Origin Fix, Verified on Hardware [BOOTED — mDNS AND IP ORIGIN CONFIRMED]
 
