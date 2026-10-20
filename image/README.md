@@ -145,21 +145,28 @@ Only step 0 touches the network.
 
 | Step | Command | Output |
 | --- | --- | --- |
-| 0 | `build-builder.sh`, `fetch-buildroot-sources.sh` | builder image, download volume (fetch stage only) |
+| 0 | `build-builder.sh`, `fetch-buildroot-sources.sh`; stage the TinyALSA archive (see below) | builder image, download volume (fetch stage only) |
 | 1 | `build-rust-daemon.sh`, `build-rust-memtest.sh`, `build-rust-mdns.sh`, `build-rust-hid-broker.sh`, `build-rust-video-broker.sh`, `build-rust-audio-brokers.sh` | static RISC-V binaries in `out/phase2-rust`, `out/phase3-rust`, `out/phase3a-rust` |
-| 2 | `build-phase3-raw-frame-probe.sh`, `build-phase3a-capture-probe.sh`, `build-phase3a-playback-probe.sh`, `build-lt6911uxc-edid-programmer.sh` | probes and EDID programmer in versioned `out/` directories |
-| 3 | `ONYX_KVM_WORK_VOLUME=<new> prepare-build-volume.sh` | disposable work volume with the Phase-1 profile and all patches |
-| 4 | inside the work volume: `apply-phase2-hid.sh`, `apply-phase3-video-foundation.sh`, `apply-phase3a-audio-enumeration.sh`, `apply-product-profile.sh`, each followed by its `validate-*-config.sh`; finish with `validate-product-config.sh` | product kernel/Buildroot profile |
-| 5 | `ONYX_KVM_CONFIG_PROFILE=product build-phase1-rootfs.sh` | audited ext4 rootfs (runs `audit-rootfs.sh` and the debugfs ownership audits) |
-| 6 | `package-phase1.sh`, `assemble-phase1-image.sh` | `boot.sd`, `rootfs.ext4`, `fip.bin`, `onyx-kvm-phase1.img` and `SHA256SUMS` |
-| 7 | `detect-target-disk.py`, flash, read back, `verify-sd-image.py` | embedded FIP, FIT and rootfs verified from the card |
+| 2 | `ONYX_KVM_WORK_VOLUME=<new> prepare-build-volume.sh` | disposable work volume with the Phase-1 profile and all patches |
+| 3 | inside the work volume: `apply-phase2-hid.sh`, `apply-phase3-video-foundation.sh`, `apply-phase3a-audio-enumeration.sh`, `apply-product-profile.sh`, each followed by its `validate-*-config.sh`; finish with `validate-product-config.sh` | product kernel/Buildroot profile |
+| 4 | `build-phase3-video-modules.sh OUTPUT_DIR` | the nine video modules and `coda980.bin` (also builds the kernel out of tree) |
+| 5 | `build-phase3-middleware.sh` | `libsys.a` and `libvpu.a` in the work volume |
+| 6 | `build-phase3-raw-frame-probe.sh`, `build-phase3a-capture-probe.sh`, `build-phase3a-playback-probe.sh`, `build-lt6911uxc-edid-programmer.sh` | probes and EDID programmer in versioned `out/` directories |
+| 7 | `ONYX_KVM_VIDEO_MODULE_DIR=<step 4 output> ONYX_KVM_CONFIG_PROFILE=product build-phase1-rootfs.sh` | audited ext4 rootfs (runs `audit-rootfs.sh` and the debugfs ownership audits) |
+| 8 | `build-phase1-bootchain.sh` | U-Boot, `fip.bin` and the device tree in the work volume |
+| 9 | `package-phase1.sh`, `assemble-phase1-image.sh` | `boot.sd`, `rootfs.ext4`, `fip.bin`, `onyx-kvm-phase1.img` and `SHA256SUMS` |
+| 10 | `detect-target-disk.py`, flash, read back, `verify-sd-image.py` | embedded FIP, FIT and rootfs verified from the card |
 
-Known gaps in this sequence, all tracked in [../docs/OPEN_ITEMS.md](../docs/OPEN_ITEMS.md)
-B2 and B3: patch 0028 does not apply to a pristine SDK, the vendor middleware
-libraries and the video kernel modules are not built by any script here, the
-TinyALSA source archive (`/private/tmp/tinyalsa-v2.0.0.tar.gz`, SHA-256 in
-`sources.lock`) must be staged by hand, and the default work-volume name differs
-between scripts, so set `ONYX_KVM_WORK_VOLUME` explicitly.
+Set `ONYX_KVM_ALLOW_UNRESOLVED_SOURCES=1` for development builds until the
+license grants in [../docs/OPEN_ITEMS.md](../docs/OPEN_ITEMS.md) B1 are
+resolved; such images are not releasable. Set `ONYX_KVM_WORK_VOLUME` explicitly
+for every step. The TinyALSA source archive
+(`tinyalsa-v2.0.0.tar.gz`, SHA-256 in `sources.lock`) is the one input still
+staged by hand (default `/private/tmp/tinyalsa-v2.0.0.tar.gz`); the probe
+scripts refuse to run without a matching checksum. Steps 4, 5 and 8 each
+reuse the same work volume and must run against the volume that step 7 uses.
+Patch 0028 targets the separate sophgo-osdrv checkout and is applied by
+`apply-osdrv-patch.sh`, which step 4 runs for you.
 
 Set `ONYX_KVM_CONFIG_PROFILE` to `phase1`, `phase2-hid`, `phase3-discovery`,
 `phase3-video-foundation`, `phase3a-audio-enumeration` or `product`. The

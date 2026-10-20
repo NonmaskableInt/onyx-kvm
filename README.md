@@ -83,12 +83,15 @@ Release needs a written grant from Sophgo/Cvitek or replacement of these parts.
 Evidence is in [docs/SDK_AUDIT.md](docs/SDK_AUDIT.md); tracking is
 [docs/OPEN_ITEMS.md](docs/OPEN_ITEMS.md) B1.
 
+Release steps and remaining blockers are in
+[docs/RELEASE_CHECKLIST.md](docs/RELEASE_CHECKLIST.md).
+
 ## Developer checks
 
 ```sh
-cargo test --workspace --locked          # required; passes
-cargo fmt --check                        # target gate; currently fails (OPEN_ITEMS Q1)
-cargo clippy --workspace --locked --all-targets -- -D warnings   # target gate; currently fails (Q1)
+cargo test --workspace --locked
+cargo fmt --check
+cargo clippy --workspace --locked --all-targets -- -D warnings
 ```
 
 Build the on-target Rust binaries (static `riscv64gc-unknown-linux-musl`,
@@ -99,6 +102,7 @@ image/build-rust-daemon.sh           # onyx-kvmd
 image/build-rust-hid-broker.sh
 image/build-rust-video-broker.sh
 image/build-rust-audio-brokers.sh
+image/build-rust-mdns.sh             # product-profile name responder
 ```
 
 The image build, verification and flashing workflow is in

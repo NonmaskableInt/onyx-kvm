@@ -69,13 +69,13 @@ Patch 0028 targets the separate sophgo-osdrv tree, not the pinned SDK. `apply-ph
 - **Shared Environment**: Created `image/default-env.sh` unifying work volume defaults to `onyx-kvm-work` and sourcing it across all `image/` build scripts.
 - **Explicit Prerequisite Errors**: Added clear error messages and checksum validation for `tinyalsa-v2.0.0.tar.gz` in probe build scripts.
 
-### B5 (P2): the shipped video modules are not reproducible from the repository — MOSTLY RESOLVED
+### B5 (P2): the shipped video modules are not reproducible from the repository — RESOLVED
 
 `image/build-phase3-video-modules.sh OUTPUT_DIR` now builds all nine modules and copies `coda980.bin`, offline, from the pinned SDK (patches 0002 to 0027) and the pinned `sophgo-osdrv` tree (patch 0028), and writes `SHA256SUMS` and `BUILD-INFO.txt`. Kernel build metadata is pinned so repeated builds match. Compared with `out/phase3-video-modules-v51` (2026-10-19):
 
 - Byte-identical: `soph_sys`, `soph_snsr_i2c`, `soph_vi`, `mars_vcodec`, `soph_jpeg`.
 - Identical except the embedded kernel build stamp: `soph_base`, `soph_vpss`, `cvi_vc_driver`.
-- **Different: `soph_mipi_rx`.** The shipped module has fewer diagnostic parameters than the repository patch stack produces (it lacks `cif_diagnostic_full_readback`, `cif_diagnostic_stock_rx0n_mclk1` and others, but has the patch 0027 wording). Its exact source state is not recorded. The rebuilt module adds diagnostic parameters that default off, but the final verification build must confirm video capture on hardware with it.
+- **Different: `soph_mipi_rx`.** The shipped module has fewer diagnostic parameters than the repository patch stack produces (it lacks `cif_diagnostic_full_readback`, `cif_diagnostic_stock_rx0n_mclk1` and others, but has the patch 0027 wording). Its exact source state is not recorded. The rebuilt module adds diagnostic parameters that default off, and video capture was confirmed on hardware with it (v82 and v85, 2026-10-20). The build recipe is now complete in the repository: `build-phase3-video-modules.sh`, `build-phase3-middleware.sh` and `build-phase1-bootchain.sh`; only the TinyALSA archive is still staged by hand.
 
 Recipe notes: `mars_vcodec` is built from the osdrv `vcodec` sources plus the SDK's `vcodec/hal/mars`; `soph_jpeg` and `cvi_vc_driver` come from osdrv with `CVIARCH_L=mars`; the SDK's prebuilt `soph_jpeg.ko` is not used.
 
