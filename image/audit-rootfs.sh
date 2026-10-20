@@ -367,4 +367,21 @@ if test -n "$expected_video_broker"; then
     test ! -e "$rootfs/run/onyx-kvm/video-enabled"
 fi
 
+if [ "$profile" = "product" ]; then
+    test -x "$rootfs/usr/bin/onyx-kvm-mdns" || {
+        printf '%s\n' 'product rootfs is missing the mDNS responder' >&2
+        exit 1
+    }
+    case "$(file "$rootfs/usr/bin/onyx-kvm-mdns")" in
+        *"ELF 64-bit"*"RISC-V"*"statically linked"*"stripped"*) ;;
+        *) printf '%s\n' 'mDNS responder is not a static stripped RISC-V ELF' >&2; exit 1 ;;
+    esac
+    test -x "$rootfs/etc/init.d/S51onyx-kvm-mdns"
+    cmp "$repo_root/image/product-mdns-overlay/etc/init.d/S51onyx-kvm-mdns" \
+        "$rootfs/etc/init.d/S51onyx-kvm-mdns"
+elif test -e "$rootfs/usr/bin/onyx-kvm-mdns" || test -e "$rootfs/etc/init.d/S51onyx-kvm-mdns"; then
+    printf '%s\n' 'mDNS responder present outside the product profile' >&2
+    exit 1
+fi
+
 printf '%s\n' 'Phase-1 root filesystem audit passed'

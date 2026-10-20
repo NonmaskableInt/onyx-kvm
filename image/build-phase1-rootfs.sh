@@ -266,6 +266,17 @@ fi
                 install -m 0444 /work/sdk/ramdisk/rootfs/common_musl_riscv64/usr/share/fw_vcodec/coda980.bin onyx-kvm/phase1-overlay/usr/share/fw_vcodec/coda980.bin
             fi
         fi
+        # The mDNS responder is admitted for the product profile only.
+        if [ "$ONYX_KVM_CONFIG_PROFILE" = product ]; then
+            cp -a /repo/image/product-mdns-overlay/. onyx-kvm/phase1-overlay/
+            install -m 0755 /repo/out/phase2-rust/onyx-kvm-mdns \
+                onyx-kvm/phase1-overlay/usr/bin/onyx-kvm-mdns
+        else
+            rm -f onyx-kvm/phase1-overlay/usr/bin/onyx-kvm-mdns \
+                onyx-kvm/phase1-overlay/etc/init.d/S51onyx-kvm-mdns \
+                buildroot/output/target/usr/bin/onyx-kvm-mdns \
+                buildroot/output/target/etc/init.d/S51onyx-kvm-mdns
+        fi
         # Incremental profile changes must not carry generated device nodes from
         # an earlier audio image into a non-audio filesystem. These nodes are
         # not owned by an overlay or device table and otherwise survive in the
@@ -335,14 +346,14 @@ fi
         fi
         make -C buildroot cvitek_SG200X_musl_riscv64_defconfig \
             BR2_TOOLCHAIN_EXTERNAL_PATH=/work/sdk/host-tools/gcc/riscv64-linux-musl-x86_64 \
-            "BR2_STRIP_EXCLUDE_FILES=onyx-kvmd onyx-kvm-memtest onyx-kvm-hid-broker onyx-kvm-video-broker onyx-kvm-audio-capture-broker onyx-kvm-audio-playback-broker"
+            "BR2_STRIP_EXCLUDE_FILES=onyx-kvmd onyx-kvm-memtest onyx-kvm-mdns onyx-kvm-hid-broker onyx-kvm-video-broker onyx-kvm-audio-capture-broker onyx-kvm-audio-playback-broker"
         # The vendor Buildroot/BusyBox combination does not reliably preserve
         # GNU make jobserver descriptors through its nested configuration
         # makes. A single job is slower but deterministic and fail-closed.
         make -C buildroot -j1 \
             BR2_DL_DIR=/downloads \
             BR2_TOOLCHAIN_EXTERNAL_PATH=/work/sdk/host-tools/gcc/riscv64-linux-musl-x86_64 \
-            "BR2_STRIP_EXCLUDE_FILES=onyx-kvmd onyx-kvm-memtest onyx-kvm-hid-broker onyx-kvm-video-broker onyx-kvm-audio-capture-broker onyx-kvm-audio-playback-broker"
+            "BR2_STRIP_EXCLUDE_FILES=onyx-kvmd onyx-kvm-memtest onyx-kvm-mdns onyx-kvm-hid-broker onyx-kvm-video-broker onyx-kvm-audio-capture-broker onyx-kvm-audio-playback-broker"
         # Incremental Buildroot finalization may retain the prior target-tree
         # mode even though the filesystem device table correctly applies 0500.
         # Normalize both views so the pre-image audit cannot disagree with the

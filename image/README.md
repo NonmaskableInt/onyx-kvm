@@ -73,7 +73,8 @@ comparison or a source-built replacement.
 ## Recovery networking
 
 Phase 1 permits wired DHCP on `eth0`. The Buildroot fragment and overlay add no
-listening or discovery service. See `docs/NETWORK_POLICY.md` for the acceptance
+listening or discovery service; the product profile alone adds the narrow
+`onyx-kvm-mdns` name responder. See `docs/NETWORK_POLICY.md` for the acceptance
 boundary.
 
 `audit-rootfs.sh` rejects known remote-login, discovery, DHCP-server, Wi-Fi,
@@ -145,7 +146,7 @@ Only step 0 touches the network.
 | Step | Command | Output |
 | --- | --- | --- |
 | 0 | `build-builder.sh`, `fetch-buildroot-sources.sh` | builder image, download volume (fetch stage only) |
-| 1 | `build-rust-daemon.sh`, `build-rust-memtest.sh`, `build-rust-hid-broker.sh`, `build-rust-video-broker.sh`, `build-rust-audio-brokers.sh` | static RISC-V binaries in `out/phase2-rust`, `out/phase3-rust`, `out/phase3a-rust` |
+| 1 | `build-rust-daemon.sh`, `build-rust-memtest.sh`, `build-rust-mdns.sh`, `build-rust-hid-broker.sh`, `build-rust-video-broker.sh`, `build-rust-audio-brokers.sh` | static RISC-V binaries in `out/phase2-rust`, `out/phase3-rust`, `out/phase3a-rust` |
 | 2 | `build-phase3-raw-frame-probe.sh`, `build-phase3a-capture-probe.sh`, `build-phase3a-playback-probe.sh`, `build-lt6911uxc-edid-programmer.sh` | probes and EDID programmer in versioned `out/` directories |
 | 3 | `ONYX_KVM_WORK_VOLUME=<new> prepare-build-volume.sh` | disposable work volume with the Phase-1 profile and all patches |
 | 4 | inside the work volume: `apply-phase2-hid.sh`, `apply-phase3-video-foundation.sh`, `apply-phase3a-audio-enumeration.sh`, `apply-product-profile.sh`, each followed by its `validate-*-config.sh`; finish with `validate-product-config.sh` | product kernel/Buildroot profile |

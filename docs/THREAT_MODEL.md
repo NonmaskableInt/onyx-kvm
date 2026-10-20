@@ -21,7 +21,8 @@ mask ROM are out of scope. They remain documented residual risks.
 
 ## Required controls
 
-1. No listening service before first-boot enrollment except a narrowly scoped
+1. No listening service before first-boot enrollment except the product mDNS
+   name responder ([NETWORK_POLICY.md](NETWORK_POLICY.md)) and a narrowly scoped
    local enrollment channel (`/setup/claim` with Origin matching, malformed-attempt
    limiting and a 6-to-8 digit PIN minimum, or the UART pairing ceremony). The
    claim is trust on first use: whoever sets up an unconfigured device owns it.

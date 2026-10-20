@@ -231,6 +231,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "onyx-kvm-mdns"
+version = "0.1.0"
+
+[[package]]
 name = "onyx-kvm-media-protocol"
 version = "0.1.0"
 

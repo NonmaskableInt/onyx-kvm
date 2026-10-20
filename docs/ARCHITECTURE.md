@@ -35,6 +35,7 @@ acting. Policy is therefore enforced at both the gateway and the broker.
 | Component | Runs as | Role |
 | --- | --- | --- |
 | `onyx-kvmd` | UID/GID 900 | HTTPS listener, web console, OAuth metadata, MCP, pairing and setup |
+| `onyx-kvm-mdns` | UID/GID 901 (product only) | Answers mDNS for the device's own `<hostname>.local` name |
 | `onyx-kvm-hid-broker` | root | Writes keyboard and pointer reports to `/dev/hidg0`, `/dev/hidg1` |
 | `onyx-kvm-video-broker` | root | Loads the quarantined video modules per session and drives the raw-frame probe |
 | `onyx-kvm-audio-brokers` | root | Separate capture and playback brokers around the ALSA probes |

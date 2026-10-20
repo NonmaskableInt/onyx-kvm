@@ -4,6 +4,7 @@ members = [
     "crates/onyx-kvm-evidence",
     "crates/onyx-kvm-hid-broker",
     "crates/onyx-kvm-mcp",
+    "crates/onyx-kvm-mdns",
     "crates/onyx-kvm-media-protocol",
     "crates/onyx-kvm-memtest",
     "crates/onyx-kvm-video-broker",

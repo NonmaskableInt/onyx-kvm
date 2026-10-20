@@ -1,0 +1,24 @@
+#!/bin/sh
+set -eu
+
+repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+artifact_dir=${ONYX_KVM_RUST_ARTIFACT_DIR:-"$repo_root/out/phase2-rust"}
+binary="$repo_root/target/riscv64gc-unknown-linux-musl/release/onyx-kvm-mdns"
+
+cargo rustc --manifest-path "$repo_root/Cargo.toml" --release \
+    --target riscv64gc-unknown-linux-musl --package onyx-kvm-mdns --offline -- \
+    -C linker=rust-lld -C link-self-contained=yes -C target-feature=+crt-static
+
+description=$(file "$binary")
+case "$description" in
+    *"ELF 64-bit"*"RISC-V"*"statically linked"*"stripped"*) ;;
+    *)
+        printf 'unexpected onyx-kvm-mdns binary: %s\n' "$description" >&2
+        exit 1
+        ;;
+esac
+
+mkdir -p "$artifact_dir"
+install -m 0755 "$binary" "$artifact_dir/onyx-kvm-mdns"
+(cd "$artifact_dir" && shasum -a 256 onyx-kvm-mdns >MDNS_SHA256SUMS)
+printf 'verified static RISC-V mDNS responder: %s/onyx-kvm-mdns\n' "$artifact_dir"
