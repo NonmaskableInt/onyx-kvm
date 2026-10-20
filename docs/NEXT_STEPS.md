@@ -65,8 +65,10 @@ Built from a fresh work volume with `ONYX_KVM_ALLOW_UNRESOLVED_SOURCES=1`
   resolve. Workaround used: an `/etc/hosts` entry on the client for the plain
   hostname origin. Fix: `S50onyx-kvmd` now waits up to 30 s for the address
   (needs a rootfs rebuild and reflash to take effect).
-- Not yet exercised on this build: HID, audio (disabled by policy), the PIN
-  `/pair` flow and MCP clients.
+- Operator reports HID and microphone working on this build (2026-10-20). The
+  microphone result is an operator observation: how it was enabled and what
+  "working" covered (Phase 3a admits metrics-only capture) was not recorded.
+- Not yet exercised on this build: the PIN `/pair` flow and MCP clients.
 
 **Next bounded experiment:** rebuild the rootfs with the `S50` fix, reflash, and
 confirm the IP origin works on first boot; then exercise HID and MCP pairing.
