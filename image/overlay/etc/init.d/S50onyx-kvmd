@@ -18,7 +18,11 @@ case "${1:-}" in
         chmod 2770 /run/onyx-kvm
         export ONYX_KVM_HTTPS_BIND=0.0.0.0:8443
         eth0_ip=""
-        for _ in 1 2 3 4 5; do
+        # DHCP usually completes after this script is first reached; the IP
+        # origin is only allowed if the address exists now, so wait for it.
+        tries=0
+        while [ "$tries" -lt 30 ]; do
+            tries=$((tries + 1))
             eth0_ip=$(ip -4 addr show eth0 2>/dev/null | awk '/inet / {print $2}' | cut -d/ -f1 || true)
             if [ -n "$eth0_ip" ]; then break; fi
             sleep 1

@@ -23,7 +23,7 @@ continuing bring-up, and update it when evidence closes a hypothesis.
 - **Next bounded experiment:** none pending on hardware. The v81 rebuild above is
   the next step and needs no new hypothesis.
 
-## Development Candidate v82: Rebuilt From Pinned Sources, Flashed, Read Back [FLASHED — NOT YET BOOTED]
+## Development Candidate v82: Rebuilt From Pinned Sources, Flashed, Read Back [BOOTED — VIDEO STREAMING CONFIRMED]
 
 Built from a fresh work volume with `ONYX_KVM_ALLOW_UNRESOLVED_SOURCES=1`
 (four components lack a license grant, so this image is **not releasable**; see
@@ -50,9 +50,26 @@ Built from a fresh work volume with `ONYX_KVM_ALLOW_UNRESOLVED_SOURCES=1`
 - **Not done:** the bootchain (U-Boot, FSBL/FIP, dtb) is built by hand in the
   volume and is not yet a repo script.
 
-**Next bounded experiment:** boot v82 with bounded UART capture; confirm the new
-FIP boots, re-pair clients, and confirm video capture with the rebuilt
-`soph_mipi_rx`. A failed boot is recovered by reflashing v80 sources.
+**Hardware boot (2026-10-20, no UART available):**
+- The card booted: the new FIP, kernel and rootfs came up, DHCP gave
+  `192.168.1.242`, and `GET /setup/status` returned
+  `{"configured":false,"name":"onyx-kvm-f406c8"}` before the claim.
+- The operator completed the setup claim and the console streams HDMI video,
+  so the rebuilt `soph_mipi_rx` and the other eight rebuilt modules work with
+  the current LT6911 path. Taint, loaded modules and nodes were not captured
+  because there was no UART; the evidence is the working stream only.
+- **Defect found:** a claim via `https://192.168.1.242:8443` was rejected with
+  "forbidden origin for setup claim". `S50onyx-kvmd` builds the origin list once
+  and only waited 5 s for `eth0`, so the IP origin was missing when DHCP was
+  slower. The image also has no mDNS responder, so `<host>.local` does not
+  resolve. Workaround used: an `/etc/hosts` entry on the client for the plain
+  hostname origin. Fix: `S50onyx-kvmd` now waits up to 30 s for the address
+  (needs a rootfs rebuild and reflash to take effect).
+- Not yet exercised on this build: HID, audio (disabled by policy), the PIN
+  `/pair` flow and MCP clients.
+
+**Next bounded experiment:** rebuild the rootfs with the `S50` fix, reflash, and
+confirm the IP origin works on first boot; then exercise HID and MCP pairing.
 
 ## Product Release Candidate v80: Offline Base Image Packaging, Verified Rootfs Audits & MCP Navigation Acceptance [COMPLETED]
 
