@@ -9,8 +9,9 @@ set -eu
 # Inputs
 #   ONYX_KVM_WORK_VOLUME   a disposable volume prepared by prepare-build-volume.sh
 #                          and apply-phase3-video-foundation.sh (patched SDK).
-#                          It is modified: the kernel is built in tree and
-#                          three osdrv directories are replaced.
+#                          It is modified: the kernel is built under
+#                          linux_5.10/build/ and three osdrv directories are
+#                          replaced.
 #   ONYX_KVM_OSDRV_DIR     checkout of sophgo/osdrv at the revision pinned in
 #                          sources.lock (default dl/sophgo-osdrv-sparse);
 #                          patch 0028 must be applied (apply-osdrv-patch.sh).
@@ -55,6 +56,7 @@ test ! -e "$output_dir" || {
     exit 1
 }
 mkdir -p "$output_dir"
+output_dir=$(CDPATH= cd -- "$output_dir" && pwd)
 osdrv_revision=$(git -C "$osdrv_dir" rev-parse HEAD)
 
 reference_mount=
@@ -77,17 +79,20 @@ fi
         export KBUILD_BUILD_TIMESTAMP="Thu Jan  1 00:00:00 UTC 1970"
         export KBUILD_BUILD_USER=onyx-kvm KBUILD_BUILD_HOST=onyx-kvm KBUILD_BUILD_VERSION=1
         sdk=/work/sdk
-        kernel=$sdk/linux_5.10
         v2=$sdk/osdrv/interdrv/v2
-        ko=/work/ko-out
+        ko=$sdk/ko-out
 
         cd "$sdk"
         set +u
         source build/cvisetup.sh >/dev/null 2>&1
         defconfig sg2002_licheervnano_sd >/dev/null 2>&1
         set -u
+        # Build the kernel out of tree, as the SDK does, so the source tree
+        # stays clean for the rootfs build that follows in the same volume.
+        export KERNEL_OUTPUT_FOLDER RAMDISK_OUTPUT_FOLDER SYSTEM_OUT_DIR
+        kernel=$sdk/linux_5.10/$KERNEL_OUTPUT_FOLDER
 
-        # 1. Kernel (in tree), needed for out-of-tree module builds.
+        # 1. Kernel, needed for out-of-tree module builds.
         ( cd build && make kernel-build )
 
         # 2. Six modules from the pinned SDK.

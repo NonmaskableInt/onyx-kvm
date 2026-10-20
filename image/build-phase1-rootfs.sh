@@ -214,7 +214,7 @@ fi
             fi
         else
             rm -rf onyx-kvm/phase1-overlay/usr/lib/onyx-kvm/dev buildroot/output/target/usr/lib/onyx-kvm/dev 2>/dev/null || true
-            if [ "$profile" = "product" ]; then
+            if [ "$ONYX_KVM_CONFIG_PROFILE" = "product" ]; then
                 rm -f onyx-kvm/phase1-overlay/etc/init.d/S35onyx-kvm-devmode buildroot/output/target/etc/init.d/S35onyx-kvm-devmode 2>/dev/null || true
             fi
         fi
