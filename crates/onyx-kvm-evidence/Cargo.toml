@@ -2,6 +2,7 @@
 name = "onyx-kvm-evidence"
 edition.workspace = true
 license.workspace = true
+publish = false
 rust-version.workspace = true
 version.workspace = true
 

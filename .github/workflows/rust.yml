@@ -1,0 +1,110 @@
+name: Rust
+
+# Gates merging to main: every job below must pass. The jobs mirror the
+# developer checks in README.md and AGENTS.md. Third-party actions are pinned
+# to commit SHAs. CI needs the network only to fetch crates; the image build
+# itself stays offline and is not run here.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rust-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+
+jobs:
+  fmt:
+    name: fmt
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - run: rustup toolchain install
+      - run: cargo fmt --all --check
+
+  clippy:
+    name: clippy
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@f0deed1e0edfc6a9be95417288c0e1099b1eeec3 # v2.7.7
+      - name: Default features
+        run: cargo clippy --workspace --locked --all-targets -- -D warnings
+      - name: Development tools feature (compiled out of product images)
+        run: cargo clippy -p onyx-kvmd --features dev-tools --locked --all-targets -- -D warnings
+
+  test:
+    name: test
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@f0deed1e0edfc6a9be95417288c0e1099b1eeec3 # v2.7.7
+      - name: Default features
+        run: cargo test --workspace --locked
+      - name: Development tools feature
+        run: cargo test -p onyx-kvmd -p onyx-kvm-mcp --features onyx-kvmd/dev-tools --locked
+
+  target:
+    name: riscv64 target build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@f0deed1e0edfc6a9be95417288c0e1099b1eeec3 # v2.7.7
+      # onyx-kvmd is not checked here: its TLS dependency (ring) compiles C and
+      # needs the vendor RISC-V toolchain, which only the offline image builder
+      # has (image/build-rust-daemon.sh). The host build, clippy and tests above
+      # still cover it.
+      - name: Type-check the on-target binaries
+        run: >
+          cargo check --locked --release --target riscv64gc-unknown-linux-musl
+          -p onyx-kvm-hid-broker -p onyx-kvm-video-broker
+          -p onyx-kvm-audio-brokers -p onyx-kvm-mdns -p onyx-kvm-memtest
+
+  supply-chain:
+    name: cargo-deny
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
+        env:
+          # The action runs in its own container; do not let it try to install
+          # the pinned workspace toolchain, which it does not need.
+          RUSTUP_TOOLCHAIN: stable
+        with:
+          command: check advisories bans licenses sources
+
+  repository:
+    name: repository checks
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Shell scripts parse
+        run: |
+          status=0
+          for f in $(git ls-files 'image/*.sh' 'image/**/*.sh' 'image/overlay/etc/init.d/*' 'image/*-overlay/etc/init.d/*'); do
+            sh -n "$f" || status=1
+          done
+          exit $status
+      - name: Python helpers compile
+        run: python3 -I -m py_compile $(git ls-files 'image/*.py')
+      - name: Retired name is absent from code and the rootfs overlays
+        run: |
+          if git grep -il cleankvm -- crates 'image/overlay' 'image/*-overlay'; then
+            echo "retired cleankvm name found (docs/NAMING.md)"; exit 1
+          fi
+      - name: No generated artifacts or key material are tracked
+        run: |
+          if git ls-files | grep -E '^(out|dl|target)/|\.(img|der|pem|key)$'; then
+            echo "generated or secret files are tracked"; exit 1
+          fi

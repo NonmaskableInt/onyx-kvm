@@ -2,6 +2,9 @@
 yanked = "deny"
 
 [licenses]
+# The workspace crates are GPL-3.0-or-later and are never published; the allow
+# list below applies to third-party dependencies only.
+private = { ignore = true }
 confidence-threshold = 0.93
 allow = [
     "Apache-2.0",
@@ -16,6 +19,7 @@ allow = [
 [bans]
 multiple-versions = "warn"
 wildcards = "deny"
+allow-wildcard-paths = true
 
 [sources]
 unknown-git = "deny"
