@@ -26,6 +26,9 @@ DNS or `/etc/hosts` entries. Its admitted behaviour is deliberately narrow:
 - It parses untrusted multicast packets with bounded, panic-free code (no name
   compression, at most 8 questions, std only, unsafe code forbidden) and runs as
   numeric UID/GID 901 with no passwd entry, no credentials and no file access.
+- It binds to the multicast group address (the kernel drops unicast-addressed
+  packets) and answers only sources inside the `eth0` subnet, so a spoofed
+  off-link source cannot use it to reflect replies at a third party.
 - It never learns anything from the network, so it cannot widen the HTTPS
   origin allow-list. Name resolution does not authenticate the device: clients
   still trust the device only through its pinned certificate and pairing.

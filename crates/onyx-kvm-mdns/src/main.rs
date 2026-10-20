@@ -6,7 +6,12 @@
 //! that is not a plain query for its own name. It holds no credentials and is
 //! started as an unprivileged user.
 //!
-//! Usage: `onyx-kvm-mdns HOSTNAME IPV4`
+//! Only packets addressed to the multicast group (bound to the group address,
+//! so the kernel drops unicast-addressed packets) and sent from the interface's
+//! own subnet are answered, so a spoofed off-link source cannot use it to
+//! reflect traffic at a third party.
+//!
+//! Usage: `onyx-kvm-mdns HOSTNAME IPV4 PREFIX_LENGTH`
 
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4, UdpSocket};
 use std::process::ExitCode;
@@ -149,9 +154,19 @@ fn build_response(packet: &[u8], own_name: &[u8], ip: Ipv4Addr, legacy: bool) ->
     Some(out)
 }
 
-fn run(hostname: &str, ip: Ipv4Addr) -> Result<(), String> {
+/// True when `source` is inside the `ip`/`prefix` subnet.
+fn on_link(source: Ipv4Addr, ip: Ipv4Addr, prefix: u32) -> bool {
+    let mask = match prefix {
+        0 => return false,
+        1..=31 => u32::MAX << (32 - prefix),
+        _ => u32::MAX,
+    };
+    u32::from(source) & mask == u32::from(ip) & mask
+}
+
+fn run(hostname: &str, ip: Ipv4Addr, prefix: u32) -> Result<(), String> {
     let own_name = wire_name(hostname).ok_or("invalid hostname")?;
-    let socket = UdpSocket::bind(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, MDNS_PORT))
+    let socket = UdpSocket::bind(SocketAddrV4::new(MDNS_GROUP, MDNS_PORT))
         .map_err(|e| format!("bind 5353: {e}"))?;
     socket
         .join_multicast_v4(&MDNS_GROUP, &ip)
@@ -175,6 +190,9 @@ fn run(hostname: &str, ip: Ipv4Addr) -> Result<(), String> {
         let SocketAddr::V4(source) = source else {
             continue;
         };
+        if !on_link(*source.ip(), ip, prefix) {
+            continue;
+        }
         let legacy = source.port() != MDNS_PORT;
         let Some(response) = build_response(&buffer[..length], &own_name, ip, legacy) else {
             continue;
@@ -198,15 +216,21 @@ fn run(hostname: &str, ip: Ipv4Addr) -> Result<(), String> {
 
 fn main() -> ExitCode {
     let mut args = std::env::args().skip(1);
-    let (Some(hostname), Some(address), None) = (args.next(), args.next(), args.next()) else {
-        eprintln!("usage: onyx-kvm-mdns HOSTNAME IPV4");
+    let (Some(hostname), Some(address), Some(prefix), None) =
+        (args.next(), args.next(), args.next(), args.next())
+    else {
+        eprintln!("usage: onyx-kvm-mdns HOSTNAME IPV4 PREFIX_LENGTH");
         return ExitCode::from(2);
     };
-    let Ok(ip) = address.parse::<Ipv4Addr>() else {
-        eprintln!("invalid IPv4 address");
+    let (Ok(ip), Ok(prefix)) = (address.parse::<Ipv4Addr>(), prefix.parse::<u32>()) else {
+        eprintln!("invalid IPv4 address or prefix length");
         return ExitCode::from(2);
     };
-    match run(&hostname, ip) {
+    if !(1..=32).contains(&prefix) {
+        eprintln!("invalid IPv4 address or prefix length");
+        return ExitCode::from(2);
+    }
+    match run(&hostname, ip, prefix) {
         Ok(()) => ExitCode::SUCCESS,
         Err(message) => {
             eprintln!("onyx-kvm-mdns: {message}");
@@ -231,6 +255,16 @@ mod tests {
 
     fn own() -> Vec<u8> {
         wire_name("onyx-kvm-f406c8").unwrap_or_default()
+    }
+
+    #[test]
+    fn on_link_checks_the_subnet() {
+        let ip = Ipv4Addr::new(192, 168, 1, 242);
+        assert!(on_link(Ipv4Addr::new(192, 168, 1, 7), ip, 24));
+        assert!(!on_link(Ipv4Addr::new(192, 168, 2, 7), ip, 24));
+        assert!(!on_link(Ipv4Addr::new(8, 8, 8, 8), ip, 24));
+        assert!(on_link(Ipv4Addr::new(192, 168, 1, 242), ip, 32));
+        assert!(!on_link(Ipv4Addr::new(192, 168, 1, 7), ip, 0));
     }
 
     #[test]
