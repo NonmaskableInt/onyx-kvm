@@ -45,6 +45,10 @@ pass.
   `docs/NAMING.md`). Dated evidence records keep the names they were written with.
 - Preserve unrelated user changes. Use focused commits and push only after
   tests or proportional verification pass.
+- `main` is protected: change it through a pull request. The CI jobs `fmt`,
+  `clippy`, `test`, `riscv64 target build`, `cargo-deny` and `repository checks`
+  (`.github/workflows/rust.yml`) must pass and the branch must be up to date.
+  Keep third-party actions pinned to commit SHAs.
 
 ## Hardware workflow
 

@@ -94,6 +94,9 @@ cargo fmt --check
 cargo clippy --workspace --locked --all-targets -- -D warnings
 ```
 
+CI runs these checks plus `cargo-deny` and a RISC-V type-check on every pull
+request; `main` accepts changes only through a passing pull request.
+
 Build the on-target Rust binaries (static `riscv64gc-unknown-linux-musl`,
 cross-linked with `rust-lld`) with the scripts in `image/`, for example:
 
